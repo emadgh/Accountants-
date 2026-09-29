@@ -24,7 +24,7 @@ export function PersianDateInput({
     };
   }, [value]);
 
-  const years = Array.from({ length: 15 }, (_, index) => current.year - 7 + index);
+  const years = Array.from({ length: 101 }, (_, index) => current.year - 80 + index);
   const maxDay = current.month <= 6 ? 31 : current.month <= 11 ? 30 : 30;
 
   const setPart = (part: 'year' | 'month' | 'day', nextValue: number) => {
