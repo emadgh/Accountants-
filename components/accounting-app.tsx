@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { LogOut, Menu } from 'lucide-react';
 import { Sidebar, type ViewKey } from '@/components/sidebar';
 import { DashboardView } from '@/components/dashboard-view';
 import { InvoiceEditor } from '@/components/invoice-editor';
@@ -11,7 +11,7 @@ import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceLi
 import { useAccountingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 
-export function AccountingApp() {
+export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   const [view, setView] = useState<ViewKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
@@ -41,10 +41,14 @@ export function AccountingApp() {
   return <div className="app-shell">
     <Sidebar active={view} onChange={navigate} open={menuOpen} onOpenChange={setMenuOpen} />
     <main className="min-h-screen lg:mr-[275px]">
-      <div className="screen-only flex h-16 items-center border-b border-slate-200 bg-white px-4 lg:hidden">
-        <Button variant="ghost" size="icon" onClick={() => setMenuOpen(true)}><Menu className="h-5 w-5" /></Button>
-        <div className="mr-2 font-black">حسابداری</div>
+      <div className="screen-only flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
+        <div className="flex items-center">
+          <Button variant="ghost" size="icon" onClick={() => setMenuOpen(true)}><Menu className="h-5 w-5" /></Button>
+          <div className="mr-2 font-black">حسابداری</div>
+        </div>
+        {onLogout && <Button variant="ghost" size="sm" onClick={onLogout}><LogOut className="h-4 w-4" /> خروج</Button>}
       </div>
+      {onLogout && <div className="screen-only fixed left-4 top-4 z-40 hidden lg:block"><Button variant="outline" size="sm" className="bg-white/95 shadow-sm" onClick={onLogout}><LogOut className="h-4 w-4" /> خروج</Button></div>}
       <div className={view === 'sale-new' || view === 'purchase-new' ? 'p-3 sm:p-5' : 'mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8'}>
         {view === 'dashboard' && <DashboardView />}
         {view === 'sales' && <InvoiceListView kind="sale" onEdit={(id) => editInvoice(id, 'sale')} onNew={() => { setSelectedInvoiceId(null); setView('sale-new'); }} />}
