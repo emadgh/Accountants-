@@ -37,7 +37,7 @@ export function invoiceTotal(invoice: Pick<Invoice, 'items' | 'discount' | 'tax'
 
 export function returnDocumentAmount(
   originalInvoice: Pick<Invoice, 'items' | 'discount' | 'tax' | 'shipping'>,
-  items: Pick<ReturnItem, 'qty' | 'unitPrice'>[]
+  items: Pick<ReturnItem, 'originalItemId' | 'qty' | 'unitPrice'>[]
 ) {
   const originalSubtotal = originalInvoice.items.reduce(
     (sum, item) => sum + invoiceLineNet(item),
