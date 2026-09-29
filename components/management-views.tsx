@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock,
-  BookOpen, Check, CircleDollarSign, Download, Edit3, FileText, Package, Plus, Search, Settings2,
+  BookOpen, Check, CircleDollarSign, Edit3, FileText, Package, Plus, Search, Settings2,
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { AccountingData, BusinessProfile, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
+import type { BusinessProfile, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
@@ -16,6 +16,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { StorageBackupPanel } from '@/components/storage-backup-panel';
 
 function PageHead({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
   return <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-black text-slate-950">{title}</h1><p className="mt-1 text-sm text-slate-500">{subtitle}</p></div>{action}</div>;
@@ -773,10 +774,8 @@ export function SettingsView() {
     upsertBusinessProfile,
     deleteBusinessProfile,
     setDefaultBusinessProfile,
-    replaceAll,
     resetAll,
   } = store;
-  const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(settings);
   const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultBusinessProfileId);
   const selectedProfile = settings.businessProfiles.find((profile) => profile.id === selectedProfileId)
@@ -791,69 +790,9 @@ export function SettingsView() {
     if (profile) setProfileDraft(structuredClone(profile));
   }, [selectedProfileId, settings.businessProfiles, settings.defaultBusinessProfileId]);
 
-  const exportData = () => {
-    const data: AccountingData = {
-      customers: store.customers,
-      products: store.products,
-      invoices: store.invoices,
-      returns: store.returns,
-      payments: store.payments,
-      checks: store.checks,
-      adjustments: store.adjustments,
-      stockMovements: store.stockMovements,
-      accounts: store.accounts,
-      journalEntries: store.journalEntries,
-      moneyTransactions: store.moneyTransactions,
-      settings: store.settings,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `accountants-backup-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  const importData = async (file?: File) => {
-    if (!file) return;
-    try {
-      const parsed = JSON.parse(await file.text()) as AccountingData;
-      if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid');
-      const importedProfiles: BusinessProfile[] = parsed.settings.businessProfiles?.length
-        ? parsed.settings.businessProfiles
-        : [{
-            id: 'business_default',
-            label: 'پروفایل اصلی',
-            businessName: parsed.settings.businessName || '',
-            ownerName: parsed.settings.ownerName || '',
-            phone: parsed.settings.phone || '',
-            address: parsed.settings.address || '',
-            nationalId: parsed.settings.nationalId || '',
-            economicCode: parsed.settings.economicCode || '',
-            postalCode: parsed.settings.postalCode || '',
-            cardNumber: parsed.settings.cardNumber || '',
-            iban: parsed.settings.iban || '',
-            bankName: parsed.settings.bankName || '',
-            invoiceTitle: parsed.settings.invoiceTitle || 'فاکتور فروش',
-            footer: parsed.settings.footer || '',
-          }];
-      const normalizedSettings: BusinessSettings = {
-        ...settings,
-        ...parsed.settings,
-        numbering: { ...settings.numbering, ...(parsed.settings.numbering || {}) },
-        businessProfiles: importedProfiles,
-        defaultBusinessProfileId: parsed.settings.defaultBusinessProfileId && importedProfiles.some((profile) => profile.id === parsed.settings.defaultBusinessProfileId)
-          ? parsed.settings.defaultBusinessProfileId
-          : importedProfiles[0].id,
-      };
-      replaceAll({ ...parsed, settings: normalizedSettings });
-      setDraft(normalizedSettings);
-      setSelectedProfileId(normalizedSettings.defaultBusinessProfileId);
-      alert('نسخه پشتیبان با موفقیت بازیابی شد.');
-    } catch {
-      alert('فایل پشتیبان معتبر نیست.');
-    }
-  };
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
 
   const newProfile = () => {
     const base = selectedProfile || settings.businessProfiles[0];
@@ -970,7 +909,7 @@ export function SettingsView() {
       </Card>
 
       <div className="space-y-5">
-        <Card><CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-sky-600" /> پشتیبان‌گیری</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-600"><p>تمام پروفایل‌ها و انتخاب هر فاکتور در نسخه پشتیبان ذخیره می‌شوند.</p><div className="grid gap-2"><Button variant="outline" onClick={exportData}><ArrowDownToLine className="h-4 w-4" /> دانلود نسخه پشتیبان</Button><Button variant="outline" onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> بازیابی نسخه پشتیبان</Button><input ref={fileRef} type="file" className="hidden" accept="application/json" onChange={(e) => importData(e.target.files?.[0])} /></div></CardContent></Card>
+        <StorageBackupPanel />
         <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
       </div>
     </div>

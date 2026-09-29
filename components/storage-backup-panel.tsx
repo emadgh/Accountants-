@@ -1,0 +1,236 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Database,
+  HardDriveDownload,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
+import { useAccountingStore } from '@/lib/store';
+import type { AccountingData } from '@/lib/types';
+import { createAccountingBackup, parseAccountingBackup, type AccountingBackupPreview } from '@/lib/backup';
+import {
+  createAccountingSnapshot,
+  deleteAccountingSnapshot,
+  getAccountingStorageInfo,
+  listAccountingSnapshots,
+  restoreAccountingSnapshot,
+  type AccountingSnapshotMeta,
+} from '@/lib/storage';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+type ImportCandidate = {
+  data: AccountingData;
+  preview: AccountingBackupPreview;
+  filename: string;
+};
+
+function formatBytes(value: number) {
+  if (value < 1024) return value + ' B';
+  if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+  return (value / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function reasonLabel(reason: AccountingSnapshotMeta['reason']) {
+  if (reason === 'auto') return 'خودکار';
+  if (reason === 'manual') return 'دستی';
+  if (reason === 'before-import') return 'قبل از Import';
+  if (reason === 'before-restore') return 'قبل از Restore';
+  return 'مهاجرت';
+}
+
+export function StorageBackupPanel() {
+  const store = useAccountingStore();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [snapshots, setSnapshots] = useState<AccountingSnapshotMeta[]>([]);
+  const [storageInfo, setStorageInfo] = useState<{ backend: string; payloadSize: number; snapshotCount: number; schemaVersion: number } | null>(null);
+  const [candidate, setCandidate] = useState<ImportCandidate | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    const [items, info] = await Promise.all([
+      listAccountingSnapshots(),
+      getAccountingStorageInfo(),
+    ]);
+    setSnapshots(items);
+    setStorageInfo(info);
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const currentData = (): AccountingData => ({
+    customers: store.customers,
+    products: store.products,
+    invoices: store.invoices,
+    returns: store.returns,
+    payments: store.payments,
+    checks: store.checks,
+    adjustments: store.adjustments,
+    stockMovements: store.stockMovements,
+    accounts: store.accounts,
+    journalEntries: store.journalEntries,
+    moneyTransactions: store.moneyTransactions,
+    settings: store.settings,
+  });
+
+  const exportData = async () => {
+    setBusy(true);
+    try {
+      const text = await createAccountingBackup(currentData());
+      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'accountants-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectImportFile = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const parsed = await parseAccountingBackup(await file.text());
+      setCandidate({ ...parsed, filename: file.name });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'فایل پشتیبان معتبر نیست.');
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!candidate) return;
+    setBusy(true);
+    try {
+      await createAccountingSnapshot('before-import');
+      store.replaceAll(candidate.data);
+      setCandidate(null);
+      window.alert('پشتیبان بازیابی شد. نسخه قبل از Import در Snapshotهای محلی نگهداری شد.');
+      window.setTimeout(() => void refresh(), 200);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'بازیابی پشتیبان انجام نشد.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createSnapshot = async () => {
+    setBusy(true);
+    try {
+      const id = await createAccountingSnapshot('manual');
+      if (!id) {
+        window.alert('Snapshot محلی در این مرورگر در دسترس نیست.');
+        return;
+      }
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreSnapshot = async (snapshot: AccountingSnapshotMeta) => {
+    if (!window.confirm('Snapshot انتخاب‌شده جایگزین داده فعلی شود؟ قبل از Restore یک Snapshot از وضعیت فعلی ساخته می‌شود.')) return;
+    setBusy(true);
+    try {
+      await restoreAccountingSnapshot(snapshot.id);
+      window.location.reload();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Restore انجام نشد.');
+      setBusy(false);
+    }
+  };
+
+  const removeSnapshot = async (snapshot: AccountingSnapshotMeta) => {
+    if (!window.confirm('این Snapshot محلی حذف شود؟')) return;
+    setBusy(true);
+    try {
+      await deleteAccountingSnapshot(snapshot.id);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <>
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-sky-600" /> ذخیره‌سازی و پشتیبان</CardTitle>
+          <div className="mt-1 text-xs text-slate-500">داده اصلی در IndexedDB نگهداری می‌شود و Snapshotهای محلی برای بازگشت امن ساخته می‌شوند.</div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Backend</div><div className="mt-1 font-black">{storageInfo?.backend || '...'}</div></div>
+          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Schema</div><div className="mt-1 font-black">v{storageInfo?.schemaVersion || '—'}</div></div>
+          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">حجم داده Persist</div><div className="mt-1 font-black">{formatBytes(storageInfo?.payloadSize || 0)}</div></div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button variant="outline" disabled={busy} onClick={() => void exportData()}><ArrowDownToLine className="h-4 w-4" /> دانلود Backup نسخه‌دار</Button>
+          <Button variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> Import و Preview</Button>
+          <input ref={fileRef} type="file" className="hidden" accept="application/json,.json" onChange={(event) => void selectImportFile(event.target.files?.[0])} />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+          <div>
+            <div className="text-sm font-black">Snapshotهای محلی</div>
+            <div className="mt-1 text-xs text-slate-500">Snapshot خودکار حداکثر هر ۶ ساعت قبل از تغییر بعدی ساخته می‌شود؛ حداکثر ۱۵ نسخه نگهداری می‌شود.</div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="icon" disabled={busy} onClick={() => void refresh()} title="بروزرسانی"><RefreshCw className="h-4 w-4" /></Button>
+            <Button size="sm" disabled={busy} onClick={() => void createSnapshot()}><HardDriveDownload className="h-4 w-4" /> Snapshot الآن</Button>
+          </div>
+        </div>
+
+        <div className="max-h-72 space-y-2 overflow-auto">
+          {snapshots.map((snapshot) => <div key={snapshot.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
+            <div>
+              <div className="flex items-center gap-2"><span className="text-sm font-bold">{new Date(snapshot.createdAt).toLocaleString('fa-IR')}</span><Badge>{reasonLabel(snapshot.reason)}</Badge></div>
+              <div className="mt-1 text-[11px] text-slate-400">{formatBytes(snapshot.size)}</div>
+            </div>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void restoreSnapshot(snapshot)}><RotateCcw className="h-4 w-4" /> Restore</Button>
+              <Button variant="ghost" size="icon" className="text-rose-600" disabled={busy} onClick={() => void removeSnapshot(snapshot)}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          </div>)}
+          {!snapshots.length && <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">هنوز Snapshot محلی ایجاد نشده است.</div>}
+        </div>
+      </CardContent>
+    </Card>
+
+    <Dialog open={!!candidate} onOpenChange={(open) => !open && !busy && setCandidate(null)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg font-black"><ShieldCheck className="h-5 w-5 text-emerald-600" /> Preview بازیابی Backup</DialogTitle>
+          <DialogDescription className="text-sm text-slate-500">قبل از جایگزینی داده‌ها، محتوا و نسخه فایل بررسی شده است. وضعیت فعلی نیز Snapshot می‌شود.</DialogDescription>
+        </DialogHeader>
+        {candidate && <div className="space-y-4">
+          <div className="rounded-xl bg-slate-50 p-3 text-sm"><div className="font-black">{candidate.filename}</div><div className="mt-1 text-xs text-slate-500">{candidate.preview.source === 'legacy' ? 'Backup قدیمی' : 'Backup نسخه‌دار'} · Schema v{candidate.preview.schemaVersion || 0}{candidate.preview.checksumVerified === true ? ' · Checksum تایید شد' : ''}</div></div>
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['مرجوعی', candidate.preview.returns], ['پرداخت', candidate.preview.payments], ['چک', candidate.preview.checks], ['Journal', candidate.preview.journalEntries], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-slate-200 p-2"><div className="text-[10px] text-slate-500">{label}</div><div className="mt-1 font-black">{value}</div></div>)}
+          </div>
+          {!!candidate.preview.warnings.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-6 text-amber-800">{candidate.preview.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}
+          <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setCandidate(null)}>انصراف</Button><Button disabled={busy} onClick={() => void confirmImport()}><RotateCcw className="h-4 w-4" /> تایید و بازیابی</Button></div>
+        </div>}
+      </DialogContent>
+    </Dialog>
+  </>;
+}

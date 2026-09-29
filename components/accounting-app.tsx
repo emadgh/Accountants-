@@ -18,13 +18,10 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const hydrated = useAccountingStore((s) => s.hydrated);
-  const setHydrated = useAccountingStore((s) => s.setHydrated);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setHydrated(true), 30);
-    return () => clearTimeout(timer);
-  }, [setHydrated]);
-
+    void useAccountingStore.persist.rehydrate();
+  }, []);
   const navigate = (next: ViewKey) => {
     if (next === 'sale-new' || next === 'purchase-new') setSelectedInvoiceId(null);
     setView(next);

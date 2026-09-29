@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { seedData } from './data';
 import type {
   Account,
@@ -49,6 +49,7 @@ import {
   reverseActiveSourceEntries,
 } from './accounting';
 import { formatDocumentNumber, normalizeStoredDate } from './standards';
+import { ACCOUNTING_SCHEMA_VERSION, accountingStateStorage } from './storage';
 
 type Store = AccountingData & {
   hydrated: boolean;
@@ -1377,7 +1378,9 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 7,
+      storage: createJSONStorage(() => accountingStateStorage),
+      version: ACCOUNTING_SCHEMA_VERSION,
+      skipHydration: true,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);
