@@ -1,3 +1,14 @@
+import {
+  createSession,
+  createUser,
+  findSessionById,
+  findUserById,
+  findUserByIdentity,
+  listUsers,
+  revokeSession,
+  type StoredAuthUser,
+} from './persistence/repositories/auth';
+
 export type AuthRole = 'admin' | 'user';
 
 export interface AuthenticatedUser {
@@ -9,20 +20,9 @@ export interface AuthenticatedUser {
   permissions: string[];
 }
 
-interface StoredAuthUser extends AuthenticatedUser {
-  normalizedUsername: string;
-  normalizedEmail?: string;
-  passwordHash: string;
-  passwordSalt: string;
-  passwordIterations: number;
-  sessionHash?: string;
-  createdAt: string;
-}
-
-interface StoredSession {
-  userId: string;
+interface BrowserSession {
+  id: string;
   token: string;
-  createdAt: number;
   expiresAt: number;
 }
 
@@ -31,16 +31,19 @@ export interface AuthSnapshot {
   user: AuthenticatedUser | null;
 }
 
-const USERS_KEY = 'accountants-auth-users-v1';
-const SESSION_KEY = 'accountants-auth-session-v1';
+const SESSION_KEY = 'accountants-auth-session-v2';
 const PASSWORD_ITERATIONS = 210_000;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const encoder = new TextEncoder();
 
 function requireBrowser() {
-  if (typeof window === 'undefined' || !window.localStorage || !globalThis.crypto?.subtle) {
-    throw new Error('Authentication requires a modern browser with Web Crypto and localStorage.');
+  if (
+    typeof window === 'undefined' ||
+    !window.sessionStorage ||
+    !globalThis.crypto?.subtle
+  ) {
+    throw new Error('Authentication requires a modern browser with Web Crypto and sessionStorage.');
   }
 }
 
@@ -48,37 +51,25 @@ function normalizeIdentity(value: string) {
   return value.trim().toLocaleLowerCase('en-US');
 }
 
-function readJson<T>(key: string, fallback: T): T {
+function readBrowserSession(): BrowserSession | null {
   requireBrowser();
   try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) as T : fallback;
+    const raw = window.sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as BrowserSession;
+    if (!parsed.id || !parsed.token || !Number.isFinite(parsed.expiresAt)) return null;
+    return parsed;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
-function readUsers() {
-  const value = readJson<unknown>(USERS_KEY, []);
-  return Array.isArray(value) ? value as StoredAuthUser[] : [];
+function writeBrowserSession(session: BrowserSession) {
+  window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
-function writeUsers(users: StoredAuthUser[]) {
-  window.localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-function readSession() {
-  const value = readJson<StoredSession | null>(SESSION_KEY, null);
-  if (!value || typeof value.userId !== 'string' || typeof value.token !== 'string') return null;
-  return value;
-}
-
-function writeSession(session: StoredSession) {
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-
-function clearSessionStorage() {
-  window.localStorage.removeItem(SESSION_KEY);
+function clearBrowserSession() {
+  window.sessionStorage.removeItem(SESSION_KEY);
 }
 
 function randomBytes(length: number) {
@@ -149,56 +140,69 @@ function publicUser(user: StoredAuthUser): AuthenticatedUser {
   };
 }
 
-async function issueSession(users: StoredAuthUser[], userId: string) {
-  const token = bytesToBase64(randomBytes(32));
-  const sessionHash = await digestBase64(token);
-  const nextUsers = users.map((user) => user.id === userId ? { ...user, sessionHash } : user);
-  writeUsers(nextUsers);
-  const now = Date.now();
-  writeSession({ userId, token, createdAt: now, expiresAt: now + SESSION_TTL_MS });
-  const user = nextUsers.find((item) => item.id === userId);
-  if (!user) throw new Error('User not found.');
-  return publicUser(user);
+function makeId(prefix: string) {
+  return (
+    prefix +
+    '_' +
+    Date.now().toString(36) +
+    '_' +
+    bytesToBase64(randomBytes(8)).replace(/[^a-z0-9]/gi, '').slice(0, 10)
+  );
 }
 
-async function clearMatchingSessionHash(session: StoredSession | null) {
-  if (!session) return;
-  const users = readUsers();
-  const index = users.findIndex((user) => user.id === session.userId);
-  if (index < 0 || !users[index].sessionHash) return;
-  const tokenHash = await digestBase64(session.token);
-  if (!safeEqualBase64(tokenHash, users[index].sessionHash || '')) return;
-  const next = [...users];
-  next[index] = { ...next[index], sessionHash: undefined };
-  writeUsers(next);
+async function issueSession(user: StoredAuthUser) {
+  const token = bytesToBase64(randomBytes(32));
+  const tokenHash = await digestBase64(token);
+  const now = Date.now();
+  const session = {
+    id: makeId('ses'),
+    userId: user.id,
+    tokenHash,
+    createdAt: now,
+    expiresAt: now + SESSION_TTL_MS,
+  };
+  await createSession(session);
+  writeBrowserSession({ id: session.id, token, expiresAt: session.expiresAt });
+  return publicUser(user);
 }
 
 export async function getAuthSnapshot(): Promise<AuthSnapshot> {
   requireBrowser();
-  const users = readUsers();
+  const users = await listUsers();
   if (!users.length) {
-    clearSessionStorage();
+    clearBrowserSession();
     return { hasUsers: false, user: null };
   }
 
-  const session = readSession();
-  if (!session) return { hasUsers: true, user: null };
+  const browserSession = readBrowserSession();
+  if (!browserSession) return { hasUsers: true, user: null };
 
-  if (!Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
-    await clearMatchingSessionHash(session);
-    clearSessionStorage();
+  if (browserSession.expiresAt <= Date.now()) {
+    await revokeSession(browserSession.id);
+    clearBrowserSession();
     return { hasUsers: true, user: null };
   }
 
-  const user = users.find((item) => item.id === session.userId);
-  if (!user?.sessionHash) {
-    clearSessionStorage();
+  const storedSession = await findSessionById(browserSession.id);
+  if (
+    !storedSession ||
+    storedSession.revokedAt ||
+    storedSession.expiresAt <= Date.now()
+  ) {
+    clearBrowserSession();
     return { hasUsers: true, user: null };
   }
 
-  const tokenHash = await digestBase64(session.token);
-  if (!safeEqualBase64(tokenHash, user.sessionHash)) {
-    clearSessionStorage();
+  const tokenHash = await digestBase64(browserSession.token);
+  if (!safeEqualBase64(tokenHash, storedSession.tokenHash)) {
+    await revokeSession(browserSession.id);
+    clearBrowserSession();
+    return { hasUsers: true, user: null };
+  }
+
+  const user = await findUserById(storedSession.userId);
+  if (!user) {
+    clearBrowserSession();
     return { hasUsers: true, user: null };
   }
 
@@ -208,13 +212,8 @@ export async function getAuthSnapshot(): Promise<AuthSnapshot> {
 export async function loginWithPassword(identity: string, password: string) {
   requireBrowser();
   const normalized = normalizeIdentity(identity);
-  const users = readUsers();
-  const user = users.find((item) =>
-    item.normalizedUsername === normalized ||
-    (!!item.normalizedEmail && item.normalizedEmail === normalized)
-  );
+  const user = await findUserByIdentity(normalized);
 
-  // Keep the user-facing error generic so account existence is not disclosed.
   if (!user || !password) throw new Error('نام کاربری/ایمیل یا رمز عبور صحیح نیست.');
 
   const candidate = await hashPassword(password, user.passwordSalt, user.passwordIterations);
@@ -222,7 +221,7 @@ export async function loginWithPassword(identity: string, password: string) {
     throw new Error('نام کاربری/ایمیل یا رمز عبور صحیح نیست.');
   }
 
-  return issueSession(users, user.id);
+  return issueSession(user);
 }
 
 export async function registerFirstAdmin(input: {
@@ -232,8 +231,9 @@ export async function registerFirstAdmin(input: {
   password: string;
 }) {
   requireBrowser();
-  const users = readUsers();
+  const users = await listUsers();
   if (users.length) throw new Error('حساب مدیر قبلاً ایجاد شده است.');
+
   const username = input.username.trim();
   const email = input.email?.trim() || undefined;
   const normalizedUsername = normalizeIdentity(username);
@@ -246,7 +246,7 @@ export async function registerFirstAdmin(input: {
   const salt = bytesToBase64(randomBytes(16));
   const passwordHash = await hashPassword(input.password, salt, PASSWORD_ITERATIONS);
   const user: StoredAuthUser = {
-    id: 'usr_' + Date.now().toString(36) + '_' + bytesToBase64(randomBytes(6)).replace(/[^a-z0-9]/gi, '').slice(0, 8),
+    id: makeId('usr'),
     username,
     normalizedUsername,
     email,
@@ -259,13 +259,14 @@ export async function registerFirstAdmin(input: {
     passwordIterations: PASSWORD_ITERATIONS,
     createdAt: new Date().toISOString(),
   };
-  writeUsers([user]);
-  return issueSession([user], user.id);
+
+  await createUser(user);
+  return issueSession(user);
 }
 
 export async function logoutCurrentSession() {
   requireBrowser();
-  const session = readSession();
-  await clearMatchingSessionHash(session);
-  clearSessionStorage();
+  const browserSession = readBrowserSession();
+  if (browserSession) await revokeSession(browserSession.id);
+  clearBrowserSession();
 }
