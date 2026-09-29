@@ -68,6 +68,7 @@ export interface InvoiceAuditEntry {
 export interface Invoice {
   id: string;
   number: string;
+  businessProfileId: string;
   kind: InvoiceKind;
   status: InvoiceStatus;
   date: string;
@@ -313,6 +314,23 @@ export interface MoneyTransaction {
   voidReason?: string;
 }
 
+export interface BusinessProfile {
+  id: string;
+  label: string;
+  businessName: string;
+  ownerName: string;
+  phone: string;
+  address: string;
+  nationalId: string;
+  economicCode: string;
+  postalCode: string;
+  cardNumber: string;
+  iban: string;
+  bankName: string;
+  invoiceTitle: string;
+  footer: string;
+}
+
 export interface BusinessSettings {
   businessName: string;
   ownerName: string;
@@ -329,6 +347,8 @@ export interface BusinessSettings {
   currency: 'تومان' | 'ریال';
   defaultTax: number;
   numbering: DocumentNumberingSettings;
+  businessProfiles: BusinessProfile[];
+  defaultBusinessProfileId: string;
 }
 
 export interface AccountingData {
