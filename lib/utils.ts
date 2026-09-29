@@ -13,8 +13,25 @@ export function money(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value || 0));
 }
 
+export function invoiceLineGross(item: Pick<Invoice['items'][number], 'qty' | 'unitPrice'>) {
+  return Math.max(0, Number(item.qty || 0) * Number(item.unitPrice || 0));
+}
+
+export function invoiceLineDiscount(item: Pick<Invoice['items'][number], 'qty' | 'unitPrice' | 'discount' | 'discountPercent'>) {
+  const gross = invoiceLineGross(item);
+  const explicit = Number(item.discount || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(gross, explicit);
+  const percent = Number(item.discountPercent || 0);
+  if (!Number.isFinite(percent) || percent <= 0) return 0;
+  return Math.min(gross, gross * Math.min(100, percent) / 100);
+}
+
+export function invoiceLineNet(item: Pick<Invoice['items'][number], 'qty' | 'unitPrice' | 'discount' | 'discountPercent'>) {
+  return Math.max(0, invoiceLineGross(item) - invoiceLineDiscount(item));
+}
+
 export function invoiceTotal(invoice: Pick<Invoice, 'items' | 'discount' | 'tax' | 'shipping'>) {
-  const sub = invoice.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
+  const sub = invoice.items.reduce((sum, item) => sum + invoiceLineNet(item), 0);
   return Math.max(0, sub - Number(invoice.discount || 0) + Number(invoice.tax || 0) + Number(invoice.shipping || 0));
 }
 
@@ -23,14 +40,19 @@ export function returnDocumentAmount(
   items: Pick<ReturnItem, 'qty' | 'unitPrice'>[]
 ) {
   const originalSubtotal = originalInvoice.items.reduce(
-    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    (sum, item) => sum + invoiceLineNet(item),
     0
   );
   if (originalSubtotal <= 0) return 0;
-  const rawReturn = items.reduce(
-    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
-    0
-  );
+  const rawReturn = items.reduce((sum, item) => {
+    const originalItem = 'originalItemId' in item
+      ? originalInvoice.items.find((source) => source.id === (item as ReturnItem).originalItemId)
+      : undefined;
+    if (!originalItem) return sum + Number(item.qty || 0) * Number(item.unitPrice || 0);
+    const sourceQty = Number(originalItem.qty || 0);
+    const netUnit = sourceQty > 0 ? invoiceLineNet(originalItem) / sourceQty : 0;
+    return sum + Number(item.qty || 0) * netUnit;
+  }, 0);
   const factor = invoiceTotal(originalInvoice) / originalSubtotal;
   return Math.min(invoiceTotal(originalInvoice), Math.max(0, rawReturn * factor));
 }
@@ -291,6 +313,7 @@ export function customerNetBalance(
     code: '',
     name: '',
     kind: 'both',
+    status: 'active',
     phone: '',
     address: '',
     nationalId: '',
