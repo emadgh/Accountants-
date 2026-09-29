@@ -1,0 +1,114 @@
+export type CustomerKind = 'customer' | 'supplier' | 'both';
+export type ProductKind = 'product' | 'service';
+export type InvoiceKind = 'sale' | 'purchase';
+export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled';
+export type PaymentMethod = 'cash' | 'card' | 'check';
+export type CheckStatus = 'pending' | 'cleared' | 'bounced';
+
+export interface Customer {
+  id: string;
+  code: string;
+  name: string;
+  kind: CustomerKind;
+  phone: string;
+  address: string;
+  nationalId: string;
+  economicCode: string;
+  postalCode: string;
+  notes?: string;
+}
+
+export interface Product {
+  id: string;
+  code: string;
+  name: string;
+  kind: ProductKind;
+  unit: string;
+  salePrice: number;
+  buyPrice: number;
+  stock: number;
+  minStock: number;
+  notes?: string;
+}
+
+export interface InvoiceItem {
+  id: string;
+  productId?: string;
+  description: string;
+  details?: string;
+  unit: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  kind: InvoiceKind;
+  status: InvoiceStatus;
+  date: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  customerNationalId?: string;
+  customerEconomicCode?: string;
+  customerPostalCode?: string;
+  items: InvoiceItem[];
+  discount: number;
+  tax: number;
+  shipping: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Payment {
+  id: string;
+  invoiceId?: string;
+  customerId: string;
+  method: PaymentMethod;
+  amount: number;
+  date: string;
+  reference?: string;
+  notes?: string;
+}
+
+export interface CheckRecord {
+  id: string;
+  direction: 'received' | 'issued';
+  customerId: string;
+  amount: number;
+  dueDate: string;
+  number: string;
+  bank: string;
+  owner: string;
+  status: CheckStatus;
+  notes?: string;
+}
+
+export interface BusinessSettings {
+  businessName: string;
+  ownerName: string;
+  phone: string;
+  address: string;
+  nationalId: string;
+  economicCode: string;
+  postalCode: string;
+  cardNumber: string;
+  iban: string;
+  bankName: string;
+  invoiceTitle: string;
+  footer: string;
+  currency: 'تومان' | 'ریال';
+  defaultTax: number;
+}
+
+export interface AccountingData {
+  customers: Customer[];
+  products: Product[];
+  invoices: Invoice[];
+  payments: Payment[];
+  checks: CheckRecord[];
+  settings: BusinessSettings;
+}
