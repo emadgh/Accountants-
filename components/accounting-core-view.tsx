@@ -11,6 +11,7 @@ import { PersianDateInput } from '@/components/persian-date-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricCard } from '@/components/ui/metric-card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
@@ -109,9 +110,9 @@ export function AccountingCoreView() {
     </div>
 
     <div className="grid gap-4 sm:grid-cols-3">
-      <Metric title="تعداد ثبت‌های روزنامه" value={String(journalEntries.length)} />
-      <Metric title="گردش بدهکار" value={money(debitTotal) + ' ' + settings.currency} />
-      <Metric title="کنترل تراز" value={allBalanced && Math.abs(debitTotal - creditTotal) < 0.01 ? 'تراز' : 'نیاز به بررسی'} danger={!allBalanced || Math.abs(debitTotal - creditTotal) >= 0.01} />
+      <MetricCard title="تعداد ثبت‌های روزنامه" value={journalEntries.length} />
+      <MetricCard title="گردش بدهکار" value={debitTotal} unit={settings.currency} tone="info" />
+      <MetricCard title="کنترل تراز" value={allBalanced && Math.abs(debitTotal - creditTotal) < 0.01 ? 'تراز' : 'نیاز به بررسی'} tone={allBalanced && Math.abs(debitTotal - creditTotal) < 0.01 ? 'success' : 'danger'} rolling={false} />
     </div>
 
     {tab === 'accounts' && <Card>
@@ -261,6 +262,4 @@ function Field({ label, children, className = '' }: { label: string; children: R
   return <label className={'space-y-1.5 ' + className}><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>;
 }
 
-function Metric({ title, value, danger = false }: { title: string; value: string; danger?: boolean }) {
-  return <Card><CardContent><div className="text-xs font-bold text-slate-500">{title}</div><div className={danger ? 'mt-2 text-xl font-black text-rose-700' : 'mt-2 text-xl font-black'}>{value}</div></CardContent></Card>;
-}
+
