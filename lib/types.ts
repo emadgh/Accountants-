@@ -28,7 +28,7 @@ export interface Product {
   unit: string;
   salePrice: number;
   buyPrice: number;
-  averageCost?: number;
+  averageCost: number;
   stock: number;
   minStock: number;
   notes?: string;
