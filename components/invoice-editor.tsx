@@ -302,7 +302,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
 }
 
 function EditableText({ value, onChange, className = '', readOnly = false, valueDirection }: { value: string; onChange: (v: string) => void; className?: string; readOnly?: boolean; valueDirection?: 'rtl' }) {
-  return <><input readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} /><span className={`print-only ${className}`} dir={valueDirection}>{value || '—'}</span></>;
+  return <><input dir={valueDirection} readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} /><span className={`print-only ${className}`} dir={valueDirection}>{value || '—'}</span></>;
 }
 function EditableArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <><textarea className="screen-editor invoice-inline-textarea" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /><div className="print-only print-block whitespace-pre-wrap leading-6">{value}</div></>;
