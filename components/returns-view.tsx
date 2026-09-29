@@ -4,7 +4,9 @@ import { useMemo, useState } from 'react';
 import { Ban, CheckCircle2, Edit3, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, ReturnDocument, ReturnItem } from '@/lib/types';
-import { money, nowFa, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
+import { money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { PersianDateInput } from '@/components/persian-date-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,7 +25,7 @@ function blankReturn(invoice?: Invoice): ReturnDocument {
     originalInvoiceNumber: invoice?.number || '',
     customerId: invoice?.customerId || '',
     customerName: invoice?.customerName || '',
-    date: nowFa(),
+    date: todayIso(),
     items: invoice?.items.map((item) => ({
       id: uid('retrow'),
       originalItemId: item.id,
@@ -160,7 +162,7 @@ export function ReturnsView() {
             <td>{document.kind === 'sale-return' ? 'مرجوعی فروش' : 'مرجوعی خرید'}</td>
             <td>{document.originalInvoiceNumber}</td>
             <td className="font-bold">{document.customerName}</td>
-            <td>{document.date}</td>
+            <td>{formatPersianDate(document.date)}</td>
             <td className="font-black">{money(document.totalAmount)} {settings.currency}</td>
             <td><ReturnStatusBadge document={document} /></td>
             <td><div className="flex gap-1">
@@ -189,7 +191,7 @@ export function ReturnsView() {
             </select>
           </Field>
           <Field label="شماره سند"><Input value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} /></Field>
-          <Field label="تاریخ"><Input value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={draft.date} onChange={(date) => setDraft({ ...draft, date })} /></Field>
           <Field label="طرف حساب"><Input readOnly className="bg-slate-100" value={original?.customerName || draft.customerName} /></Field>
         </div>
 
