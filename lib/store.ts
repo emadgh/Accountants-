@@ -548,7 +548,7 @@ function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invo
   });
 }
 
-function normalizeAccountingData(data: AccountingData): AccountingData {
+export function normalizeAccountingData(data: AccountingData): AccountingData {
   const settings = normalizeBusinessSettings(data.settings);
   const customers = (data.customers || []).map((customer) => ({
     ...customer,
