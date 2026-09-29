@@ -545,9 +545,9 @@ export const useAccountingStore = create<Store>()(
         } else if (key === 'receipt' || key === 'payment') {
           state.payments
             .filter((payment) => payment.direction === key)
-            .forEach((payment) => used.add(payment.documentNumber?.trim()));
+            .forEach((payment) => used.add(payment.documentNumber.trim()));
         } else {
-          state.checks.forEach((check) => used.add(check.documentNumber?.trim()));
+          state.checks.forEach((check) => used.add(check.documentNumber.trim()));
         }
 
         let next = Math.max(1, Number(current.next || 1));
