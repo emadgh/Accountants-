@@ -107,12 +107,13 @@ const aliases = {
   number: ['number', 'no', 'serial', 'shomare', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
   date: ['date', 'tarikh', 'createdate', 'factor_date', 'factordate'],
   customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'shakhs', 'ashkhasid'],
-  productRef: ['productid', 'product_id', 'kalaid', 'kala_id', 'codekala', 'kalacode', 'productcode'],
+  productRef: ['productid', 'product_id', 'kalaid', 'kala_id', 'codekala', 'codkala', 'kalacode', 'productcode'],
   invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'number', 'shomare', 'shfactor', 'shomarefactor', 'factornumber', 'factorno'],
   qty: ['qty', 'quantity', 'tedad', 'meghdar', 'count'],
   price: ['unitprice', 'unit_price', 'price', 'fee', 'fi', 'gheymat', 'gheymatvahed', 'mablaghvahed'],
   amount: ['amount', 'mablagh', 'total', 'sum', 'jam', 'price', 'mablaghkol'],
   discount: ['discount', 'takhfif', 'takhfifmablagh'],
+  invoiceDiscount: ['invoicediscount', 'invoice_discount', 'factordiscount', 'factor_discount', 'takhfifkol', 'takhfiffactor', 'takhfif_factor'],
   discountPercent: ['discountpercent', 'discount_percent', 'takhfifdarsad', 'darsadtakhfif'],
   tax: ['tax', 'maliat', 'arzeshafzode'],
   shipping: ['shipping', 'haml', 'keraye', 'freight'],
@@ -357,13 +358,14 @@ function findDerivedBalance(snapshot: ExternalSqliteSnapshot, prefix: 't' | 'k',
 
 function buildStockMovements(products: Product[], invoices: Invoice[], knownFinalStockIds: Set<string>): StockMovement[] {
   const movements: StockMovement[] = [];
+  const sourceInvoicesForOpening = invoices.filter((invoice) => invoice.status !== 'void');
   const finalInvoices = invoices
     .filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void')
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date, 'en'));
 
   const netByProduct = new Map<string, number>();
-  for (const invoice of finalInvoices) {
+  for (const invoice of sourceInvoicesForOpening) {
     for (const item of invoice.items) {
       if (!item.productId) continue;
       const delta = invoice.kind === 'purchase' ? Number(item.qty || 0) : -Number(item.qty || 0);
@@ -597,7 +599,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         return {
           id: 'yas_item_' + keyPart(numberValue, source) + '_' + (itemIndex + 1),
           productId: product?.id,
-          description: text(value(itemRow, aliases.name)) || text(value(itemRow, aliases.details)) || product?.name || 'ردیف ' + (itemIndex + 1),
+          description: product?.name || text(value(itemRow, aliases.name)) || 'ردیف ' + (itemIndex + 1),
           details: text(value(itemRow, aliases.details)),
           unit: product?.unit || text(value(itemRow, aliases.unit)) || 'عدد',
           qty,
@@ -612,6 +614,15 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       }
 
       const anomaly = numberValue.replace(/\D/g, '') === '300051';
+      const tableCarriesLineRows = itemTables.some((candidate) => candidate.name === table.name) &&
+        hasColumn(table, aliases.qty) &&
+        hasColumn(table, aliases.price);
+      const invoiceDiscountValue = value(row, aliases.invoiceDiscount);
+      const invoiceDiscount = invoiceDiscountValue != null
+        ? Math.max(0, number(invoiceDiscountValue))
+        : tableCarriesLineRows
+          ? 0
+          : Math.max(0, number(value(row, aliases.discount)));
       const now = new Date().toISOString();
       const invoice: Invoice = {
         id: 'yas_invoice_' + keyPart(kind + '_' + source, String(index + 1)),
@@ -628,7 +639,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         customerEconomicCode: customer?.economicCode,
         customerPostalCode: customer?.postalCode,
         items,
-        discount: Math.max(0, number(value(row, aliases.discount))),
+        discount: invoiceDiscount,
         tax: Math.max(0, number(value(row, aliases.tax))),
         shipping: Math.max(0, number(value(row, aliases.shipping))),
         notes: text(value(row, aliases.details)),
@@ -734,13 +745,14 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       const amount = Math.abs(number(value(row, aliases.amount)));
       if (amount <= 0) continue;
       const now = new Date().toISOString();
+      const incomeMethod = inferPaymentMethod(incomeTable, row, financialAccountNames);
       moneyTransactions.push({
         id: 'yas_income_' + keyPart(sourceKey(row, index), String(index + 1)),
         kind: 'income',
         status: 'final',
         date: safeDate(value(row, aliases.date)),
         amount,
-        settlementAccountId: 'acct_cash',
+        settlementAccountId: incomeMethod === 'card' ? 'acct_bank' : 'acct_cash',
         categoryAccountId: 'acct_other_income',
         description: text(value(row, aliases.details)) || 'درآمد منتقل‌شده از Yas',
         reference: sourceKey(row, index),
