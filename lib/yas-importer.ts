@@ -95,14 +95,14 @@ const aliases = {
   stock: ['stock', 'mojoodi', 'inventory', 'tedadmojood', 'mande'],
   salePrice: ['saleprice', 'sale_price', 'gheymatforoosh', 'gheymatforosh', 'foroshprice'],
   buyPrice: ['buyprice', 'buy_price', 'gheymatkharid', 'kharidprice'],
-  number: ['number', 'no', 'serial', 'shomare', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
+  number: ['number', 'no', 'serial', 'shomare', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
   date: ['date', 'tarikh', 'createdate', 'factor_date', 'factordate'],
-  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid'],
+  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'shakhs', 'ashkhasid'],
   productRef: ['productid', 'product_id', 'kalaid', 'kala_id', 'codekala', 'kalacode', 'productcode'],
-  invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'shomarefactor', 'factornumber', 'factorno'],
+  invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'number', 'shomare', 'shfactor', 'shomarefactor', 'factornumber', 'factorno'],
   qty: ['qty', 'quantity', 'tedad', 'meghdar', 'count'],
-  price: ['unitprice', 'unit_price', 'price', 'fee', 'gheymat', 'gheymatvahed', 'mablaghvahed'],
-  amount: ['amount', 'mablagh', 'total', 'sum', 'price', 'mablaghkol'],
+  price: ['unitprice', 'unit_price', 'price', 'fee', 'fi', 'gheymat', 'gheymatvahed', 'mablaghvahed'],
+  amount: ['amount', 'mablagh', 'total', 'sum', 'jam', 'price', 'mablaghkol'],
   discount: ['discount', 'takhfif', 'takhfifmablagh'],
   discountPercent: ['discountpercent', 'discount_percent', 'takhfifdarsad', 'darsadtakhfif'],
   tax: ['tax', 'maliat', 'arzeshafzode'],
@@ -226,7 +226,7 @@ function scoreProduct(table: ExternalSqliteTable) {
 function scoreInvoiceHeader(table: ExternalSqliteTable) {
   if (isDerivedTable(table)) return -100;
   let score = 0;
-  if (tableNameIncludes(table, ['factor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) score += 6;
+  if (tableNameIncludes(table, ['factor', 'faktor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) score += 6;
   if (hasColumn(table, aliases.number)) score += 3;
   if (hasColumn(table, aliases.date)) score += 2;
   if (hasColumn(table, aliases.customerRef)) score += 4;
@@ -237,7 +237,7 @@ function scoreInvoiceHeader(table: ExternalSqliteTable) {
 function scoreInvoiceItem(table: ExternalSqliteTable) {
   if (isDerivedTable(table)) return -100;
   let score = 0;
-  if (tableNameIncludes(table, ['factoritem', 'factorrow', 'invoiceitem', 'detail', 'radif', 'ریز', 'اقلام'])) score += 8;
+  if (tableNameIncludes(table, ['factoritem', 'faktoritem', 'factorrow', 'invoiceitem', 'detail', 'radif', 'ریز', 'اقلام'])) score += 8;
   if (hasColumn(table, aliases.invoiceRef)) score += 4;
   if (hasColumn(table, aliases.qty)) score += 4;
   if (hasColumn(table, aliases.price)) score += 4;
@@ -494,8 +494,13 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
 
       const customerRef = rowRef(row, aliases.customerRef);
       const customer = customerByRef.get(normalizeName(customerRef));
-      if (!customer && customerRef) {
-        messages.push({ severity: 'warning', code: 'invoice-customer-unmapped', entity: numberValue, message: 'طرف‌حساب فاکتور ' + numberValue + ' نگاشت نشد: ' + customerRef });
+      if (!customer) {
+        messages.push({
+          severity: 'conflict',
+          code: 'invoice-customer-unmapped',
+          entity: numberValue,
+          message: 'طرف‌حساب فاکتور ' + numberValue + ' نگاشت نشد' + (customerRef ? ': ' + customerRef : '؛ مرجع طرف‌حساب خالی است.') + ' Import تا رفع این نگاشت متوقف می‌شود.',
+        });
       }
 
       const itemCandidates = itemRows.filter(({ row: itemRow }) => {
@@ -557,7 +562,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
           severity: 'conflict',
           code: 'known-anomaly-300051',
           entity: numberValue,
-          message: 'فاکتور 300051 به‌صورت Draft/Needs Review وارد می‌شود و تا بررسی دستی روی مانده و Journal اثر ندارد.',
+          message: 'فاکتور 300051 (ناسازگاری شناخته‌شده Yas؛ در تحلیل منبع مبلغ 10,000,000 و بدون اثر در t100005/دریافت متناظر) به‌صورت Draft/Needs Review وارد می‌شود و تا بررسی دستی روی مانده و Journal اثر ندارد.',
         });
       }
       invoices.push(invoice);
