@@ -816,7 +816,7 @@ export function SettingsView() {
     }
     const errors = validateOfficialFields(profileDraft);
     if (errors.length) {
-      window.alert(errors.join('\n'));
+      notify(errors.join('\n'), 'error');
       return;
     }
     const result = upsertBusinessProfile(profileDraft);
