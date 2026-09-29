@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, Copy, Plus, Printer, Save, Trash2 } from 'lucide-react';
+import { ArrowRight, Ban, CheckCircle2, Copy, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
 import { invoiceTotal, money, nowFa, uid } from '@/lib/utils';
@@ -23,7 +23,7 @@ function blankInvoice(kind: InvoiceKind, customerName = ''): Invoice {
 }
 
 export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; invoiceId?: string | null; onBack?: () => void }) {
-  const { invoices, customers, products, settings, setSettings, saveInvoice } = useAccountingStore();
+  const { invoices, customers, products, settings, setSettings, saveInvoiceDraft, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
   const existing = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const [invoice, setInvoice] = useState<Invoice>(() => existing ? structuredClone(existing) : blankInvoice(kind));
   const [savedFlash, setSavedFlash] = useState(false);
@@ -35,6 +35,12 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   const subtotal = invoice.items.reduce((s, i) => s + Number(i.qty || 0) * Number(i.unitPrice || 0), 0);
   const total = invoiceTotal(invoice);
   const customer = customers.find((c) => c.id === invoice.customerId);
+  const isDraft = invoice.status === 'draft';
+  const isVoid = invoice.status === 'void';
+  const isPosted = !isDraft && !isVoid;
+  const isDirty = !!existing && invoiceEditableSignature(existing) !== invoiceEditableSignature(invoice);
+  const statusLabel = invoice.status === 'draft' ? 'پیش‌نویس' : invoice.status === 'partial' ? 'بخشی تسویه' : invoice.status === 'settled' ? 'تسویه‌شده' : invoice.status === 'void' ? 'باطل' : 'قطعی';
+  const statusClass = invoice.status === 'draft' ? '' : invoice.status === 'void' ? 'bg-rose-50 text-rose-700' : invoice.status === 'partial' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
 
   const patch = <K extends keyof Invoice>(key: K, value: Invoice[K]) => setInvoice((x) => ({ ...x, [key]: value, updatedAt: new Date().toISOString() }));
   const patchItem = (id: string, values: Partial<InvoiceItem>) => setInvoice((x) => ({ ...x, items: x.items.map((item) => item.id === id ? { ...item, ...values } : item), updatedAt: new Date().toISOString() }));
@@ -51,23 +57,90 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     patchItem(rowId, { productId: p.id, description: p.name, unit: p.unit, unitPrice: invoice.kind === 'sale' ? p.salePrice : p.buyPrice });
   };
 
-  const persist = (forceFinal = false) => {
-    const next = { ...invoice, status: forceFinal ? 'final' as const : invoice.status, updatedAt: new Date().toISOString() };
-    saveInvoice(next);
-    setInvoice(next);
+  const showSaved = () => {
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 1200);
-    return next;
+  };
+
+  const persist = () => {
+    if (isVoid) return null;
+
+    if (isDraft) {
+      const result = saveInvoiceDraft(invoice);
+      if (!result.ok || !result.invoice) {
+        window.alert(result.message || 'ذخیره فاکتور انجام نشد.');
+        return null;
+      }
+      setInvoice(structuredClone(result.invoice));
+      showSaved();
+      return result.invoice;
+    }
+
+    if (!isDirty) {
+      window.alert('تغییری برای ثبت Revision وجود ندارد.');
+      return existing || invoice;
+    }
+
+    const reason = window.prompt('دلیل ویرایش سند قطعی را وارد کنید:');
+    if (!reason?.trim()) return null;
+    const result = reviseInvoice(invoice, reason);
+    if (!result.ok || !result.invoice) {
+      window.alert(result.message || 'ثبت Revision انجام نشد.');
+      return null;
+    }
+    setInvoice(structuredClone(result.invoice));
+    showSaved();
+    return result.invoice;
   };
 
   const print = () => {
-    persist(true);
-    window.setTimeout(() => window.print(), 120);
+    if (isVoid) {
+      window.print();
+      return;
+    }
+
+    if (isDraft) {
+      const result = finalizeInvoice(invoice);
+      if (!result.ok || !result.invoice) {
+        window.alert(result.message || 'ثبت نهایی فاکتور انجام نشد.');
+        return;
+      }
+      setInvoice(structuredClone(result.invoice));
+      window.setTimeout(() => window.print(), 120);
+      return;
+    }
+
+    if (isDirty && !persist()) return;
+    window.setTimeout(() => window.print(), 80);
+  };
+
+  const voidCurrent = () => {
+    if (!isPosted) return;
+    const reason = window.prompt('دلیل ابطال فاکتور را وارد کنید:');
+    if (!reason?.trim()) return;
+    const result = voidInvoice(invoice.id, reason);
+    if (!result.ok || !result.invoice) {
+      window.alert(result.message || 'ابطال فاکتور انجام نشد.');
+      return;
+    }
+    setInvoice(structuredClone(result.invoice));
   };
 
   const duplicate = () => {
     const now = new Date().toISOString();
-    setInvoice({ ...invoice, id: uid('inv'), number: `${invoice.kind === 'sale' ? '3' : '5'}${String(Date.now()).slice(-5)}`, status: 'draft', createdAt: now, updatedAt: now });
+    setInvoice({
+      ...invoice,
+      id: uid('inv'),
+      number: `${invoice.kind === 'sale' ? '3' : '5'}${String(Date.now()).slice(-5)}`,
+      status: 'draft',
+      revision: 0,
+      finalizedAt: undefined,
+      voidedAt: undefined,
+      voidReason: undefined,
+      auditTrail: [],
+      createdAt: now,
+      updatedAt: now,
+    });
   };
 
   return <div className="space-y-4">
@@ -75,17 +148,21 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       <div className="flex items-center gap-2">
         {onBack && <Button variant="ghost" size="icon" onClick={onBack}><ArrowRight className="h-4 w-4" /></Button>}
         <div><div className="font-black">{invoice.kind === 'sale' ? 'ویرایش فاکتور فروش' : 'ویرایش فاکتور خرید'}</div><div className="mt-0.5 text-xs text-slate-400">همین فرم نسخه قابل چاپ فاکتور است.</div></div>
-        <Badge className={invoice.status === 'draft' ? '' : 'bg-emerald-50 text-emerald-700'}>{invoice.status === 'draft' ? 'پیش‌نویس' : 'ثبت‌شده'}</Badge>
+        <Badge className={statusClass}>{statusLabel}{(invoice.revision || 0) > 1 ? ` · R${invoice.revision}` : ''}</Badge>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {savedFlash && <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><CheckCircle2 className="h-4 w-4" /> ذخیره شد</span>}
         <Button variant="outline" size="sm" onClick={duplicate}><Copy className="h-4 w-4" /> کپی فاکتور</Button>
-        <Button variant="outline" size="sm" onClick={() => persist(false)}><Save className="h-4 w-4" /> ذخیره</Button>
-        <Button size="sm" onClick={print}><Printer className="h-4 w-4" /> ثبت نهایی و چاپ</Button>
+        {!isVoid && <Button variant="outline" size="sm" onClick={persist}><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
+        {isPosted && <Button variant="danger" size="sm" onClick={voidCurrent}><Ban className="h-4 w-4" /> ابطال</Button>}
+        <Button size="sm" onClick={print}><Printer className="h-4 w-4" /> {isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
     </div>
 
-    <div className="print-surface invoice-paper">
+    <div className="print-surface invoice-paper relative">
+      {isVoid && <div className="pointer-events-none absolute inset-x-0 top-[42%] z-10 -rotate-12 text-center text-7xl font-black text-rose-500/15">باطل</div>}
+      {isVoid && <div className="screen-only mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">این فاکتور باطل شده است.{invoice.voidReason ? ` دلیل: ${invoice.voidReason}` : ''}</div>}
+      <fieldset disabled={isVoid} className="contents">
       <header className="mb-3">
         <EditableText value={invoice.kind === 'sale' ? settings.invoiceTitle : 'فاکتور خرید'} onChange={(v) => invoice.kind === 'sale' && setSettings({ ...settings, invoiceTitle: v })} className="mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />
         <div className="mt-4 grid grid-cols-[1fr_1.4fr] gap-5 text-[12px] leading-7">
@@ -119,7 +196,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
             </div>
           </div>
           <div className="space-y-1 sm:text-left">
-            <InfoLine label="شماره" value={invoice.number} onChange={(v) => patch('number', v)} />
+            <InfoLine label="شماره" value={invoice.number} onChange={(v) => patch('number', v)} readOnly={!isDraft} />
             <InfoLine label="تاریخ" value={invoice.date} onChange={(v) => patch('date', v)} />
             <div className="flex gap-1 text-[10px] text-slate-500 sm:justify-end"><span>{customer?.code ? `کد شخص: ${customer.code}` : ''}</span></div>
           </div>
@@ -171,7 +248,18 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       </div>
 
       <div className="mt-20 grid grid-cols-2 text-center text-[12px]"><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده</div><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div></div>
+      </fieldset>
     </div>
+
+    {!!invoice.auditTrail?.length && <div className="screen-only rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 font-black text-slate-800"><History className="h-4 w-4 text-sky-600" /> تاریخچه سند</div>
+      <div className="space-y-2">
+        {[...invoice.auditTrail].reverse().map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
+          <div><span className="font-bold">{auditActionLabel(entry.action)}</span>{entry.note ? <span className="mr-2 text-slate-500">— {entry.note}</span> : null}</div>
+          <div className="text-slate-400">Revision {entry.revision} · {new Date(entry.at).toLocaleString('fa-IR')}</div>
+        </div>)}
+      </div>
+    </div>}
   </div>;
 }
 
@@ -185,5 +273,36 @@ function MiniEdit({ value, onChange, placeholder }: { value: string; onChange: (
 function NumberEdit({ value, onChange, formatted = false }: { value: number; onChange: (v: number) => void; formatted?: boolean }) {
   return <><input dir="ltr" type="number" min="0" className="screen-editor invoice-inline-input text-center" value={value} onChange={(e) => onChange(Number(e.target.value))} /><span className="print-only" dir="ltr">{formatted ? money(value) : value}</span></>;
 }
-function InfoLine({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) { return <div className="flex min-h-7 items-center gap-1"><span className="shrink-0 font-bold">{label}:</span><EditableText value={value} onChange={onChange} /></div>; }
+function InfoLine({ label, value, onChange, readOnly = false }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean }) { return <div className="flex min-h-7 items-center gap-1"><span className="shrink-0 font-bold">{label}:</span><EditableText value={value} onChange={onChange} readOnly={readOnly} /></div>; }
 function AmountLine({ label, value, onChange, fixed }: { label: string; value: number; onChange?: (v: number) => void; fixed?: boolean }) { return <div className="flex min-h-8 items-center justify-between gap-4"><span className="font-bold text-slate-600">{label}</span>{fixed ? <span className="font-bold" dir="ltr">{money(value)}</span> : <div className="w-36"><NumberEdit value={value} onChange={onChange!} formatted /></div>}</div>; }
+
+
+function invoiceEditableSignature(invoice: Invoice) {
+  return JSON.stringify({
+    number: invoice.number,
+    date: invoice.date,
+    customerId: invoice.customerId,
+    customerName: invoice.customerName,
+    customerPhone: invoice.customerPhone,
+    customerAddress: invoice.customerAddress,
+    customerNationalId: invoice.customerNationalId || '',
+    customerEconomicCode: invoice.customerEconomicCode || '',
+    customerPostalCode: invoice.customerPostalCode || '',
+    items: invoice.items,
+    discount: invoice.discount,
+    tax: invoice.tax,
+    shipping: invoice.shipping,
+    notes: invoice.notes,
+  });
+}
+
+function auditActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    created: 'ایجاد پیش‌نویس',
+    draft_saved: 'ذخیره پیش‌نویس',
+    finalized: 'ثبت نهایی',
+    revised: 'ویرایش سند قطعی',
+    voided: 'ابطال سند',
+  };
+  return labels[action] || action;
+}
