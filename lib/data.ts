@@ -53,4 +53,5 @@ export const seedData: AccountingData = {
   checks: [
     { id: 'chk_1', direction: 'received', customerId: 'cus_mansouri', amount: 15000000, dueDate: '1405/03/20', number: '458721', bank: 'ملت', owner: 'پخش منصوری', status: 'pending' },
   ],
+  adjustments: [],
 };
