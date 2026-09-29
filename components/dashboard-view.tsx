@@ -14,7 +14,7 @@ export function DashboardView() {
   const totalSales = saleInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
   const totalPurchases = purchaseInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
   const receivable = saleInvoices.reduce((s, i) => s + Math.max(0, invoiceTotal(i) - settledForInvoice(i, payments, checks)), 0);
-  const inventoryValue = products.filter((p) => p.kind === 'product').reduce((s, p) => s + p.stock * p.buyPrice, 0);
+  const inventoryValue = products.filter((p) => p.kind === 'product').reduce((s, p) => s + p.stock * Number(p.averageCost ?? p.buyPrice ?? 0), 0);
   const pendingChecks = checks.filter((c) => c.status === 'pending');
   const lowStock = products.filter((p) => p.kind === 'product' && p.stock <= p.minStock);
 
