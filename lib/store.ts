@@ -291,21 +291,22 @@ function appendReturnAudit(document: ReturnDocument, action: ReturnAuditAction, 
 }
 
 function normalizeReturnItems(document: ReturnDocument, originalInvoice: Invoice): ReturnItem[] {
-  return document.items
-    .map((item) => {
-      const source = originalInvoice.items.find((original) => original.id === item.originalItemId);
-      if (!source) return null;
-      return {
-        id: item.id || uid('retrow'),
-        originalItemId: source.id,
-        productId: source.productId,
-        description: source.description,
-        unit: source.unit,
-        qty: Number(item.qty || 0),
-        unitPrice: Number(source.unitPrice || 0),
-      } satisfies ReturnItem;
-    })
-    .filter((item): item is ReturnItem => !!item && item.qty > 0);
+  const items: ReturnItem[] = [];
+  for (const item of document.items) {
+    const source = originalInvoice.items.find((original) => original.id === item.originalItemId);
+    const qty = Number(item.qty || 0);
+    if (!source || qty <= 0) continue;
+    items.push({
+      id: item.id || uid('retrow'),
+      originalItemId: source.id,
+      productId: source.productId,
+      description: source.description,
+      unit: source.unit,
+      qty,
+      unitPrice: Number(source.unitPrice || 0),
+    });
+  }
+  return items;
 }
 
 function validateReturn(
