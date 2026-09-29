@@ -48,7 +48,7 @@ Tracker: #16
 
 ## M3 — گزارش، ذخیره‌سازی پایدار و v1.0
 
-- #10 گزارش‌ها و Export
+- #10 گزارش‌ها و Export ✅
 - #11 IndexedDB، Versioning و Backup امن
 - #12 PWA/Offline و UX
 - #13 تست خودکار و Release v1.0
