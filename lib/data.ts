@@ -47,6 +47,7 @@ export const seedData: AccountingData = {
       createdAt: '2026-09-01T09:00:00.000Z', updatedAt: '2026-09-01T09:00:00.000Z',
     },
   ],
+  returns: [],
   payments: [
     { id: 'pay_1', invoiceId: 'inv_demo', customerId: 'cus_mansouri', direction: 'receipt', method: 'card', amount: 12000000, date: '۱۴۰۵/۰۳/۰۵', reference: 'کارت به کارت' },
   ],
