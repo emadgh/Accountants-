@@ -1,14 +1,14 @@
 'use client';
 
 import {
-  BarChart3, Boxes, Building2, ChevronLeft, CircleDollarSign, ClipboardList,
+  BarChart3, BookOpen, Boxes, Building2, ChevronLeft, CircleDollarSign, ClipboardList,
   FilePlus2, FileText, Home, Menu, PackageSearch, ReceiptText, Settings,
   ShoppingCart, Users, WalletCards, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-export type ViewKey = 'dashboard' | 'sales' | 'sale-new' | 'purchases' | 'purchase-new' | 'customers' | 'products' | 'inventory' | 'payments' | 'checks' | 'reports' | 'settings';
+export type ViewKey = 'dashboard' | 'sales' | 'sale-new' | 'purchases' | 'purchase-new' | 'customers' | 'ledger' | 'products' | 'inventory' | 'payments' | 'checks' | 'reports' | 'settings';
 
 const sections = [
   { key: 'dashboard', label: 'داشبورد', icon: Home },
@@ -17,6 +17,7 @@ const sections = [
   { key: 'purchases', label: 'فاکتورهای خرید', icon: ShoppingCart },
   { key: 'purchase-new', label: 'فاکتور خرید جدید', icon: ClipboardList },
   { key: 'customers', label: 'مشتریان و تامین‌کنندگان', icon: Users },
+  { key: 'ledger', label: 'دفتر حساب طرف حساب', icon: BookOpen },
   { key: 'products', label: 'کالا و خدمات', icon: PackageSearch },
   { key: 'inventory', label: 'انبار', icon: Boxes },
   { key: 'payments', label: 'دریافت و پرداخت', icon: CircleDollarSign },

@@ -5,7 +5,7 @@ import { Menu } from 'lucide-react';
 import { Sidebar, type ViewKey } from '@/components/sidebar';
 import { DashboardView } from '@/components/dashboard-view';
 import { InvoiceEditor } from '@/components/invoice-editor';
-import { ChecksView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, ReportsView, SettingsView } from '@/components/management-views';
+import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, ReportsView, SettingsView } from '@/components/management-views';
 import { useAccountingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 
@@ -13,6 +13,7 @@ export function AccountingApp() {
   const [view, setView] = useState<ViewKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const hydrated = useAccountingStore((s) => s.hydrated);
   const setHydrated = useAccountingStore((s) => s.setHydrated);
 
@@ -48,7 +49,8 @@ export function AccountingApp() {
         {view === 'sale-new' && <InvoiceEditor kind="sale" invoiceId={selectedInvoiceId} onBack={() => setView('sales')} />}
         {view === 'purchases' && <InvoiceListView kind="purchase" onEdit={(id) => editInvoice(id, 'purchase')} onNew={() => { setSelectedInvoiceId(null); setView('purchase-new'); }} />}
         {view === 'purchase-new' && <InvoiceEditor kind="purchase" invoiceId={selectedInvoiceId} onBack={() => setView('purchases')} />}
-        {view === 'customers' && <CustomersView />}
+        {view === 'customers' && <CustomersView onOpenLedger={(id) => { setSelectedCustomerId(id); setView('ledger'); }} />}
+        {view === 'ledger' && <CustomerLedgerView initialCustomerId={selectedCustomerId} onOpenInvoice={editInvoice} />}
         {view === 'products' && <ProductsView />}
         {view === 'inventory' && <InventoryView />}
         {view === 'payments' && <PaymentsView />}

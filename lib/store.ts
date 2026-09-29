@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { seedData } from './data';
 import type {
+  AccountAdjustment,
   AccountingData,
   BusinessSettings,
   CheckRecord,
@@ -37,6 +38,7 @@ type Store = AccountingData & {
   deleteInvoice: (id: string) => StoreOperationResult;
   addPayment: (payment: Payment) => OperationResult;
   deletePayment: (id: string) => void;
+  addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
   upsertCheck: (check: CheckRecord) => OperationResult;
   deleteCheck: (id: string) => OperationResult;
   setSettings: (settings: BusinessSettings) => void;
@@ -144,7 +146,7 @@ function normalizeForDraft(invoice: Invoice, previous?: Invoice): Invoice {
   return { ...base, auditTrail: appendAudit(base, action, revision) };
 }
 
-function normalizeImportedPayments(data: AccountingData) {
+function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invoices'>) {
   return data.payments.map((payment) => {
     const invoice = payment.invoiceId ? data.invoices.find((item) => item.id === payment.invoiceId) : undefined;
     return {
@@ -152,6 +154,26 @@ function normalizeImportedPayments(data: AccountingData) {
       direction: resolvedPaymentDirection(payment, invoice),
     };
   });
+}
+
+function normalizeAccountingData(data: AccountingData): AccountingData {
+  const customers = (data.customers || []).map((customer) => ({
+    ...customer,
+    openingBalance: Number(customer.openingBalance || 0),
+  }));
+  const invoices = data.invoices || [];
+  const checks = data.checks || [];
+  const rawPayments = data.payments || [];
+  const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
+  return {
+    customers,
+    products: data.products || [],
+    invoices: withInvoiceStatuses(invoices, payments, checks),
+    payments,
+    checks,
+    adjustments: data.adjustments || [],
+    settings: { ...seedData.settings, ...(data.settings || {}) },
+  };
 }
 
 export const useAccountingStore = create<Store>()(
@@ -361,6 +383,27 @@ export const useAccountingStore = create<Store>()(
           };
         }),
 
+      addAdjustment: (adjustment) => {
+        const state = get();
+        if (!state.customers.some((customer) => customer.id === adjustment.customerId)) {
+          return { ok: false, message: 'طرف حساب اصلاحیه پیدا نشد.' };
+        }
+        if (!Number.isFinite(adjustment.amount) || Math.abs(adjustment.amount) < 0.0001) {
+          return { ok: false, message: 'مبلغ اصلاحیه باید بزرگ‌تر از صفر باشد.' };
+        }
+        if (!adjustment.note.trim()) {
+          return { ok: false, message: 'ثبت دلیل اصلاحیه الزامی است.' };
+        }
+        const normalized: AccountAdjustment = {
+          ...adjustment,
+          amount: Number(adjustment.amount),
+          note: adjustment.note.trim(),
+          createdAt: adjustment.createdAt || new Date().toISOString(),
+        };
+        set({ adjustments: [normalized, ...(state.adjustments || [])] });
+        return { ok: true };
+      },
+
       upsertCheck: (check) => {
         const state = get();
         const previous = state.checks.find((item) => item.id === check.id);
@@ -400,31 +443,34 @@ export const useAccountingStore = create<Store>()(
       setSettings: (settings) => set({ settings }),
 
       replaceAll: (data) => {
-        const payments = normalizeImportedPayments(data);
-        set({
-          ...data,
-          payments,
-          invoices: withInvoiceStatuses(data.invoices, payments, data.checks),
-        });
+        set(normalizeAccountingData(data));
       },
 
       resetAll: () => {
-        const payments = normalizeImportedPayments(seedData);
-        set({
-          ...seedData,
-          payments,
-          invoices: withInvoiceStatuses(seedData.invoices, payments, seedData.checks),
-        });
+        set(normalizeAccountingData(seedData));
       },
     }),
     {
       name: 'accountants-web-v1',
+      version: 2,
+      migrate: (persistedState: unknown) => {
+        const state = (persistedState || {}) as Partial<AccountingData>;
+        return {
+          ...state,
+          customers: (state.customers || []).map((customer) => ({
+            ...customer,
+            openingBalance: Number(customer.openingBalance || 0),
+          })),
+          adjustments: state.adjustments || [],
+        };
+      },
       partialize: (state) => ({
         customers: state.customers,
         products: state.products,
         invoices: state.invoices,
         payments: state.payments,
         checks: state.checks,
+        adjustments: state.adjustments,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),

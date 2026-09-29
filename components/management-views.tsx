@@ -1,14 +1,14 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock,
-  Check, CircleDollarSign, Download, Edit3, FileText, Package, Plus, Search, Settings2,
+  BookOpen, Check, CircleDollarSign, Download, Edit3, FileText, Package, Plus, Search, Settings2,
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { AccountingData, CheckRecord, Customer, InvoiceKind, Payment, Product } from '@/lib/types';
-import { customerNetBalance, effectivePaymentAmount, invoiceTotal, money, resolvedPaymentDirection, settledForInvoice, todayFa, uid } from '@/lib/utils';
+import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, todayFa, uid } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -45,16 +45,224 @@ function InvoiceStatus({ status }: { status: string }) {
   const [label, cls] = x[status] || [status, '']; return <Badge className={cls}>{label}</Badge>;
 }
 
-export function CustomersView() {
-  const { customers, invoices, payments, checks, upsertCustomer, deleteCustomer, settings } = useAccountingStore();
-  const [q, setQ] = useState(''); const [edit, setEdit] = useState<Customer | null>(null); const [open, setOpen] = useState(false);
-  const list = customers.filter((c) => (c.name + ' ' + c.phone + ' ' + c.code).toLowerCase().includes(q.toLowerCase()));
-  const balance = (id: string) => customerNetBalance(id, invoices, payments, checks);
-  const start = (c?: Customer) => { setEdit(c ? { ...c } : { id: uid('cus'), code: String(100000 + customers.length + 1), name: '', kind: 'customer', phone: '', address: '', nationalId: '', economicCode: '', postalCode: '' }); setOpen(true); };
-  return <div className="space-y-5"><PageHead title="مشتریان و تامین‌کنندگان" subtitle="دفتر طرف حساب، مشخصات رسمی و مانده حساب" action={<Button onClick={() => start()}><Plus className="h-4 w-4" /> طرف حساب جدید</Button>} />
-    <Card><CardHeader><SearchBox value={q} onChange={setQ} placeholder="نام، تلفن یا کد شخص..." /></CardHeader><div className="table-wrap"><table className="data-table"><thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>تلفن</th><th>آدرس</th><th>مانده حساب</th><th>عملیات</th></tr></thead><tbody>{list.map((c) => { const b = balance(c.id); return <tr key={c.id}><td className="font-bold">{c.code}</td><td className="font-bold">{c.name}</td><td>{c.kind === 'customer' ? 'مشتری' : c.kind === 'supplier' ? 'تامین‌کننده' : 'هر دو'}</td><td>{c.phone || '—'}</td><td className="max-w-xs truncate">{c.address || '—'}</td><td className={b > 0 ? 'font-black text-rose-600' : b < 0 ? 'font-black text-emerald-600' : 'font-bold'}>{money(Math.abs(b))} {settings.currency}{b > 0 ? ' بدهکار' : b < 0 ? ' بستانکار' : ''}</td><td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(c)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('طرف حساب حذف شود؟') && deleteCustomer(c.id)}><Trash2 className="h-4 w-4" /></Button></div></td></tr>; })}{!list.length && <EmptyRow cols={7} text="طرف حسابی پیدا نشد." />}</tbody></table></div></Card>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle className="text-lg font-black">{edit && customers.some((c) => c.id === edit.id) ? 'ویرایش طرف حساب' : 'طرف حساب جدید'}</DialogTitle><DialogDescription className="text-sm text-slate-500">اطلاعات حقوقی برای فاکتور رسمی قابل استفاده است.</DialogDescription></DialogHeader>{edit && <div className="grid gap-3 sm:grid-cols-2"><Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field><Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field><Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field><Field label="تلفن"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={edit.economicCode} onChange={(e) => setEdit({ ...edit, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={edit.postalCode} onChange={(e) => setEdit({ ...edit, postalCode: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field><div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertCustomer(edit); setOpen(false); }}><Check className="h-4 w-4" /> ذخیره</Button></div></div>}</DialogContent></Dialog>
+
+export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: string) => void }) {
+  const { customers, invoices, payments, checks, adjustments, upsertCustomer, deleteCustomer, settings } = useAccountingStore();
+  const [q, setQ] = useState('');
+  const [edit, setEdit] = useState<Customer | null>(null);
+  const [open, setOpen] = useState(false);
+  const list = customers.filter((customer) => (customer.name + ' ' + customer.phone + ' ' + customer.code).toLowerCase().includes(q.toLowerCase()));
+  const balance = (customer: Customer) => customerNetBalance(customer.id, invoices, payments, checks, adjustments, customer.openingBalance || 0);
+  const startEdit = (customer?: Customer) => {
+    setEdit(customer ? { ...customer } : {
+      id: uid('cus'),
+      code: String(100000 + customers.length + 1),
+      name: '',
+      kind: 'customer',
+      phone: '',
+      address: '',
+      nationalId: '',
+      economicCode: '',
+      postalCode: '',
+      openingBalance: 0,
+    });
+    setOpen(true);
+  };
+
+  return <div className="space-y-5">
+    <PageHead title="مشتریان و تامین‌کنندگان" subtitle="مشخصات رسمی، مانده حساب و دسترسی به دفتر گردش طرف حساب" action={<Button onClick={() => startEdit()}><Plus className="h-4 w-4" /> طرف حساب جدید</Button>} />
+    <Card>
+      <CardHeader><SearchBox value={q} onChange={setQ} placeholder="نام، تلفن یا کد شخص..." /></CardHeader>
+      <div className="table-wrap"><table className="data-table">
+        <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>تلفن</th><th>آدرس</th><th>مانده حساب</th><th>عملیات</th></tr></thead>
+        <tbody>
+          {list.map((customer) => {
+            const currentBalance = balance(customer);
+            return <tr key={customer.id}>
+              <td className="font-bold">{customer.code}</td>
+              <td className="font-bold">{customer.name}</td>
+              <td>{customer.kind === 'customer' ? 'مشتری' : customer.kind === 'supplier' ? 'تامین‌کننده' : 'هر دو'}</td>
+              <td>{customer.phone || '—'}</td>
+              <td className="max-w-xs truncate">{customer.address || '—'}</td>
+              <td className={currentBalance > 0 ? 'font-black text-rose-600' : currentBalance < 0 ? 'font-black text-emerald-600' : 'font-bold'}>
+                {money(Math.abs(currentBalance))} {settings.currency}{currentBalance > 0 ? ' بدهکار' : currentBalance < 0 ? ' بستانکار' : ''}
+              </td>
+              <td><div className="flex gap-1">
+                {onOpenLedger && <Button variant="ghost" size="icon" onClick={() => onOpenLedger(customer.id)} title="دفتر حساب"><BookOpen className="h-4 w-4" /></Button>}
+                <Button variant="ghost" size="icon" onClick={() => startEdit(customer)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('طرف حساب حذف شود؟') && deleteCustomer(customer.id)} title="حذف"><Trash2 className="h-4 w-4" /></Button>
+              </div></td>
+            </tr>;
+          })}
+          {!list.length && <EmptyRow cols={7} text="طرف حسابی پیدا نشد." />}
+        </tbody>
+      </table></div>
+    </Card>
+
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="text-lg font-black">{edit && customers.some((customer) => customer.id === edit.id) ? 'ویرایش طرف حساب' : 'طرف حساب جدید'}</DialogTitle>
+          <DialogDescription className="text-sm text-slate-500">اطلاعات حقوقی برای فاکتور رسمی قابل استفاده است. مانده اول دوره فقط هنگام ساخت طرف حساب تعیین می‌شود.</DialogDescription>
+        </DialogHeader>
+        {edit && <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+          <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
+          <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
+          <Field label="تلفن"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
+          <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
+          <Field label="کد اقتصادی"><Input value={edit.economicCode} onChange={(e) => setEdit({ ...edit, economicCode: e.target.value })} /></Field>
+          <Field label="کد پستی"><Input value={edit.postalCode} onChange={(e) => setEdit({ ...edit, postalCode: e.target.value })} /></Field>
+          <Field label="مانده اول دوره">
+            <Input type="number" disabled={customers.some((customer) => customer.id === edit.id)} className={customers.some((customer) => customer.id === edit.id) ? 'bg-slate-100' : ''} value={edit.openingBalance || 0} onChange={(e) => setEdit({ ...edit, openingBalance: Number(e.target.value) })} />
+            <span className="mt-1 block text-[10px] leading-5 text-slate-400">مثبت = بدهکار، منفی = بستانکار. اصلاحات بعدی از دفتر حساب ثبت می‌شوند.</span>
+          </Field>
+          <Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button>
+            <Button disabled={!edit.name.trim()} onClick={() => { upsertCustomer(edit); setOpen(false); }}><Check className="h-4 w-4" /> ذخیره</Button>
+          </div>
+        </div>}
+      </DialogContent>
+    </Dialog>
   </div>;
+}
+
+export function CustomerLedgerView({
+  initialCustomerId,
+  onOpenInvoice,
+}: {
+  initialCustomerId?: string | null;
+  onOpenInvoice?: (invoiceId: string, kind: InvoiceKind) => void;
+}) {
+  const { customers, invoices, payments, checks, adjustments, addAdjustment, settings } = useAccountingStore();
+  const [selectedId, setSelectedId] = useState(initialCustomerId || customers[0]?.id || '');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [filter, setFilter] = useState<'all' | 'invoice' | 'money' | 'check' | 'adjustment'>('all');
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustDirection, setAdjustDirection] = useState<'debit' | 'credit'>('debit');
+  const [adjustAmount, setAdjustAmount] = useState(0);
+  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustNote, setAdjustNote] = useState('');
+
+  useEffect(() => {
+    if (initialCustomerId) setSelectedId(initialCustomerId);
+  }, [initialCustomerId]);
+
+  const customer = customers.find((item) => item.id === selectedId);
+  const ledger = useMemo(
+    () => customer ? buildCustomerLedger(customer, invoices, payments, checks, adjustments) : [],
+    [customer, invoices, payments, checks, adjustments]
+  );
+  const fromKey = fromDate.trim() ? normalizeDateKey(fromDate) : '';
+  const toKey = toDate.trim() ? normalizeDateKey(toDate) : '';
+  const visible = ledger.filter((entry) => {
+    if (entry.kind === 'opening' && fromKey) return false;
+    const dateKey = entry.kind === 'opening' ? '0000-00-00' : normalizeDateKey(entry.date);
+    if (fromKey && dateKey < fromKey) return false;
+    if (toKey && dateKey > toKey) return false;
+    if (filter === 'all') return true;
+    if (filter === 'invoice') return entry.kind === 'sale' || entry.kind === 'purchase' || entry.kind === 'void';
+    if (filter === 'money') return entry.kind === 'receipt' || entry.kind === 'payment';
+    if (filter === 'check') return entry.kind === 'check' || ((entry.kind === 'receipt' || entry.kind === 'payment') && !!entry.status && entry.status !== 'effective');
+    return entry.kind === 'adjustment' || entry.kind === 'opening';
+  });
+  const currentBalance = ledger.length ? ledger[ledger.length - 1].balance : 0;
+  const visibleDebit = visible.reduce((sum, entry) => sum + entry.debit, 0);
+  const visibleCredit = visible.reduce((sum, entry) => sum + entry.credit, 0);
+
+  const submitAdjustment = () => {
+    if (!customer) return;
+    const amount = Math.abs(Number(adjustAmount || 0));
+    const result = addAdjustment({
+      id: uid('adj'),
+      customerId: customer.id,
+      date: adjustDate,
+      amount: adjustDirection === 'debit' ? amount : -amount,
+      note: adjustNote,
+      createdAt: new Date().toISOString(),
+    });
+    if (!result.ok) {
+      window.alert(result.message || 'ثبت اصلاحیه انجام نشد.');
+      return;
+    }
+    setAdjustAmount(0);
+    setAdjustNote('');
+    setAdjustDate(todayFa());
+    setAdjustOpen(false);
+  };
+
+  return <div className="space-y-5">
+    <PageHead title="دفتر حساب طرف حساب" subtitle="گردش بدهکار/بستانکار، مانده جاری، اسناد مبنا و اصلاحیه‌های قابل ردیابی" action={<Button disabled={!customer} onClick={() => setAdjustOpen(true)}><Plus className="h-4 w-4" /> ثبت اصلاحیه</Button>} />
+
+    <Card>
+      <CardContent className="grid gap-3 md:grid-cols-[1.3fr_.8fr_.8fr_1fr]">
+        <Field label="طرف حساب">
+          <select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+            <option value="">انتخاب...</option>{customers.map((item) => <option key={item.id} value={item.id}>{item.code} — {item.name}</option>)}
+          </select>
+        </Field>
+        <Field label="از تاریخ"><Input value={fromDate} onChange={(e) => setFromDate(e.target.value)} placeholder="۱۴۰۵/۰۱/۰۱" /></Field>
+        <Field label="تا تاریخ"><Input value={toDate} onChange={(e) => setToDate(e.target.value)} placeholder="۱۴۰۵/۱۲/۲۹" /></Field>
+        <Field label="نوع گردش"><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}><option value="all">همه</option><option value="invoice">فاکتورها</option><option value="money">دریافت / پرداخت</option><option value="check">چک‌ها</option><option value="adjustment">اول دوره / اصلاحیه</option></select></Field>
+      </CardContent>
+    </Card>
+
+    {customer ? <>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Metric icon={CircleDollarSign} title="مانده جاری" value={currentBalance === 0 ? '0 ' + settings.currency : money(Math.abs(currentBalance)) + ' ' + settings.currency + ' ' + (currentBalance > 0 ? 'بدهکار' : 'بستانکار')} danger={currentBalance > 0} />
+        <Metric icon={ArrowDownToLine} title="جمع بدهکار بازه" value={money(visibleDebit) + ' ' + settings.currency} />
+        <Metric icon={ArrowUpFromLine} title="جمع بستانکار بازه" value={money(visibleCredit) + ' ' + settings.currency} />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div><CardTitle>{customer.name}</CardTitle><div className="mt-1 text-xs text-slate-500">کد شخص {customer.code} · {visible.length} گردش در فیلتر فعلی</div></div>
+          <Badge className={currentBalance > 0 ? 'bg-rose-50 text-rose-700' : currentBalance < 0 ? 'bg-emerald-50 text-emerald-700' : ''}>{currentBalance > 0 ? 'بدهکار' : currentBalance < 0 ? 'بستانکار' : 'تسویه'}</Badge>
+        </CardHeader>
+        <div className="table-wrap"><table className="data-table min-w-[980px]">
+          <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th><th>مانده</th><th>وضعیت / سند</th></tr></thead>
+          <tbody>
+            {visible.map((entry) => <tr key={entry.id}>
+              <td>{entry.date || '—'}</td>
+              <td><div className="font-bold">{entry.title}</div>{entry.note && <div className="mt-1 max-w-[360px] text-[11px] leading-5 text-slate-500">{entry.note}</div>}{!entry.effective && entry.nominalAmount ? <div className="mt-1 text-[10px] text-amber-600">مبلغ اسمی {money(entry.nominalAmount)}؛ بدون اثر در مانده</div> : null}</td>
+              <td>{entry.reference || '—'}</td>
+              <td className="font-bold text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td>
+              <td className="font-bold text-emerald-700">{entry.credit ? money(entry.credit) : '—'}</td>
+              <td className={entry.balance > 0 ? 'font-black text-rose-700' : entry.balance < 0 ? 'font-black text-emerald-700' : 'font-black'}>{money(Math.abs(entry.balance))}{entry.balance > 0 ? ' بدهکار' : entry.balance < 0 ? ' بستانکار' : ''}</td>
+              <td><div className="flex items-center gap-2"><LedgerStatus status={entry.status} effective={entry.effective} kind={entry.kind} />{entry.invoiceId && entry.invoiceKind && onOpenInvoice && <Button variant="ghost" size="sm" onClick={() => onOpenInvoice(entry.invoiceId!, entry.invoiceKind!)}><FileText className="h-3.5 w-3.5" /> سند مبنا</Button>}</div></td>
+            </tr>)}
+            {!visible.length && <EmptyRow cols={7} text="گردشی مطابق فیلتر فعلی وجود ندارد." />}
+          </tbody>
+        </table></div>
+      </Card>
+    </> : <Card><CardContent className="py-16 text-center text-slate-400">برای مشاهده دفتر حساب، یک طرف حساب انتخاب کنید.</CardContent></Card>}
+
+    <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+      <DialogContent>
+        <DialogHeader><DialogTitle className="text-lg font-black">ثبت اصلاحیه حساب</DialogTitle><DialogDescription className="text-sm text-slate-500">اصلاحیه به‌عنوان یک گردش مستقل ذخیره می‌شود و مانده اول دوره یا اسناد قبلی را بازنویسی نمی‌کند.</DialogDescription></DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="نوع اصلاحیه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustDirection} onChange={(e) => setAdjustDirection(e.target.value as 'debit' | 'credit')}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
+          <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={adjustAmount} onChange={(e) => setAdjustAmount(Number(e.target.value))} /></Field>
+          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="طرف حساب"><Input value={customer?.name || ''} readOnly className="bg-slate-100" /></Field>
+          <Field label="دلیل اصلاحیه *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً اصلاح مانده انتقالی طبق سند..." /></Field>
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!customer || adjustAmount <= 0 || !adjustNote.trim()} onClick={submitAdjustment}>ثبت اصلاحیه</Button></div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </div>;
+}
+
+function LedgerStatus({ status, effective, kind }: { status?: string; effective: boolean; kind: string }) {
+  if (kind === 'opening') return <Badge>اول دوره</Badge>;
+  if (kind === 'adjustment') return <Badge className="bg-violet-50 text-violet-700">اصلاحیه</Badge>;
+  if (kind === 'void') return <Badge className="bg-rose-50 text-rose-700">باطل</Badge>;
+  if (status === 'pending') return <Badge className="bg-amber-50 text-amber-700">در انتظار</Badge>;
+  if (status === 'bounced') return <Badge className="bg-rose-50 text-rose-700">برگشتی</Badge>;
+  if (status === 'cleared') return <Badge className="bg-emerald-50 text-emerald-700">وصول / پاس</Badge>;
+  return effective ? <Badge className="bg-emerald-50 text-emerald-700">موثر</Badge> : <Badge>اطلاعاتی</Badge>;
 }
 
 export function ProductsView() {
@@ -352,7 +560,7 @@ export function ReportsView() {
 
 export function SettingsView() {
   const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
-  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, payments: store.payments, checks: store.checks, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
+  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, payments: store.payments, checks: store.checks, adjustments: store.adjustments, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); replaceAll(parsed); setDraft(parsed.settings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
   return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
     <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><div className="sm:col-span-2 flex justify-end"><Button onClick={() => setSettings(draft)}>ذخیره تنظیمات</Button></div></CardContent></Card>
