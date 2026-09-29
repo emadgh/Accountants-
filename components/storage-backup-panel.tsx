@@ -25,6 +25,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricCard } from '@/components/ui/metric-card';
+import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { confirmDialog, notify } from '@/lib/feedback';
 
@@ -179,9 +181,9 @@ export function StorageBackupPanel() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Backend</div><div className="mt-1 font-black">{storageInfo?.backend || '...'}</div></div>
-          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">Schema</div><div className="mt-1 font-black">v{storageInfo?.schemaVersion || '—'}</div></div>
-          <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] text-slate-500">حجم داده Persist</div><div className="mt-1 font-black">{formatBytes(storageInfo?.payloadSize || 0)}</div></div>
+          <MetricCard size="sm" title="Backend" value={storageInfo?.backend || '...'} rolling={false} tone="info" />
+          <MetricCard size="sm" title="Schema" value={storageInfo ? `v${storageInfo.schemaVersion}` : '—'} rolling={false} />
+          <MetricCard size="sm" title="حجم داده Persist" value={formatBytes(storageInfo?.payloadSize || 0)} rolling={false} tone="purple" />
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
@@ -224,9 +226,12 @@ export function StorageBackupPanel() {
           <DialogDescription className="text-sm text-slate-500">قبل از جایگزینی داده‌ها، محتوا و نسخه فایل بررسی شده است. وضعیت فعلی نیز Snapshot می‌شود.</DialogDescription>
         </DialogHeader>
         {candidate && <div className="space-y-4">
-          <div className="rounded-xl bg-slate-50 p-3 text-sm"><div className="font-black">{candidate.filename}</div><div className="mt-1 text-xs text-slate-500">{candidate.preview.source === 'legacy' ? 'Backup قدیمی' : 'Backup نسخه‌دار'} · Schema v{candidate.preview.schemaVersion || 0}{candidate.preview.checksumVerified === true ? ' · Checksum تایید شد' : ''}</div></div>
-          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['مرجوعی', candidate.preview.returns], ['پرداخت', candidate.preview.payments], ['چک', candidate.preview.checks], ['Journal', candidate.preview.journalEntries], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-slate-200 p-2"><div className="text-[10px] text-slate-500">{label}</div><div className="mt-1 font-black">{value}</div></div>)}
+          <Panel variant="subtle" padding="sm">
+            <div className="font-black">{candidate.filename}</div>
+            <div className="mt-1 text-xs text-slate-500">{candidate.preview.source === 'legacy' ? 'Backup قدیمی' : 'Backup نسخه‌دار'} · Schema v{candidate.preview.schemaVersion || 0}{candidate.preview.checksumVerified === true ? ' · Checksum تایید شد' : ''}</div>
+          </Panel>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['مرجوعی', candidate.preview.returns], ['پرداخت', candidate.preview.payments], ['چک', candidate.preview.checks], ['Journal', candidate.preview.journalEntries], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <MetricCard key={String(label)} size="sm" title={String(label)} value={Number(value)} align="center" />)}
           </div>
           {!!candidate.preview.warnings.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-6 text-amber-800">{candidate.preview.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}
           <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setCandidate(null)}>انصراف</Button><Button disabled={busy} onClick={() => void confirmImport()}><RotateCcw className="h-4 w-4" /> تایید و بازیابی</Button></div>
