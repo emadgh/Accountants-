@@ -33,7 +33,15 @@ export interface YasMigrationMessage {
 }
 
 export interface YasReconciliationRow {
-  kind: 'customer-balance' | 'product-stock' | 'sales-total' | 'payment-total';
+  kind:
+    | 'customer-count'
+    | 'product-count'
+    | 'invoice-count'
+    | 'payment-count'
+    | 'customer-balance'
+    | 'product-stock'
+    | 'sales-total'
+    | 'payment-total';
   key: string;
   label: string;
   source: number;
@@ -57,6 +65,7 @@ export interface YasMigrationReport {
     invoiceItems: string[];
     payments: string[];
     income?: string;
+    financialAccounts: string[];
     signature?: string;
   };
   counts: {
@@ -110,7 +119,8 @@ const aliases = {
   details: ['details', 'description', 'tozihat', 'sharh', 'note', 'notes'],
   kind: ['kind', 'type', 'noe', 'doctype', 'factortype', 'factor_type'],
   direction: ['direction', 'type', 'noe', 'paymenttype'],
-  method: ['method', 'paymentmethod', 'noepardakht'],
+  method: ['method', 'paymentmethod', 'noepardakht', 'noehesab'],
+  settlementRef: ['settlementaccountid', 'settlement_account_id', 'accountid', 'account_id', 'hesabmali', 'hesab', 'sandogh', 'bankid', 'bank_id', 'codehesab', 'codemali'],
   balance: ['balance', 'mande', 'mandeh', 'remaining', 'baghimande'],
   businessName: ['businessname', 'companyname', 'shopname', 'namforoshgah', 'nameforoshgah'],
 };
@@ -277,6 +287,35 @@ function inferPaymentDirection(table: ExternalSqliteTable, row: Row): Payment['d
     : 'receipt';
 }
 
+function inferPaymentMethod(table: ExternalSqliteTable, row: Row, financialAccountNames: Map<string, string>): Payment['method'] {
+  const settlementRef = text(value(row, aliases.settlementRef));
+  const accountLabel = financialAccountNames.get(normalizeName(settlementRef)) || '';
+  const raw = normalizeName(
+    [text(value(row, aliases.method)), settlementRef, accountLabel, table.name].filter(Boolean).join(' ')
+  );
+  if (raw.includes('check') || raw.includes(normalizeName('چک'))) return 'check';
+  if (
+    raw.includes('bank') ||
+    raw.includes('card') ||
+    raw.includes(normalizeName('بانک')) ||
+    raw.includes(normalizeName('کارت')) ||
+    raw.includes(normalizeName('واریز'))
+  ) return 'card';
+  return 'cash';
+}
+
+function findDuplicates(values: string[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const raw of values) {
+    const key = normalizeName(raw);
+    if (!key) continue;
+    if (seen.has(key)) duplicates.add(raw);
+    else seen.add(key);
+  }
+  return [...duplicates];
+}
+
 function blobToDataUrl(input: ExternalSqliteValue | undefined) {
   if (!input || typeof input !== 'object' || !('__blobBase64' in input)) return undefined;
   const base64 = input.__blobBase64;
@@ -422,6 +461,24 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   const paymentTables = matchingTables(snapshot, scorePayment, 9);
   const signatureTable = snapshot.tables.find((table) => tableNameIncludes(table, ['signbitmap', 'signature']));
   const incomeTable = snapshot.tables.find((table) => !isDerivedTable(table) && tableNameIncludes(table, ['income', 'daramad', 'درآمد']));
+  const financialAccountTables = snapshot.tables.filter(
+    (table) =>
+      !isDerivedTable(table) &&
+      table.rowCount <= 100 &&
+      tableNameIncludes(table, ['financialaccount', 'bankaccount', 'hesabmali', 'hesabha', 'sandogh', 'bank', 'accounts'])
+  );
+  const financialAccountNames = new Map<string, string>();
+  for (const table of financialAccountTables) {
+    table.rows.forEach((row, index) => {
+      const label = text(value(row, aliases.name)) || text(value(row, aliases.details)) || 'حساب مالی ' + (index + 1);
+      const refCandidates = [
+        text(value(row, aliases.id)),
+        text(value(row, aliases.code)),
+        label,
+      ].filter(Boolean);
+      refCandidates.forEach((candidate) => financialAccountNames.set(normalizeName(candidate), label));
+    });
+  }
 
   if (!customerTable) messages.push({ severity: 'conflict', code: 'customers-table-missing', message: 'جدول طرف‌حساب‌ها با اطمینان کافی شناسایی نشد.' });
   if (!productTable) messages.push({ severity: 'warning', code: 'products-table-missing', message: 'جدول کالا/خدمت با اطمینان کافی شناسایی نشد.' });
@@ -571,6 +628,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   }
 
   const payments: Payment[] = [];
+  const sourcePaymentDocumentNumbers: string[] = [];
   for (const table of paymentTables) {
     for (let index = 0; index < table.rows.length; index++) {
       const row = table.rows[index];
@@ -585,13 +643,14 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       const linkedInvoice = invoiceSourceMap.get(normalizeName(invoiceRef));
       const direction = inferPaymentDirection(table, row);
       const documentNumber = text(value(row, aliases.number)) || (direction === 'receipt' ? 'YR-' : 'YP-') + String(payments.length + 1).padStart(6, '0');
+      sourcePaymentDocumentNumbers.push(documentNumber);
       payments.push({
         id: 'yas_payment_' + keyPart(source, String(index + 1)),
         documentNumber,
         invoiceId: linkedInvoice?.id,
         customerId: customer.id,
         direction,
-        method: 'cash',
+        method: inferPaymentMethod(table, row, financialAccountNames),
         amount: Math.abs(number(value(row, aliases.amount))),
         date: safeDate(value(row, aliases.date)),
         reference: text(value(row, aliases.details)) || source,
@@ -662,12 +721,48 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   };
 
   const data = normalizeAccountingData(draftData);
-  const duplicates = currentDuplicates(current, data);
+  const sourceDuplicates = [
+    ...findDuplicates(data.customers.map((item) => item.code)).map((item) => 'کد طرف‌حساب تکراری در Yas: ' + item),
+    ...findDuplicates(data.products.map((item) => item.code)).map((item) => 'کد کالا/خدمت تکراری در Yas: ' + item),
+    ...findDuplicates(sourcePaymentDocumentNumbers).map((item) => 'شماره سند دریافت/پرداخت تکراری در Yas: ' + item),
+  ];
+  const duplicates = [...sourceDuplicates, ...currentDuplicates(current, data)];
+  if (sourceDuplicates.some((item) => item.includes('شماره سند دریافت/پرداخت'))) {
+    messages.push({
+      severity: 'conflict',
+      code: 'duplicate-payment-document',
+      message: 'شماره سند تکراری در دریافت/پرداخت Yas وجود دارد و با Unique Constraint مقصد سازگار نیست.',
+    });
+  }
   if (duplicates.length) {
     messages.push({ severity: 'warning', code: 'duplicates-current-db', message: duplicates.length + ' مورد مشابه در دیتابیس فعلی شناسایی شد. Import به‌صورت Replace انجام می‌شود، نه Merge.' });
   }
 
   const reconciliation: YasReconciliationRow[] = [];
+
+  const sourceInvoiceKeys = new Set<string>();
+  for (const table of invoiceTables) {
+    table.rows.forEach((row, index) => {
+      const source = sourceKey(row, index);
+      const numberValue = text(value(row, aliases.number)) || source;
+      sourceInvoiceKeys.add(inferInvoiceKind(table, row) + ':' + numberValue);
+    });
+  }
+  const addCountReconciliation = (kind: YasReconciliationRow['kind'], key: string, label: string, source: number, imported: number) => {
+    reconciliation.push({
+      kind,
+      key,
+      label,
+      source,
+      imported,
+      difference: imported - source,
+      status: imported === source ? 'ok' : 'mismatch',
+    });
+  };
+  addCountReconciliation('customer-count', 'customers', 'تعداد طرف‌حساب‌ها', customerTable?.rowCount || 0, data.customers.length);
+  addCountReconciliation('product-count', 'products', 'تعداد کالا/خدمت', productTable?.rowCount || 0, data.products.length);
+  addCountReconciliation('invoice-count', 'invoices', 'تعداد فاکتورها', sourceInvoiceKeys.size, data.invoices.length);
+  addCountReconciliation('payment-count', 'payments', 'تعداد دریافت/پرداخت', paymentTables.reduce((sum, table) => sum + table.rowCount, 0), data.payments.length);
 
   const sourceSaleTotal = invoiceTables.flatMap((table) => table.rows.map((row) => ({ table, row })))
     .filter(({ table, row }) => inferInvoiceKind(table, row) === 'sale')
@@ -751,6 +846,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       invoiceItems: itemTables.map((table) => table.name),
       payments: paymentTables.map((table) => table.name),
       income: incomeTable?.name,
+      financialAccounts: financialAccountTables.map((table) => table.name),
       signature: signatureTable?.name,
     },
     counts: {
