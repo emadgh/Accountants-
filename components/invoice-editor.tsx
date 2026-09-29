@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Ban, CheckCircle2, Copy, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { BusinessProfile, Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
-import { invoiceTotal, money, uid } from '@/lib/utils';
+import { invoiceLineDiscount, invoiceLineGross, invoiceLineNet, invoiceTotal, money, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ function blankInvoice(kind: InvoiceKind, customerName = '', number = '', busines
     status: 'draft',
     date: todayIso(),
     customerId: '', customerName, customerPhone: '', customerAddress: '', customerNationalId: '', customerEconomicCode: '', customerPostalCode: '',
-    items: [{ id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }],
+    items: [{ id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0, discount: 0 }],
     discount: 0, tax: 0, shipping: 0, notes: '', createdAt: now, updatedAt: now,
   };
 }
@@ -42,7 +42,9 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind), settings.defaultBusinessProfileId));
   }, [existing?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const subtotal = invoice.items.reduce((s, i) => s + Number(i.qty || 0) * Number(i.unitPrice || 0), 0);
+  const grossSubtotal = invoice.items.reduce((sum, item) => sum + invoiceLineGross(item), 0);
+  const lineDiscountTotal = invoice.items.reduce((sum, item) => sum + invoiceLineDiscount(item), 0);
+  const subtotal = invoice.items.reduce((sum, item) => sum + invoiceLineNet(item), 0);
   const total = invoiceTotal(invoice);
   const customer = customers.find((c) => c.id === invoice.customerId);
   const businessProfile = settings.businessProfiles.find((profile) => profile.id === invoice.businessProfileId)
@@ -63,7 +65,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   const customerOptions: SearchableOption[] = [
     { value: '', label: 'ورود دستی', description: 'نام و اطلاعات طرف حساب را دستی وارد کنید' },
     ...customers
-      .filter((c) => invoice.kind === 'sale' ? c.kind !== 'supplier' : c.kind !== 'customer')
+      .filter((c) => (c.status !== 'archived' || c.id === invoice.customerId) && (invoice.kind === 'sale' ? c.kind !== 'supplier' : c.kind !== 'customer'))
       .map((c) => ({
         value: c.id,
         label: c.name,
@@ -189,7 +191,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
 
   const addRow = () => {
     if (isVoid) return;
-    patch('items', [...invoice.items, { id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }]);
+    patch('items', [...invoice.items, { id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0, discount: 0 }]);
   };
 
   useEffect(() => {
@@ -293,8 +295,8 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       </div>
 
       <div className="invoice-table-scroll mt-2"><table className="invoice-grid-table">
-        <colgroup><col style={{ width: '7%' }} /><col style={{ width: '38%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} /><col style={{ width: '16%' }} /><col style={{ width: '18%' }} /></colgroup>
-        <thead><tr><th>ردیف</th><th>شرح کالا / خدمت</th><th>مقدار</th><th>واحد</th><th>قیمت واحد</th><th>مبلغ کل</th><th className="screen-only !w-8"></th></tr></thead>
+        <colgroup><col style={{ width: '6%' }} /><col style={{ width: '32%' }} /><col style={{ width: '9%' }} /><col style={{ width: '9%' }} /><col style={{ width: '14%' }} /><col style={{ width: '14%' }} /><col style={{ width: '16%' }} /></colgroup>
+        <thead><tr><th>ردیف</th><th>شرح کالا / خدمت</th><th>مقدار</th><th>واحد</th><th>قیمت واحد</th><th>تخفیف ردیف</th><th>مبلغ خالص</th><th className="screen-only !w-8"></th></tr></thead>
         <tbody>{invoice.items.map((item, index) => <tr key={item.id}>
           <td className="text-center font-bold">{index + 1}</td>
           <td>
@@ -307,7 +309,14 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           <td><NumberEdit value={item.qty} onChange={(v) => patchItem(item.id, { qty: v })} /></td>
           <td><EditableText value={item.unit} onChange={(v) => patchItem(item.id, { unit: v })} className="text-center" /></td>
           <td><NumberEdit value={item.unitPrice} onChange={(v) => patchItem(item.id, { unitPrice: v })} formatted /></td>
-          <td className="text-left font-bold" dir="ltr">{money(item.qty * item.unitPrice)}</td>
+          <td>
+            <NumberEdit value={Number(item.discount || 0)} onChange={(v) => patchItem(item.id, { discount: Math.min(invoiceLineGross(item), v) })} formatted />
+            {!!item.discountPercent && <div className="print-only text-[9px] text-slate-400">{item.discountPercent}%</div>}
+          </td>
+          <td className="text-left font-bold" dir="ltr">
+            <span>{money(invoiceLineNet(item))}</span>
+            {invoiceLineDiscount(item) > 0 && <div className="print-only text-[9px] font-normal text-slate-400">ناخالص {money(invoiceLineGross(item))}</div>}
+          </td>
           <td className="screen-only"><button aria-label="حذف ردیف" className="rounded-lg p-1 text-rose-500 hover:bg-rose-50" onClick={() => patch('items', invoice.items.filter((x) => x.id !== item.id))}><Trash2 className="h-4 w-4" /></button></td>
         </tr>)}</tbody>
       </table></div>
@@ -318,8 +327,10 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           <EditableArea value={invoice.notes} onChange={(v) => patch('notes', v)} placeholder="توضیحات فاکتور..." />
         </div>
         <div className="order-1 space-y-1 text-[12px] sm:order-2">
-          <AmountLine label="جمع جزء" value={subtotal} fixed />
-          <AmountLine label="تخفیف" value={invoice.discount} onChange={(v) => patch('discount', v)} />
+          <AmountLine label="جمع ناخالص ردیف‌ها" value={grossSubtotal} fixed />
+          {lineDiscountTotal > 0 && <AmountLine label="تخفیف ردیف‌ها" value={lineDiscountTotal} fixed />}
+          <AmountLine label="جمع خالص ردیف‌ها" value={subtotal} fixed />
+          <AmountLine label="تخفیف کل فاکتور" value={invoice.discount} onChange={(v) => patch('discount', v)} />
           <AmountLine label="مالیات / عوارض" value={invoice.tax} onChange={(v) => patch('tax', v)} />
           <AmountLine label="هزینه حمل" value={invoice.shipping} onChange={(v) => patch('shipping', v)} />
           <div className="mt-2 flex items-center justify-between border-t border-sky-200 pt-3 text-sky-700"><span className="text-[14px] font-black">مبلغ فاکتور:</span><span className="text-[16px] font-black" dir="ltr">{money(total)} <small className="text-[11px]">{settings.currency}</small></span></div>
@@ -336,7 +347,15 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <div className="text-slate-500"><EditableArea value={businessProfile?.footer || ''} onChange={(v) => updateBusinessProfile({ footer: v })} placeholder="پاورقی فاکتور..." /></div>
       </div>
 
-      <div className="invoice-signatures mt-20 grid grid-cols-2 text-center text-[12px]"><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده</div><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div></div>
+      <div className="invoice-signatures mt-16 grid grid-cols-2 text-center text-[12px]">
+        <div className="flex min-h-24 flex-col items-center justify-end">
+          {businessProfile?.signatureImage && businessProfile.showSignature !== false
+            ? <img src={businessProfile.signatureImage} alt="امضای فروشنده" className="mb-2 max-h-16 max-w-40 object-contain" />
+            : <div className="mb-12" />}
+          <div className="mx-auto mb-2 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده
+        </div>
+        <div className="flex min-h-24 flex-col items-center justify-end"><div className="mb-12" /><div className="mx-auto mb-2 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div>
+      </div>
       </fieldset>
     </div>
 
