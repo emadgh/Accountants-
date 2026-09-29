@@ -3,6 +3,7 @@ export type ProductKind = 'product' | 'service';
 export type InvoiceKind = 'sale' | 'purchase';
 export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
 export type PaymentMethod = 'cash' | 'card' | 'check';
+export type PaymentDirection = 'receipt' | 'payment';
 export type CheckStatus = 'pending' | 'cleared' | 'bounced';
 
 export interface Customer {
@@ -82,7 +83,9 @@ export interface Payment {
   id: string;
   invoiceId?: string;
   customerId: string;
+  direction: PaymentDirection;
   method: PaymentMethod;
+  checkId?: string;
   amount: number;
   date: string;
   reference?: string;
@@ -128,8 +131,11 @@ export interface AccountingData {
   settings: BusinessSettings;
 }
 
-export interface StoreOperationResult {
+export interface OperationResult {
   ok: boolean;
   message?: string;
+}
+
+export interface StoreOperationResult extends OperationResult {
   invoice?: Invoice;
 }

@@ -10,11 +10,18 @@ import type {
   Customer,
   Invoice,
   InvoiceAuditAction,
+  OperationResult,
   Payment,
   Product,
   StoreOperationResult,
 } from './types';
-import { invoiceTotal, uid } from './utils';
+import {
+  expectedPaymentDirection,
+  invoiceTotal,
+  resolvedPaymentDirection,
+  settledForInvoice,
+  uid,
+} from './utils';
 
 type Store = AccountingData & {
   hydrated: boolean;
@@ -28,10 +35,10 @@ type Store = AccountingData & {
   reviseInvoice: (invoice: Invoice, reason: string) => StoreOperationResult;
   voidInvoice: (id: string, reason: string) => StoreOperationResult;
   deleteInvoice: (id: string) => StoreOperationResult;
-  addPayment: (payment: Payment) => void;
+  addPayment: (payment: Payment) => OperationResult;
   deletePayment: (id: string) => void;
-  upsertCheck: (check: CheckRecord) => void;
-  deleteCheck: (id: string) => void;
+  upsertCheck: (check: CheckRecord) => OperationResult;
+  deleteCheck: (id: string) => OperationResult;
   setSettings: (settings: BusinessSettings) => void;
   replaceAll: (data: AccountingData) => void;
   resetAll: () => void;
@@ -54,12 +61,12 @@ function applyInventory(products: Product[], invoice: Invoice, direction: 1 | -1
   return Array.from(map.values());
 }
 
-function withInvoiceStatuses(invoices: Invoice[], payments: Payment[]) {
+function withInvoiceStatuses(invoices: Invoice[], payments: Payment[], checks: CheckRecord[]) {
   return invoices.map((invoice) => {
     if (invoice.status === 'draft' || invoice.status === 'void') return invoice;
-    const paid = payments.filter((p) => p.invoiceId === invoice.id).reduce((s, p) => s + p.amount, 0);
+    const settled = settledForInvoice(invoice, payments, checks);
     const total = invoiceTotal(invoice);
-    const status: Invoice['status'] = paid <= 0 ? 'final' : paid >= total ? 'settled' : 'partial';
+    const status: Invoice['status'] = settled <= 0 ? 'final' : settled >= total ? 'settled' : 'partial';
     return { ...invoice, status };
   });
 }
@@ -137,6 +144,16 @@ function normalizeForDraft(invoice: Invoice, previous?: Invoice): Invoice {
   return { ...base, auditTrail: appendAudit(base, action, revision) };
 }
 
+function normalizeImportedPayments(data: AccountingData) {
+  return data.payments.map((payment) => {
+    const invoice = payment.invoiceId ? data.invoices.find((item) => item.id === payment.invoiceId) : undefined;
+    return {
+      ...payment,
+      direction: resolvedPaymentDirection(payment, invoice),
+    };
+  });
+}
+
 export const useAccountingStore = create<Store>()(
   persist(
     (set, get) => ({
@@ -205,7 +222,7 @@ export const useAccountingStore = create<Store>()(
         const merged = previous
           ? state.invoices.map((item) => (item.id === next.id ? next : item))
           : [next, ...state.invoices];
-        const invoices = withInvoiceStatuses(merged, state.payments);
+        const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
         const saved = invoices.find((item) => item.id === next.id) || next;
         set({ products, invoices });
         return { ok: true, invoice: saved };
@@ -243,7 +260,7 @@ export const useAccountingStore = create<Store>()(
 
         const products = applyInventory(baseProducts, next, 1);
         const merged = state.invoices.map((item) => (item.id === next.id ? next : item));
-        const invoices = withInvoiceStatuses(merged, state.payments);
+        const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
         const saved = invoices.find((item) => item.id === next.id) || next;
         set({ products, invoices });
         return { ok: true, invoice: saved };
@@ -257,7 +274,7 @@ export const useAccountingStore = create<Store>()(
         }
         if (!reason.trim()) return { ok: false, message: 'دلیل ابطال را وارد کنید.' };
         if (state.payments.some((payment) => payment.invoiceId === id)) {
-          return { ok: false, message: 'این فاکتور پرداخت/دریافت متصل دارد. ابتدا تراکنش‌های مرتبط را اصلاح یا حذف کنید.' };
+          return { ok: false, message: 'این فاکتور دریافت/پرداخت متصل دارد. ابتدا تراکنش‌های مرتبط را اصلاح یا حذف کنید.' };
         }
 
         const now = new Date().toISOString();
@@ -287,40 +304,128 @@ export const useAccountingStore = create<Store>()(
         return { ok: true };
       },
 
-      addPayment: (payment) =>
-        set((s) => {
-          const payments = [payment, ...s.payments];
-          return { payments, invoices: withInvoiceStatuses(s.invoices, payments) };
-        }),
+      addPayment: (payment) => {
+        const state = get();
+        if (!payment.customerId) return { ok: false, message: 'طرف حساب را انتخاب کنید.' };
+        if (!Number.isFinite(payment.amount) || payment.amount <= 0) {
+          return { ok: false, message: 'مبلغ تراکنش باید بزرگ‌تر از صفر باشد.' };
+        }
+
+        const linkedInvoice = payment.invoiceId
+          ? state.invoices.find((invoice) => invoice.id === payment.invoiceId)
+          : undefined;
+        if (payment.invoiceId && !linkedInvoice) return { ok: false, message: 'فاکتور مرتبط پیدا نشد.' };
+        if (linkedInvoice && (linkedInvoice.status === 'draft' || linkedInvoice.status === 'void')) {
+          return { ok: false, message: 'به پیش‌نویس یا فاکتور باطل نمی‌توان تراکنش متصل کرد.' };
+        }
+
+        let normalized: Payment = {
+          ...payment,
+          direction: linkedInvoice ? expectedPaymentDirection(linkedInvoice) : payment.direction,
+          customerId: linkedInvoice ? linkedInvoice.customerId : payment.customerId,
+        };
+
+        if (normalized.method === 'check') {
+          if (!normalized.checkId) return { ok: false, message: 'برای روش چک، یک چک ثبت‌شده را انتخاب کنید.' };
+          const check = state.checks.find((item) => item.id === normalized.checkId);
+          if (!check) return { ok: false, message: 'چک انتخاب‌شده پیدا نشد.' };
+          const expectedCheckDirection = normalized.direction === 'receipt' ? 'received' : 'issued';
+          if (check.direction !== expectedCheckDirection) {
+            return { ok: false, message: 'نوع چک با جهت دریافت/پرداخت سازگار نیست.' };
+          }
+          if (check.customerId !== normalized.customerId) {
+            return { ok: false, message: 'طرف حساب چک با طرف حساب تراکنش یکسان نیست.' };
+          }
+          if (Math.abs(Number(check.amount) - Number(normalized.amount)) > 0.0001) {
+            return { ok: false, message: 'مبلغ تراکنش چکی باید با مبلغ چک برابر باشد.' };
+          }
+          if (state.payments.some((item) => item.checkId === normalized.checkId)) {
+            return { ok: false, message: 'این چک قبلاً به یک تراکنش متصل شده است.' };
+          }
+        } else {
+          normalized = { ...normalized, checkId: undefined };
+        }
+
+        const payments = [normalized, ...state.payments];
+        const invoices = withInvoiceStatuses(state.invoices, payments, state.checks);
+        set({ payments, invoices });
+        return { ok: true };
+      },
 
       deletePayment: (id) =>
-        set((s) => {
-          const payments = s.payments.filter((p) => p.id !== id);
-          return { payments, invoices: withInvoiceStatuses(s.invoices, payments) };
+        set((state) => {
+          const payments = state.payments.filter((payment) => payment.id !== id);
+          return {
+            payments,
+            invoices: withInvoiceStatuses(state.invoices, payments, state.checks),
+          };
         }),
 
-      upsertCheck: (check) =>
-        set((s) => ({
-          checks: s.checks.some((c) => c.id === check.id)
-            ? s.checks.map((c) => (c.id === check.id ? check : c))
-            : [check, ...s.checks],
-        })),
+      upsertCheck: (check) => {
+        const state = get();
+        const previous = state.checks.find((item) => item.id === check.id);
+        const linkedPayment = state.payments.find((payment) => payment.checkId === check.id);
 
-      deleteCheck: (id) => set((s) => ({ checks: s.checks.filter((c) => c.id !== id) })),
+        if (linkedPayment && previous) {
+          const structuralChange =
+            previous.customerId !== check.customerId ||
+            previous.direction !== check.direction ||
+            Math.abs(Number(previous.amount) - Number(check.amount)) > 0.0001;
+          if (structuralChange) {
+            return {
+              ok: false,
+              message: 'چک به یک تراکنش متصل است؛ طرف حساب، نوع و مبلغ آن قابل تغییر نیست. وضعیت، سررسید و اطلاعات بانکی قابل ویرایش‌اند.',
+            };
+          }
+        }
+
+        const checks = previous
+          ? state.checks.map((item) => (item.id === check.id ? check : item))
+          : [check, ...state.checks];
+        const invoices = withInvoiceStatuses(state.invoices, state.payments, checks);
+        set({ checks, invoices });
+        return { ok: true };
+      },
+
+      deleteCheck: (id) => {
+        const state = get();
+        if (state.payments.some((payment) => payment.checkId === id)) {
+          return { ok: false, message: 'این چک به تراکنش متصل است و قابل حذف نیست. ابتدا تراکنش مرتبط را حذف کنید.' };
+        }
+        const checks = state.checks.filter((check) => check.id !== id);
+        set({ checks, invoices: withInvoiceStatuses(state.invoices, state.payments, checks) });
+        return { ok: true };
+      },
 
       setSettings: (settings) => set({ settings }),
-      replaceAll: (data) => set({ ...data }),
-      resetAll: () => set({ ...seedData }),
+
+      replaceAll: (data) => {
+        const payments = normalizeImportedPayments(data);
+        set({
+          ...data,
+          payments,
+          invoices: withInvoiceStatuses(data.invoices, payments, data.checks),
+        });
+      },
+
+      resetAll: () => {
+        const payments = normalizeImportedPayments(seedData);
+        set({
+          ...seedData,
+          payments,
+          invoices: withInvoiceStatuses(seedData.invoices, payments, seedData.checks),
+        });
+      },
     }),
     {
       name: 'accountants-web-v1',
-      partialize: (s) => ({
-        customers: s.customers,
-        products: s.products,
-        invoices: s.invoices,
-        payments: s.payments,
-        checks: s.checks,
-        settings: s.settings,
+      partialize: (state) => ({
+        customers: state.customers,
+        products: state.products,
+        invoices: state.invoices,
+        payments: state.payments,
+        checks: state.checks,
+        settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),
     }
