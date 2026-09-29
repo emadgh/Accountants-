@@ -2,11 +2,13 @@ type SqlPrimitive = string | number | null;
 export type SqlBind = SqlPrimitive[];
 export type SqlStatement = { sql: string; bind?: SqlBind };
 
-type WorkerRequest =
-  | { id: number; type: 'init' }
-  | { id: number; type: 'exec'; sql: string; bind?: SqlBind }
-  | { id: number; type: 'query'; sql: string; bind?: SqlBind }
-  | { id: number; type: 'transaction'; statements: SqlStatement[] };
+type WorkerCommand =
+  | { type: 'init' }
+  | { type: 'exec'; sql: string; bind?: SqlBind }
+  | { type: 'query'; sql: string; bind?: SqlBind }
+  | { type: 'transaction'; statements: SqlStatement[] };
+
+type WorkerRequest = WorkerCommand & { id: number };
 
 type WorkerResponse = {
   id: number;
@@ -51,14 +53,14 @@ class SQLiteClient {
     };
   }
 
-  request<T>(request: Omit<WorkerRequest, 'id'>): Promise<T> {
+  request<T>(request: WorkerCommand): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         resolve: resolve as (value: unknown) => void,
         reject,
       });
-      this.worker.postMessage({ ...request, id } satisfies WorkerRequest);
+      this.worker.postMessage({ ...request, id } as WorkerRequest);
     });
   }
 }
