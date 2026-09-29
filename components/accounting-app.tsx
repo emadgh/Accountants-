@@ -7,7 +7,8 @@ import { DashboardView } from '@/components/dashboard-view';
 import { InvoiceEditor } from '@/components/invoice-editor';
 import { AccountingCoreView } from '@/components/accounting-core-view';
 import { ReturnsView } from '@/components/returns-view';
-import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, ReportsView, SettingsView } from '@/components/management-views';
+import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, SettingsView } from '@/components/management-views';
+import { ReportsView } from '@/components/reports-view';
 import { useAccountingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 
