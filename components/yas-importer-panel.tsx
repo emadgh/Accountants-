@@ -169,6 +169,7 @@ export function YasImporterPanel() {
             <div>فاکتور: <b>{report.mapping.invoiceHeaders.join(', ') || '—'}</b></div>
             <div>ردیف فاکتور: <b>{report.mapping.invoiceItems.join(', ') || '—'}</b></div>
             <div>دریافت/پرداخت: <b>{report.mapping.payments.join(', ') || '—'}</b></div>
+            <div>حساب‌های مالی: <b>{report.mapping.financialAccounts.join(', ') || 'صندوق/بانک بر اساس ردیف سند'}</b></div>
             <div>امضا: <b>{report.mapping.signature || '—'}</b></div>
           </div>
         </Panel>
