@@ -9,6 +9,7 @@ import { formatPersianDate, todayIso } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Panel } from '@/components/ui/panel';
 import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
 import { notify, promptDialog } from '@/lib/feedback';
 
@@ -214,7 +215,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   });
 
   return <div className="space-y-4">
-    <div className="invoice-toolbar screen-only sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+    <Panel padding="sm" className="invoice-toolbar screen-only sticky top-0 z-20 bg-white/95 backdrop-blur">
       <div className="flex items-center gap-2">
         {onBack && <Button variant="ghost" size="icon" onClick={onBack}><ArrowRight className="h-4 w-4" /></Button>}
         <div><div className="font-black">{invoice.kind === 'sale' ? 'ویرایش فاکتور فروش' : 'ویرایش فاکتور خرید'}</div><div className="mt-0.5 text-xs text-slate-400">همین فرم نسخه قابل چاپ فاکتور است.</div></div>
@@ -228,7 +229,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
         <Button size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
-    </div>
+    </Panel>
 
     <div className="print-surface invoice-paper relative">
       {isDraft && <div className="print-only print-watermark text-slate-500">پیش‌نویس</div>}
@@ -236,12 +237,14 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       {isVoid && <div className="screen-only mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">این فاکتور باطل شده است.{invoice.voidReason ? ` دلیل: ${invoice.voidReason}` : ''}</div>}
       <fieldset disabled={isVoid} className="contents">
       <header className="invoice-party-block mb-3">
-        <div className="screen-only mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
-          <div><div className="text-xs font-black text-sky-800">پروفایل صادرکننده</div><div className="text-[10px] text-slate-500">این انتخاب روی خود فاکتور ذخیره می‌شود.</div></div>
-          <select className="h-9 min-w-[220px] rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold" value={invoice.businessProfileId} onChange={(e) => patch('businessProfileId', e.target.value)}>
-            {settings.businessProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}{profile.id === settings.defaultBusinessProfileId ? ' — پیش‌فرض' : ''}</option>)}
-          </select>
-        </div>
+        <Panel variant="subtle" padding="sm" className="screen-only mb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div><div className="text-xs font-black text-sky-800">پروفایل صادرکننده</div><div className="text-[10px] text-slate-500">این انتخاب روی خود فاکتور ذخیره می‌شود.</div></div>
+            <select className="h-9 min-w-[220px] rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold" value={invoice.businessProfileId} onChange={(e) => patch('businessProfileId', e.target.value)}>
+              {settings.businessProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}{profile.id === settings.defaultBusinessProfileId ? ' — پیش‌فرض' : ''}</option>)}
+            </select>
+          </div>
+        </Panel>
         <EditableText value={invoice.kind === 'sale' ? (businessProfile?.invoiceTitle || 'فاکتور فروش') : 'فاکتور خرید'} onChange={(v) => invoice.kind === 'sale' && updateBusinessProfile({ invoiceTitle: v })} className="mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />
         <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-[12px] leading-7 sm:grid-cols-[.85fr_1.55fr]">
           <div className="order-2 sm:order-1">
@@ -337,7 +340,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       </fieldset>
     </div>
 
-    {!!invoice.auditTrail?.length && <div className="screen-only rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    {!!invoice.auditTrail?.length && <Panel padding="sm" className="screen-only">
       <div className="mb-3 flex items-center gap-2 font-black text-slate-800"><History className="h-4 w-4 text-sky-600" /> تاریخچه سند</div>
       <div className="space-y-2">
         {[...invoice.auditTrail].reverse().map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
@@ -345,7 +348,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           <div className="text-slate-400">Revision {entry.revision} · {new Date(entry.at).toLocaleString('fa-IR')}</div>
         </div>)}
       </div>
-    </div>}
+    </Panel>}
   </div>;
 }
 
