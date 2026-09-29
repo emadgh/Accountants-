@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { CheckRecord, Invoice, Payment, PaymentDirection } from './types';
+import type { AccountAdjustment, CheckRecord, Invoice, Payment, PaymentDirection } from './types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -51,7 +51,8 @@ export function customerNetBalance(
   customerId: string,
   invoices: Invoice[],
   payments: Payment[],
-  checks: CheckRecord[]
+  checks: CheckRecord[],
+  adjustments: AccountAdjustment[] = []
 ) {
   const posted = invoices.filter(
     (invoice) => invoice.customerId === customerId && invoice.status !== 'draft' && invoice.status !== 'void'
@@ -80,8 +81,15 @@ export function customerNetBalance(
     .filter((item) => item.direction === 'payment')
     .reduce((sum, item) => sum + item.amount, 0);
 
+  const adjustmentBalance = adjustments
+    .filter((adjustment) => adjustment.customerId === customerId)
+    .reduce(
+      (sum, adjustment) => sum + (adjustment.direction === 'debit' ? Number(adjustment.amount || 0) : -Number(adjustment.amount || 0)),
+      0
+    );
+
   // Positive = طرف حساب بدهکار است. Negative = طرف حساب بستانکار است.
-  return sales - purchases - receipts + outgoing;
+  return sales - purchases - receipts + outgoing + adjustmentBalance;
 }
 
 export function todayFa() {
