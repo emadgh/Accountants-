@@ -20,11 +20,11 @@ export const seedData: AccountingData = {
   customers: [
     {
       id: 'cus_mansouri', code: '100006', name: 'پخش منصوری', kind: 'customer',
-      phone: '۰۹۱۲۳۴۵۶۷۸۹', address: 'کاشمر', nationalId: '', economicCode: '', postalCode: '',
+      phone: '۰۹۱۲۳۴۵۶۷۸۹', address: 'کاشمر', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
     },
     {
       id: 'cus_kashi', code: '100007', name: 'کاشی زهره', kind: 'both',
-      phone: '۰۹۳۵۱۲۳۴۵۶۷', address: 'کاشمر - شهرک صنعتی', nationalId: '', economicCode: '', postalCode: '',
+      phone: '۰۹۳۵۱۲۳۴۵۶۷', address: 'کاشمر - شهرک صنعتی', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
     },
   ],
   products: [
@@ -53,4 +53,5 @@ export const seedData: AccountingData = {
   checks: [
     { id: 'chk_1', direction: 'received', customerId: 'cus_mansouri', amount: 15000000, dueDate: '1405/03/20', number: '458721', bank: 'ملت', owner: 'پخش منصوری', status: 'pending' },
   ],
+  adjustments: [],
 };
