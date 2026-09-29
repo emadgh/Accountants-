@@ -105,6 +105,20 @@ export interface CheckRecord {
   notes?: string;
 }
 
+export type AccountAdjustmentDirection = 'debit' | 'credit';
+export type AccountAdjustmentKind = 'opening' | 'adjustment';
+
+export interface AccountAdjustment {
+  id: string;
+  customerId: string;
+  date: string;
+  kind: AccountAdjustmentKind;
+  direction: AccountAdjustmentDirection;
+  amount: number;
+  description: string;
+  createdAt: string;
+}
+
 export interface BusinessSettings {
   businessName: string;
   ownerName: string;
@@ -128,6 +142,7 @@ export interface AccountingData {
   invoices: Invoice[];
   payments: Payment[];
   checks: CheckRecord[];
+  adjustments: AccountAdjustment[];
   settings: BusinessSettings;
 }
 
