@@ -9,13 +9,16 @@ import { AccountingCoreView } from '@/components/accounting-core-view';
 import { ReturnsView } from '@/components/returns-view';
 import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, SettingsView } from '@/components/management-views';
 import { ReportsView } from '@/components/reports-view';
+import { BusinessProfilesView } from '@/components/business-profiles-view';
 import { useAccountingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { notify } from '@/lib/feedback';
+import { GlobalSearchDialog } from '@/components/global-search/global-search-dialog';
 
 export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   const [view, setView] = useState<ViewKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const hydrated = useAccountingStore((s) => s.hydrated);
@@ -35,6 +38,16 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   }, []);
 
   useEffect(() => {
+    const onGlobalSearchKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      setMenuOpen(false);
+      setSearchOpen(true);
+    };
+    window.addEventListener('keydown', onGlobalSearchKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalSearchKeyDown);
+  }, []);
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.key.toLowerCase() !== 'n') return;
       if (view === 'sale-new' || view === 'purchase-new') return;
@@ -48,6 +61,7 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   const navigate = (next: ViewKey) => {
     if (next === 'sale-new' || next === 'purchase-new') setSelectedInvoiceId(null);
     setView(next);
+    setMenuOpen(false);
   };
 
   const editInvoice = (id: string, kind: 'sale' | 'purchase') => {
@@ -60,7 +74,7 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   }
 
   return <div className="app-shell">
-    <Sidebar active={view} onChange={navigate} open={menuOpen} onOpenChange={setMenuOpen} />
+    <Sidebar active={view} onChange={navigate} open={menuOpen} onOpenChange={setMenuOpen} onOpenSearch={() => { setMenuOpen(false); setSearchOpen(true); }} />
     <main className="min-h-screen lg:mr-[275px]">
       <div className="screen-only flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:hidden">
         <div className="flex items-center">
@@ -86,7 +100,15 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
         {view === 'accounting' && <AccountingCoreView />}
         {view === 'reports' && <ReportsView />}
         {view === 'settings' && <SettingsView />}
+        {view === 'business-profiles' && <BusinessProfilesView />}
       </div>
     </main>
+    <GlobalSearchDialog
+      open={searchOpen}
+      onOpenChange={setSearchOpen}
+      onNavigate={navigate}
+      onOpenCustomer={(customerId) => { setSelectedCustomerId(customerId); setView('ledger'); setMenuOpen(false); }}
+      onOpenInvoice={(invoiceId, kind) => { editInvoice(invoiceId, kind); setMenuOpen(false); }}
+    />
   </div>;
 }

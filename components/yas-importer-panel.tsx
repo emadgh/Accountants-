@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -174,19 +175,19 @@ export function YasImporterPanel() {
           </div>
         </Panel>
 
-        {!!report.duplicates.length && <Panel padding="sm" className="border-amber-200 bg-amber-50">
-          <div className="font-black text-amber-800">Duplicate detection روی دیتابیس فعلی</div>
-          <div className="mt-2 max-h-32 overflow-auto text-xs leading-6 text-amber-800">{report.duplicates.slice(0, 50).map((item) => <div key={item}>• {item}</div>)}</div>
-        </Panel>}
+        {!!report.duplicates.length && <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-700">
+          <AlertTitle className="font-black">Duplicate detection روی دیتابیس فعلی</AlertTitle>
+          <AlertDescription className="mt-2 max-h-32 overflow-auto text-xs leading-6 text-amber-800">{report.duplicates.slice(0, 50).map((item) => <div key={item}>• {item}</div>)}</AlertDescription>
+        </Alert>}
 
-        {!!report.messages.length && <Panel padding="sm">
-          <div className="mb-2 flex items-center gap-2 font-black"><AlertTriangle className="h-4 w-4 text-amber-600" /> Warnings / Conflicts</div>
+        {!!report.messages.length && <section className="flex flex-col gap-2">
+          <h3 className="flex items-center gap-2 font-black"><AlertTriangle className="h-4 w-4 text-amber-600" /> Warnings / Conflicts</h3>
           <div className="max-h-56 space-y-2 overflow-auto">
-            {report.messages.map((item, index) => <div key={item.code + index} className={item.severity === 'conflict' ? 'rounded-lg bg-rose-50 p-2 text-xs text-rose-800' : item.severity === 'warning' ? 'rounded-lg bg-amber-50 p-2 text-xs text-amber-800' : 'rounded-lg bg-slate-50 p-2 text-xs text-slate-700'}>
-              <b>{item.severity === 'conflict' ? 'Conflict' : item.severity === 'warning' ? 'Warning' : 'Info'}:</b> {item.message}
-            </div>)}
+            {report.messages.map((item, index) => <Alert key={item.code + index} variant={item.severity === 'conflict' ? 'destructive' : 'default'} className={item.severity === 'conflict' ? 'rounded-lg border-rose-200 bg-rose-50 p-2 text-xs text-rose-800 [&>svg]:text-rose-700' : item.severity === 'warning' ? 'rounded-lg border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 [&>svg]:text-amber-700' : 'rounded-lg border-slate-200 bg-slate-50 p-2 text-xs text-slate-700'}>
+              <AlertDescription className="text-xs"><b>{item.severity === 'conflict' ? 'Conflict' : item.severity === 'warning' ? 'Warning' : 'Info'}:</b> {item.message}</AlertDescription>
+            </Alert>)}
           </div>
-        </Panel>}
+        </section>}
 
         <Panel padding="sm">
           <div className="mb-2 flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Reconciliation</div>

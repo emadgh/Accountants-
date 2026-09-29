@@ -3,3 +3,5 @@ node_modules
 out
 .DS_Store
 *.log
+.npm-cache
+package-lock.json

@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
   BookOpen,
+  Building2,
   Boxes,
   CircleDollarSign,
   ClipboardList,
@@ -32,7 +33,8 @@ export type ViewKey =
   | 'returns'
   | 'accounting'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'business-profiles';
 
 export type SidebarItem = {
   key: ViewKey;
@@ -113,6 +115,7 @@ export const sidebarGroups: readonly SidebarGroup[] = [
     id: 'system',
     label: 'سیستم',
     items: [
+      { key: 'business-profiles', label: 'پروفایل‌های کسب‌وکار', icon: Building2 },
       { key: 'settings', label: 'تنظیمات', icon: Settings },
     ],
   },

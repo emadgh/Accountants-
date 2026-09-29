@@ -7,6 +7,7 @@ import Prism from '@/components/react-bits/prism';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export type LoginMode = 'login' | 'setup';
 
@@ -191,9 +192,9 @@ export function LoginView({
                   )}
 
                   {message && (
-                    <div role="alert" className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2.5 text-xs font-bold leading-6 text-rose-200">
-                      {message}
-                    </div>
+                    <Alert variant="destructive" className="rounded-xl border-rose-400/20 bg-rose-500/10 px-3 py-2.5 text-xs font-bold leading-6 text-rose-200 [&>svg]:text-rose-200">
+                      <AlertDescription className="text-xs leading-6">{message}</AlertDescription>
+                    </Alert>
                   )}
 
                   <Button

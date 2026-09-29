@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Panel } from '@/components/ui/panel';
 import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
 import { notify, promptDialog } from '@/lib/feedback';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = ''): Invoice {
   const now = new Date().toISOString();
@@ -236,7 +237,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     <div className="print-surface invoice-paper relative">
       {isDraft && <div className="print-only print-watermark text-slate-500">پیش‌نویس</div>}
       {isVoid && <div className="print-only print-watermark text-rose-500">باطل</div>}
-      {isVoid && <div className="screen-only mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">این فاکتور باطل شده است.{invoice.voidReason ? ` دلیل: ${invoice.voidReason}` : ''}</div>}
+      {isVoid && <Alert variant="destructive" className="screen-only mb-4 rounded-xl border-rose-200 bg-rose-50 text-sm font-bold text-rose-700 [&>svg]:text-rose-700"><AlertDescription>این فاکتور باطل شده است.{invoice.voidReason ? ' دلیل: ' + invoice.voidReason : ''}</AlertDescription></Alert>}
       <fieldset disabled={isVoid} className="contents">
       <header className="invoice-party-block mb-3">
         <Panel variant="subtle" padding="sm" className="screen-only mb-3">

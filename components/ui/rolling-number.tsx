@@ -2,15 +2,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/utils';
-
-let rollingNumberModulePromise: Promise<unknown> | null = null;
-
-function ensureRollingNumberModule() {
-  if (!rollingNumberModulePromise) {
-    rollingNumberModulePromise = import('@layflags/rolling-number');
-  }
-  return rollingNumberModulePromise;
-}
+import styles from './rolling-number.module.css';
 
 export interface RollingNumberProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'prefix'> {
   value: number;
@@ -38,32 +30,6 @@ export function RollingNumber({
   style,
   ...props
 }: RollingNumberProps) {
-  const [ready, setReady] = React.useState(false);
-  const [reducedMotion, setReducedMotion] = React.useState(false);
-
-  React.useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const syncMotion = () => setReducedMotion(media.matches);
-    syncMotion();
-    media.addEventListener?.('change', syncMotion);
-
-    let active = true;
-    if (rolling) {
-      ensureRollingNumberModule()
-        .then(() => {
-          if (active) setReady(true);
-        })
-        .catch(() => {
-          if (active) setReady(false);
-        });
-    }
-
-    return () => {
-      active = false;
-      media.removeEventListener?.('change', syncMotion);
-    };
-  }, [rolling]);
-
   const formatted = React.useMemo(
     () => new Intl.NumberFormat(locale, {
       maximumFractionDigits: 0,
@@ -71,18 +37,23 @@ export function RollingNumber({
     }).format(Number.isFinite(value) ? value : 0),
     [formatOptions, locale, value]
   );
-
-  const chars = React.useMemo(() => formatted.split(''), [formatted]);
-  const totalDigits = chars.reduce((sum, char) => sum + (/\d/.test(char) ? 1 : 0), 0);
-  let seenDigits = 0;
+  const digitSystem = React.useMemo(
+    () => Array.from({ length: 10 }, (_, digit) =>
+      new Intl.NumberFormat(locale, { useGrouping: false }).format(digit)
+    ),
+    [locale]
+  );
+  const characters = React.useMemo(() => Array.from(formatted), [formatted]);
+  const totalDigits = characters.reduce((count, character) => count + Number(digitSystem.includes(character)), 0);
 
   const readablePrefix = typeof prefix === 'string' || typeof prefix === 'number' ? String(prefix) : '';
   const readableSuffix = typeof suffix === 'string' || typeof suffix === 'number' ? String(suffix) : '';
   const label = ariaLabel || [readablePrefix, formatted, readableSuffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-
   const minWidth = reserveCharacters
     ? `min(${Math.max(reserveCharacters, 1)}ch, 100%)`
     : undefined;
+
+  let seenDigits = 0;
 
   return (
     <span
@@ -94,28 +65,30 @@ export function RollingNumber({
     >
       {prefix ? <span aria-hidden="true" className="me-1">{prefix}</span> : null}
 
-      <span aria-hidden="true" className="inline-flex items-baseline">
-        {chars.map((char) => {
-          if (/\d/.test(char)) {
+      <span aria-hidden="true" className={styles.group}>
+        {characters.map((character, index) => {
+          const digit = digitSystem.indexOf(character);
+          if (digit >= 0) {
             const positionFromRight = totalDigits - seenDigits - 1;
             seenDigits += 1;
-            const key = `digit-${positionFromRight}`;
-
-            if (rolling && ready && !reducedMotion) {
-              return (
-                <layflags-rolling-number
-                  key={key}
-                  value={char}
-                  style={{ '--roll-duration': `${durationMs}ms` } as React.CSSProperties}
-                />
-              );
-            }
-
-            return <span key={key}>{char}</span>;
+            return (
+              <span key={`digit-${positionFromRight}`} className={styles.window}>
+                <span
+                  className={styles.strip}
+                  style={{
+                    transform: `translateY(-${digit * 10}%)`,
+                    transitionDuration: rolling ? `${Math.max(0, durationMs)}ms` : '0ms',
+                  }}
+                >
+                  {digitSystem.map((systemDigit, digitIndex) => (
+                    <span key={digitIndex} className={styles.digit}>{systemDigit}</span>
+                  ))}
+                </span>
+              </span>
+            );
           }
 
-          const key = `symbol-${char}-${totalDigits - seenDigits}`;
-          return <span key={key}>{char}</span>;
+          return <span key={`symbol-${index}`} className={styles.symbol}>{character}</span>;
         })}
       </span>
 

@@ -7,10 +7,12 @@ import {
   ChevronLeft,
   FileText,
   Menu,
+  Search,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { sidebarGroups, type ViewKey } from '@/components/sidebar-config';
 
 export type { ViewKey } from '@/components/sidebar-config';
@@ -26,11 +28,13 @@ export function Sidebar({
   onChange,
   open,
   onOpenChange,
+  onOpenSearch,
 }: {
   active: ViewKey;
   onChange: (v: ViewKey) => void;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onOpenSearch?: () => void;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(defaultExpanded);
 
@@ -106,6 +110,12 @@ export function Sidebar({
               <div className="mt-1 text-xs text-slate-400">فاکتور، انبار و تسویه حساب</div>
             </div>
           </div>
+          {onOpenSearch && (
+            <Button variant="outline" className="mt-4 w-full justify-between" onClick={onOpenSearch}>
+              <span className="flex items-center gap-2"><Search className="size-4" aria-hidden="true" /> جست‌وجوی سراسری</span>
+              <span className="inline-flex items-center gap-1"><KbdGroup><Kbd>⌘</Kbd><Kbd>K</Kbd></KbdGroup><span>/</span><KbdGroup><Kbd>Ctrl</Kbd><Kbd>K</Kbd></KbdGroup></span>
+            </Button>
+          )}
         </div>
 
         <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 py-3" aria-label="منوی اصلی">

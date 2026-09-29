@@ -92,9 +92,9 @@ export interface YasMigrationAnalysis {
 const aliases = {
   id: ['id', '_id', 'rowid', 'code', 'kod', 'cod', 'pk'],
   code: ['code', 'kod', 'cod', 'customer_code', 'customercode', 'personcode', 'codeperson', 'codehesab', 'codhesab', 'productcode', 'kalacode', 'codekala', 'codkala'],
-  name: ['name', 'nam', 'title', 'esm', 'fullname', 'namefamily', 'onvan'],
+  name: ['name', 'nam', 'namekala', 'title', 'esm', 'fullname', 'namefamily', 'onvan'],
   phone: ['phone', 'tel', 'telephone', 'mobile', 'mob', 'tell'],
-  address: ['address', 'adres', 'addr'],
+  address: ['address', 'adres', 'adress', 'addr'],
   nationalId: ['nationalid', 'national_id', 'shenase_melli', 'shenase'],
   economicCode: ['economiccode', 'economic_code', 'codeeghtesadi'],
   postalCode: ['postalcode', 'postal_code', 'codeposti'],
@@ -104,14 +104,14 @@ const aliases = {
   stock: ['stock', 'mojoodi', 'inventory', 'tedadmojood', 'mande'],
   salePrice: ['saleprice', 'sale_price', 'gheymatforoosh', 'gheymatforosh', 'foroshprice'],
   buyPrice: ['buyprice', 'buy_price', 'gheymatkharid', 'kharidprice'],
-  number: ['number', 'no', 'serial', 'shomare', 'shf', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
+  number: ['number', 'sanad', 'no', 'serial', 'shomare', 'shf', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
   date: ['date', 'tarikh', 'tarikhfaktor', 'createdate', 'factor_date', 'factordate'],
-  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'codhesab', 'shakhs', 'ashkhasid', 'codshakhs', 'codeshakhs', 'codashkhas', 'codeashkhas'],
+  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codetaraf', 'code_taraf', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'codhesab', 'shakhs', 'ashkhasid', 'codshakhs', 'codeshakhs', 'codashkhas', 'codeashkhas'],
   productRef: ['productid', 'product_id', 'kalaid', 'kala_id', 'codekala', 'codkala', 'kalacode', 'productcode'],
   invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'number', 'shomare', 'shf', 'shfactor', 'shomarefactor', 'factornumber', 'factorno'],
   qty: ['qty', 'quantity', 'tedad', 'meghdar', 'count'],
   price: ['unitprice', 'unit_price', 'price', 'fee', 'fi', 'gheymat', 'gheymatvahed', 'mablaghvahed'],
-  amount: ['amount', 'mablagh', 'total', 'sum', 'jam', 'price', 'mablaghkol'],
+  amount: ['amount', 'mablaghfak', 'mablagh', 'total', 'sum', 'jam', 'price', 'mablaghkol'],
   discount: ['discount', 'takhfif', 'takhfifmablagh'],
   invoiceDiscount: ['invoicediscount', 'invoice_discount', 'factordiscount', 'factor_discount', 'takhfifkol', 'takhfiffactor', 'takhfif_factor'],
   discountPercent: ['discountpercent', 'discount_percent', 'takhfifdarsad', 'darsadtakhfif'],
@@ -122,7 +122,7 @@ const aliases = {
   direction: ['direction', 'type', 'noe', 'paymenttype'],
   method: ['method', 'paymentmethod', 'noepardakht', 'noehesab'],
   settlementRef: ['settlementaccountid', 'settlement_account_id', 'accountid', 'account_id', 'hesabmali', 'hesab', 'sandogh', 'bankid', 'bank_id', 'codehesab', 'codemali'],
-  balance: ['balance', 'mande', 'mandeh', 'remaining', 'baghimande'],
+  balance: ['balance', 'mandekol', 'mojoodi', 'mande', 'mandeh', 'remaining', 'baghimande'],
   businessName: ['businessname', 'companyname', 'shopname', 'namforoshgah', 'nameforoshgah'],
 };
 
@@ -236,6 +236,7 @@ function scoreProduct(table: ExternalSqliteTable) {
 
 function scoreInvoiceHeader(table: ExternalSqliteTable) {
   if (isDerivedTable(table)) return -100;
+  if (!tableNameIncludes(table, ['factor', 'faktor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) return -100;
   let score = 0;
   if (tableNameIncludes(table, ['faktorforoush', 'faktorkharid'])) score += 12;
   else if (tableNameIncludes(table, ['factor', 'faktor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) score += 6;
@@ -249,6 +250,7 @@ function scoreInvoiceHeader(table: ExternalSqliteTable) {
 function scoreInvoiceItem(table: ExternalSqliteTable) {
   if (isDerivedTable(table)) return -100;
   let score = 0;
+  if (/^faktor\d+$/i.test(table.name.trim())) score += 8;
   if (tableNameIncludes(table, ['factoritem', 'faktoritem', 'factorrow', 'invoiceitem', 'detail', 'radif', 'ریز', 'اقلام'])) score += 8;
   if (hasColumn(table, aliases.invoiceRef)) score += 4;
   if (hasColumn(table, aliases.qty)) score += 4;
@@ -359,7 +361,7 @@ function findDerivedBalance(snapshot: ExternalSqliteSnapshot, prefix: 't' | 'k',
 
 function buildStockMovements(products: Product[], invoices: Invoice[], knownFinalStockIds: Set<string>): StockMovement[] {
   const movements: StockMovement[] = [];
-  const sourceInvoicesForOpening = invoices.filter((invoice) => invoice.status !== 'void');
+  const sourceInvoicesForOpening = invoices.filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void');
   const finalInvoices = invoices
     .filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void')
     .slice()
@@ -461,9 +463,9 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
 
   const customerTable = bestTable(snapshot, scoreCustomer, 7);
   const productTable = bestTable(snapshot, scoreProduct, 7);
-  const invoiceTables = matchingTables(snapshot, scoreInvoiceHeader, 9);
+  const invoiceTables = matchingTables(snapshot, scoreInvoiceHeader, 9).filter((table) => table.rowCount > 0);
   const itemTables = matchingTables(snapshot, scoreInvoiceItem, 10);
-  const paymentTables = matchingTables(snapshot, scorePayment, 9);
+  const paymentTables = matchingTables(snapshot, scorePayment, 9).filter((table) => table.rowCount > 0);
   const signatureTable = snapshot.tables.find((table) => tableNameIncludes(table, ['signbitmap', 'signature']));
   const incomeTable = snapshot.tables.find((table) => !isDerivedTable(table) && tableNameIncludes(table, ['income', 'daramad', 'درآمد']));
   const financialAccountTables = snapshot.tables.filter(
@@ -585,7 +587,8 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         });
       }
 
-      const itemCandidates = itemRows.filter(({ row: itemRow }) => {
+      const itemCandidates = itemRows.filter(({ table: itemTable, row: itemRow }) => {
+        if (normalizeName(itemTable.name) === normalizeName('faktor' + numberValue)) return true;
         const ref = rowRef(itemRow, aliases.invoiceRef);
         return !!ref && [source, numberValue, text(value(row, aliases.id))].some((candidate) => normalizeName(candidate) === normalizeName(ref));
       });
@@ -679,7 +682,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       const documentNumber = text(value(row, aliases.number)) || (direction === 'receipt' ? 'YR-' : 'YP-') + String(payments.length + 1).padStart(6, '0');
       sourcePaymentDocumentNumbers.push(documentNumber);
       payments.push({
-        id: 'yas_payment_' + keyPart(source, String(index + 1)),
+        id: 'yas_payment_' + keyPart(table.name + '_' + source, String(index + 1)),
         documentNumber,
         invoiceId: linkedInvoice?.id,
         customerId: customer.id,

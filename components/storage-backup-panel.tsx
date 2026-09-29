@@ -30,6 +30,7 @@ import { MetricCard } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { confirmDialog, notify } from '@/lib/feedback';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 type ImportCandidate = {
   data: AccountingData;
@@ -234,7 +235,7 @@ export function StorageBackupPanel() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['مرجوعی', candidate.preview.returns], ['پرداخت', candidate.preview.payments], ['چک', candidate.preview.checks], ['Journal', candidate.preview.journalEntries], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <MetricCard key={String(label)} size="sm" title={String(label)} value={Number(value)} align="center" />)}
           </div>
-          {!!candidate.preview.warnings.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-6 text-amber-800">{candidate.preview.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}
+          {!!candidate.preview.warnings.length && <Alert className="rounded-xl border-amber-200 bg-amber-50 text-xs leading-6 text-amber-800 [&>svg]:text-amber-700"><AlertDescription className="text-xs leading-6">{candidate.preview.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</AlertDescription></Alert>}
           <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setCandidate(null)}>انصراف</Button><Button disabled={busy} onClick={() => void confirmImport()}><RotateCcw className="h-4 w-4" /> تایید و بازیابی</Button></div>
         </div>}
       </DialogContent>

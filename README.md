@@ -25,10 +25,12 @@
 
 ```bash
 npm install
-npm run dev
+npm run autobuild
 ```
 
 سپس `http://localhost:3000` را باز کنید.
+
+در حالت Autobuild، Next.js تغییرات فایل‌ها را دنبال می‌کند، آن‌ها را خودکار می‌سازد و تغییرات رابط را در مرورگر با Fast Refresh نمایش می‌دهد. دستور `npm run dev` نیز همین حالت را اجرا می‌کند.
 
 ## بیلد نهایی
 

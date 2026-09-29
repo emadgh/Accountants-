@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { Download, WifiOff } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -62,7 +64,7 @@ export function PwaRegister() {
   };
 
   return <>
-    {offline && <div className="screen-only fixed bottom-3 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-xl" role="status" aria-live="polite"><WifiOff className="h-4 w-4" /> حالت آفلاین</div>}
-    {installPrompt && !offline && <button type="button" onClick={() => void install()} className="screen-only fixed bottom-3 left-3 z-[100] flex items-center gap-2 rounded-full border border-sky-200 bg-white px-4 py-2 text-xs font-black text-sky-700 shadow-xl hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-300" aria-label="نصب برنامه روی دستگاه"><Download className="h-4 w-4" /> نصب برنامه</button>}
+    {offline && <Alert role="status" aria-live="polite" className="screen-only fixed bottom-3 left-1/2 z-[100] w-fit -translate-x-1/2 rounded-full border-slate-700 bg-slate-900 py-2 text-xs font-bold text-white shadow-xl [&>svg]:left-3 [&>svg]:top-1/2 [&>svg]:-translate-y-1/2 [&>svg]:text-white [&>svg+div]:translate-y-0 [&>svg~*]:pl-6"><WifiOff className="size-4" aria-hidden="true" /><AlertDescription className="text-xs leading-none text-white">حالت آفلاین</AlertDescription></Alert>}
+    {installPrompt && !offline && <Button type="button" variant="outline" size="sm" onClick={() => void install()} className="screen-only fixed bottom-3 left-3 z-[100] rounded-full border-sky-200 bg-white px-4 py-2 text-xs font-black text-sky-700 shadow-xl hover:bg-sky-50 focus-visible:ring-2 focus-visible:ring-sky-300" aria-label="نصب برنامه روی دستگاه"><Download className="size-4" aria-hidden="true" /> نصب برنامه</Button>}
   </>;
 }
