@@ -14,6 +14,9 @@ import type {
   OperationResult,
   Payment,
   Product,
+  StockAdjustmentInput,
+  StockMovement,
+  StockMovementAction,
   StoreOperationResult,
 } from './types';
 import {
@@ -21,6 +24,7 @@ import {
   invoiceTotal,
   resolvedPaymentDirection,
   settledForInvoice,
+  todayFa,
   uid,
 } from './utils';
 
@@ -39,6 +43,7 @@ type Store = AccountingData & {
   addPayment: (payment: Payment) => OperationResult;
   deletePayment: (id: string) => void;
   addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
+  addStockAdjustment: (input: StockAdjustmentInput) => OperationResult;
   upsertCheck: (check: CheckRecord) => OperationResult;
   deleteCheck: (id: string) => OperationResult;
   setSettings: (settings: BusinessSettings) => void;
@@ -50,17 +55,130 @@ function isPosted(status: Invoice['status']) {
   return status === 'final' || status === 'partial' || status === 'settled';
 }
 
-function applyInventory(products: Product[], invoice: Invoice, direction: 1 | -1) {
-  if (!isPosted(invoice.status)) return products;
-  const map = new Map(products.map((p) => [p.id, { ...p }]));
+const MAIN_WAREHOUSE_ID = 'main';
+
+type InventoryApplyResult = OperationResult & {
+  products: Product[];
+  stockMovements: StockMovement[];
+};
+
+function normalizeProducts(products: Product[]) {
+  return products.map((product) => ({
+    ...product,
+    averageCost: Number(product.averageCost ?? product.buyPrice ?? 0),
+  }));
+}
+
+function buildOpeningMovements(products: Product[]): StockMovement[] {
+  return products
+    .filter((product) => product.kind === 'product' && Math.abs(Number(product.stock || 0)) > 0.0001)
+    .map((product) => {
+      const averageCost = Number(product.averageCost ?? product.buyPrice ?? 0);
+      return {
+        id: 'stock_open_' + product.id,
+        productId: product.id,
+        warehouseId: MAIN_WAREHOUSE_ID,
+        date: 'ابتدای دوره',
+        createdAt: '2000-01-01T00:00:00.000Z',
+        quantity: Number(product.stock || 0),
+        balanceAfter: Number(product.stock || 0),
+        averageCostAfter: averageCost,
+        unitCost: averageCost,
+        type: 'opening' as const,
+        action: 'migration-opening' as const,
+        sourceType: 'system' as const,
+        sourceId: 'migration-v3',
+        sourceReference: 'موجودی انتقالی',
+        note: 'مانده موجودی پیش از فعال شدن کاردکس انبار',
+      };
+    });
+}
+
+function applyInvoiceInventory(
+  products: Product[],
+  stockMovements: StockMovement[],
+  invoice: Invoice,
+  direction: 1 | -1,
+  action: StockMovementAction
+): InventoryApplyResult {
+  const nextProducts = normalizeProducts(products);
+  const nextMovements = [...stockMovements];
+
   for (const item of invoice.items) {
     if (!item.productId) continue;
-    const product = map.get(item.productId);
-    if (!product || product.kind !== 'product') continue;
-    const movement = invoice.kind === 'sale' ? -Number(item.qty || 0) : Number(item.qty || 0);
-    product.stock += movement * direction;
+    const index = nextProducts.findIndex((product) => product.id === item.productId);
+    if (index < 0) continue;
+    const product = { ...nextProducts[index] };
+    if (product.kind !== 'product') continue;
+
+    const baseQuantity = invoice.kind === 'sale' ? -Number(item.qty || 0) : Number(item.qty || 0);
+    const quantity = baseQuantity * direction;
+    const currentStock = Number(product.stock || 0);
+    const currentAverage = Number(product.averageCost ?? product.buyPrice ?? 0);
+    const newStock = currentStock + quantity;
+
+    if (newStock < -0.0001) {
+      return {
+        ok: false,
+        message: 'برگشت/ثبت سند باعث موجودی منفی برای «' + product.name + '» می‌شود. موجودی فعلی: ' + currentStock + ' ' + product.unit + '.',
+        products,
+        stockMovements,
+      };
+    }
+
+    let unitCost = currentAverage;
+    let newAverage = currentAverage;
+
+    if (invoice.kind === 'purchase') {
+      unitCost = Math.max(0, Number(item.unitPrice || 0));
+      const newValue = currentStock * currentAverage + quantity * unitCost;
+      newAverage = newStock > 0.0001 ? Math.max(0, newValue / newStock) : 0;
+      if (direction === 1) product.buyPrice = unitCost;
+    } else if (direction === -1) {
+      const originalSale = [...nextMovements].reverse().find(
+        (movement) =>
+          movement.sourceType === 'invoice' &&
+          movement.sourceId === invoice.id &&
+          movement.productId === product.id &&
+          movement.type === 'sale' &&
+          movement.quantity < 0
+      );
+      unitCost = Number(originalSale?.unitCost ?? currentAverage);
+      const newValue = currentStock * currentAverage + quantity * unitCost;
+      newAverage = newStock > 0.0001 ? Math.max(0, newValue / newStock) : 0;
+    }
+
+    product.stock = Math.abs(newStock) < 0.0001 ? 0 : newStock;
+    product.averageCost = newAverage;
+    nextProducts[index] = product;
+
+    nextMovements.push({
+      id: uid('stock'),
+      productId: product.id,
+      warehouseId: MAIN_WAREHOUSE_ID,
+      date: invoice.date,
+      createdAt: new Date().toISOString(),
+      quantity,
+      balanceAfter: product.stock,
+      averageCostAfter: newAverage,
+      unitCost,
+      type: direction === -1 ? 'reversal' : invoice.kind === 'sale' ? 'sale' : 'purchase',
+      action,
+      sourceType: 'invoice',
+      sourceId: invoice.id,
+      sourceReference: invoice.number,
+      sourceKind: invoice.kind,
+      note: action === 'revision-reversal'
+        ? 'برگشت اثر نسخه قبلی فاکتور'
+        : action === 'void-reversal'
+          ? 'برگشت اثر فاکتور باطل‌شده'
+          : action === 'revision'
+            ? 'ثبت Revision جدید فاکتور'
+            : undefined,
+    });
   }
-  return Array.from(map.values());
+
+  return { ok: true, products: nextProducts, stockMovements: nextMovements };
 }
 
 function withInvoiceStatuses(invoices: Invoice[], payments: Payment[], checks: CheckRecord[]) {
@@ -161,17 +279,20 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     ...customer,
     openingBalance: Number(customer.openingBalance || 0),
   }));
+  const products = normalizeProducts(data.products || []);
   const invoices = data.invoices || [];
   const checks = data.checks || [];
   const rawPayments = data.payments || [];
   const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
+  const stockMovements = data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products);
   return {
     customers,
-    products: data.products || [],
+    products,
     invoices: withInvoiceStatuses(invoices, payments, checks),
     payments,
     checks,
     adjustments: data.adjustments || [],
+    stockMovements,
     settings: { ...seedData.settings, ...(data.settings || {}) },
   };
 }
@@ -179,7 +300,7 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
 export const useAccountingStore = create<Store>()(
   persist(
     (set, get) => ({
-      ...seedData,
+      ...normalizeAccountingData(seedData),
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
 
@@ -193,11 +314,43 @@ export const useAccountingStore = create<Store>()(
       deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((c) => c.id !== id) })),
 
       upsertProduct: (product) =>
-        set((s) => ({
-          products: s.products.some((p) => p.id === product.id)
-            ? s.products.map((p) => (p.id === product.id ? product : p))
-            : [product, ...s.products],
-        })),
+        set((state) => {
+          const previous = state.products.find((item) => item.id === product.id);
+          if (previous) {
+            const normalized: Product = {
+              ...product,
+              stock: previous.stock,
+              averageCost: Number(previous.averageCost ?? previous.buyPrice ?? product.buyPrice ?? 0),
+            };
+            return { products: state.products.map((item) => (item.id === product.id ? normalized : item)) };
+          }
+
+          const normalized: Product = {
+            ...product,
+            averageCost: Number(product.averageCost ?? product.buyPrice ?? 0),
+          };
+          let stockMovements = state.stockMovements;
+          if (normalized.kind === 'product' && Math.abs(Number(normalized.stock || 0)) > 0.0001) {
+            const averageCost = Number(normalized.averageCost || 0);
+            stockMovements = [...stockMovements, {
+              id: uid('stock'),
+              productId: normalized.id,
+              warehouseId: MAIN_WAREHOUSE_ID,
+              date: todayFa(),
+              createdAt: new Date().toISOString(),
+              quantity: Number(normalized.stock || 0),
+              balanceAfter: Number(normalized.stock || 0),
+              averageCostAfter: averageCost,
+              unitCost: averageCost,
+              type: 'opening',
+              action: 'product-opening',
+              sourceType: 'system',
+              sourceId: normalized.id,
+              sourceReference: 'موجودی اولیه کالا',
+            }];
+          }
+          return { products: [normalized, ...state.products], stockMovements };
+        }),
 
       deleteProduct: (id) => set((s) => ({ products: s.products.filter((p) => p.id !== id) })),
 
@@ -240,13 +393,14 @@ export const useAccountingStore = create<Store>()(
         const valid = validatePosting(state.products, next, state.invoices);
         if (!valid.ok) return valid;
 
-        const products = applyInventory(state.products, next, 1);
+        const inventory = applyInvoiceInventory(state.products, state.stockMovements, next, 1, 'finalize');
+        if (!inventory.ok) return { ok: false, message: inventory.message };
         const merged = previous
           ? state.invoices.map((item) => (item.id === next.id ? next : item))
           : [next, ...state.invoices];
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products, invoices });
+        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
         return { ok: true, invoice: saved };
       },
 
@@ -261,7 +415,9 @@ export const useAccountingStore = create<Store>()(
           return { ok: false, message: 'شماره فاکتور قطعی قابل تغییر نیست.' };
         }
 
-        const baseProducts = applyInventory(state.products, previous, -1);
+        const reversedInventory = applyInvoiceInventory(state.products, state.stockMovements, previous, -1, 'revision-reversal');
+        if (!reversedInventory.ok) return { ok: false, message: reversedInventory.message };
+        const baseProducts = reversedInventory.products;
         const now = new Date().toISOString();
         const revision = Math.max(1, previous.revision || 1) + 1;
         const base: Invoice = {
@@ -280,11 +436,12 @@ export const useAccountingStore = create<Store>()(
         const valid = validatePosting(baseProducts, next, state.invoices);
         if (!valid.ok) return valid;
 
-        const products = applyInventory(baseProducts, next, 1);
+        const appliedInventory = applyInvoiceInventory(baseProducts, reversedInventory.stockMovements, next, 1, 'revision');
+        if (!appliedInventory.ok) return { ok: false, message: appliedInventory.message };
         const merged = state.invoices.map((item) => (item.id === next.id ? next : item));
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products, invoices });
+        set({ products: appliedInventory.products, stockMovements: appliedInventory.stockMovements, invoices });
         return { ok: true, invoice: saved };
       },
 
@@ -309,9 +466,10 @@ export const useAccountingStore = create<Store>()(
           updatedAt: now,
         };
         const next: Invoice = { ...base, auditTrail: appendAudit(base, 'voided', revision, reason) };
-        const products = applyInventory(state.products, previous, -1);
+        const inventory = applyInvoiceInventory(state.products, state.stockMovements, previous, -1, 'void-reversal');
+        if (!inventory.ok) return { ok: false, message: inventory.message };
         const invoices = state.invoices.map((item) => (item.id === id ? next : item));
-        set({ products, invoices });
+        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
         return { ok: true, invoice: next };
       },
 
@@ -404,6 +562,49 @@ export const useAccountingStore = create<Store>()(
         return { ok: true };
       },
 
+      addStockAdjustment: (input) => {
+        const state = get();
+        const index = state.products.findIndex((product) => product.id === input.productId);
+        if (index < 0) return { ok: false, message: 'کالا پیدا نشد.' };
+        const current = state.products[index];
+        if (current.kind !== 'product') return { ok: false, message: 'برای خدمات موجودی انبار ثبت نمی‌شود.' };
+        if (!input.note.trim()) return { ok: false, message: 'دلیل اصلاح/شمارش موجودی الزامی است.' };
+
+        const currentStock = Number(current.stock || 0);
+        const quantity = input.mode === 'count' ? Number(input.quantity) - currentStock : Number(input.quantity);
+        if (!Number.isFinite(quantity) || Math.abs(quantity) < 0.0001) {
+          return { ok: false, message: 'تغییری در موجودی ایجاد نشده است.' };
+        }
+        const newStock = currentStock + quantity;
+        if (newStock < -0.0001) {
+          return { ok: false, message: 'اصلاح موجودی نمی‌تواند موجودی را منفی کند.' };
+        }
+
+        const averageCost = Number(current.averageCost ?? current.buyPrice ?? 0);
+        const product: Product = { ...current, stock: Math.abs(newStock) < 0.0001 ? 0 : newStock, averageCost };
+        const products = state.products.map((item, productIndex) => productIndex === index ? product : item);
+        const sourceId = uid('stockadj');
+        const movement: StockMovement = {
+          id: uid('stock'),
+          productId: product.id,
+          warehouseId: MAIN_WAREHOUSE_ID,
+          date: input.date,
+          createdAt: new Date().toISOString(),
+          quantity,
+          balanceAfter: product.stock,
+          averageCostAfter: averageCost,
+          unitCost: averageCost,
+          type: 'adjustment',
+          action: input.mode === 'count' ? 'count' : 'manual-adjustment',
+          sourceType: 'adjustment',
+          sourceId,
+          sourceReference: input.mode === 'count' ? 'شمارش انبار' : 'اصلاح موجودی',
+          note: input.note.trim(),
+        };
+        set({ products, stockMovements: [...state.stockMovements, movement] });
+        return { ok: true };
+      },
+
       upsertCheck: (check) => {
         const state = get();
         const previous = state.checks.find((item) => item.id === check.id);
@@ -452,16 +653,19 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
+        const products = normalizeProducts(state.products || []);
         return {
           ...state,
           customers: (state.customers || []).map((customer) => ({
             ...customer,
             openingBalance: Number(customer.openingBalance || 0),
           })),
+          products,
           adjustments: state.adjustments || [],
+          stockMovements: state.stockMovements?.length ? state.stockMovements : buildOpeningMovements(products),
         };
       },
       partialize: (state) => ({
@@ -471,6 +675,7 @@ export const useAccountingStore = create<Store>()(
         payments: state.payments,
         checks: state.checks,
         adjustments: state.adjustments,
+        stockMovements: state.stockMovements,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),
