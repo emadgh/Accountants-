@@ -2,11 +2,27 @@ type SqlPrimitive = string | number | null;
 export type SqlBind = SqlPrimitive[];
 export type SqlStatement = { sql: string; bind?: SqlBind };
 
+export type ExternalSqliteBlob = { __blobBase64: string };
+export type ExternalSqliteValue = string | number | null | ExternalSqliteBlob;
+export type ExternalSqliteTable = {
+  name: string;
+  columns: string[];
+  rowCount: number;
+  rows: Record<string, ExternalSqliteValue>[];
+};
+export type ExternalSqliteSnapshot = {
+  quickCheck: string;
+  walHeader: boolean;
+  warnings: string[];
+  tables: ExternalSqliteTable[];
+};
+
 type WorkerCommand =
   | { type: 'init' }
   | { type: 'exec'; sql: string; bind?: SqlBind }
   | { type: 'query'; sql: string; bind?: SqlBind }
-  | { type: 'transaction'; statements: SqlStatement[] };
+  | { type: 'transaction'; statements: SqlStatement[] }
+  | { type: 'inspectExternal'; bytes: ArrayBuffer };
 
 type WorkerRequest = WorkerCommand & { id: number };
 
@@ -96,4 +112,10 @@ export async function sqliteTransaction(statements: SqlStatement[]) {
   if (!statements.length) return;
   const client = await getClient();
   return client.request<void>({ type: 'transaction', statements });
+}
+
+
+export async function inspectExternalSqlite(bytes: ArrayBuffer) {
+  const client = await getClient();
+  return client.request<ExternalSqliteSnapshot>({ type: 'inspectExternal', bytes });
 }
