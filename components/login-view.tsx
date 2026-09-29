@@ -81,7 +81,7 @@ export function LoginView({
             colors={['#38bdf8', '#818cf8', '#c084fc']}
             fillOpacity={0.16}
           >
-            <Card className="rounded-[25px] border-0 bg-slate-950/88 text-slate-100 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            <Card variant="dark">
               <CardHeader className="block border-white/10 px-6 pb-4 pt-6 text-center sm:px-7">
                 <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-sky-300">
                   {mode === 'setup' ? <ShieldCheck className="h-6 w-6" /> : <LockKeyhole className="h-6 w-6" />}
