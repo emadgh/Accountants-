@@ -10,6 +10,7 @@ import type {
   BusinessSettings,
   CheckRecord,
   Customer,
+  DocumentSequenceKey,
   Invoice,
   InvoiceAuditAction,
   MoneyTransaction,
@@ -46,10 +47,12 @@ import {
   normalizeAccounts,
   reverseActiveSourceEntries,
 } from './accounting';
+import { formatDocumentNumber, normalizeStoredDate } from './standards';
 
 type Store = AccountingData & {
   hydrated: boolean;
   setHydrated: (v: boolean) => void;
+  reserveDocumentNumber: (key: DocumentSequenceKey) => string;
   upsertCustomer: (customer: Customer) => void;
   deleteCustomer: (id: string) => void;
   upsertProduct: (product: Product) => void;
@@ -473,14 +476,37 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     openingBalance: Number(customer.openingBalance || 0),
   }));
   const products = normalizeProducts(data.products || []);
-  const invoices = data.invoices || [];
-  const checks = data.checks || [];
-  const rawPayments = data.payments || [];
+  const invoices = (data.invoices || []).map((invoice) => ({ ...invoice, date: normalizeStoredDate(invoice.date) }));
+  const returns = (data.returns || []).map((document) => ({ ...document, date: normalizeStoredDate(document.date) }));
+  const checks = (data.checks || []).map((check, index) => ({
+    ...check,
+    documentNumber: check.documentNumber || 'C-' + String(index + 1).padStart(6, '0'),
+    dueDate: normalizeStoredDate(check.dueDate),
+  }));
+  const rawPayments = (data.payments || []).map((payment, index) => ({
+    ...payment,
+    documentNumber: payment.documentNumber || (payment.direction === 'payment' ? 'PY-' : 'R-') + String(index + 1).padStart(6, '0'),
+    date: normalizeStoredDate(payment.date),
+  }));
   const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
-  const returns = data.returns || [];
-  const stockMovements = data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products);
+  const adjustments = (data.adjustments || []).map((item) => ({ ...item, date: normalizeStoredDate(item.date) }));
+  const stockMovements = (data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products)).map((movement) => ({
+    ...movement,
+    date: movement.date === 'ابتدای دوره' ? movement.date : normalizeStoredDate(movement.date),
+  }));
   const accounts = normalizeAccounts(data.accounts || []);
-  const moneyTransactions = data.moneyTransactions || [];
+  const journalEntries = (data.journalEntries || []).map((entry) => ({
+    ...entry,
+    date: entry.date === 'ابتدای دوره' ? entry.date : normalizeStoredDate(entry.date),
+  }));
+  const moneyTransactions = (data.moneyTransactions || []).map((transaction) => ({
+    ...transaction,
+    date: normalizeStoredDate(transaction.date),
+  }));
+  const numbering = {
+    ...seedData.settings.numbering,
+    ...(data.settings?.numbering || {}),
+  };
 
   const base: AccountingData = {
     customers,
@@ -489,12 +515,12 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     returns,
     payments,
     checks,
-    adjustments: data.adjustments || [],
+    adjustments,
     stockMovements,
     accounts,
-    journalEntries: data.journalEntries || [],
+    journalEntries,
     moneyTransactions,
-    settings: { ...seedData.settings, ...(data.settings || {}) },
+    settings: { ...seedData.settings, ...(data.settings || {}), numbering },
   };
 
   return {
@@ -509,6 +535,39 @@ export const useAccountingStore = create<Store>()(
       ...normalizeAccountingData(seedData),
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
+
+      reserveDocumentNumber: (key) => {
+        const state = get();
+        const current = state.settings.numbering[key] || seedData.settings.numbering[key];
+        const used = new Set<string>();
+        if (key === 'sale' || key === 'purchase') {
+          state.invoices.filter((invoice) => invoice.kind === key).forEach((invoice) => used.add(invoice.number.trim()));
+        } else if (key === 'receipt' || key === 'payment') {
+          state.payments
+            .filter((payment) => payment.direction === key)
+            .forEach((payment) => used.add(payment.documentNumber.trim()));
+        } else {
+          state.checks.forEach((check) => used.add(check.documentNumber.trim()));
+        }
+
+        let next = Math.max(1, Number(current.next || 1));
+        let candidate = formatDocumentNumber({ ...current, next });
+        while (used.has(candidate)) {
+          next++;
+          candidate = formatDocumentNumber({ ...current, next });
+        }
+
+        set({
+          settings: {
+            ...state.settings,
+            numbering: {
+              ...state.settings.numbering,
+              [key]: { ...current, next: next + 1 },
+            },
+          },
+        });
+        return candidate;
+      },
 
       upsertCustomer: (customer) =>
         set((state) => {
@@ -888,6 +947,10 @@ export const useAccountingStore = create<Store>()(
         if (!Number.isFinite(payment.amount) || payment.amount <= 0) {
           return { ok: false, message: 'مبلغ تراکنش باید بزرگ‌تر از صفر باشد.' };
         }
+        if (!payment.documentNumber?.trim()) return { ok: false, message: 'شماره سند دریافت/پرداخت الزامی است.' };
+        if (state.payments.some((item) => item.id !== payment.id && item.documentNumber?.trim() === payment.documentNumber.trim())) {
+          return { ok: false, message: 'شماره سند دریافت/پرداخت تکراری است.' };
+        }
 
         const linkedInvoice = payment.invoiceId
           ? state.invoices.find((invoice) => invoice.id === payment.invoiceId)
@@ -1116,6 +1179,10 @@ export const useAccountingStore = create<Store>()(
 
       upsertCheck: (check) => {
         const state = get();
+        if (!check.documentNumber?.trim()) return { ok: false, message: 'شماره سند چک الزامی است.' };
+        if (state.checks.some((item) => item.id !== check.id && item.documentNumber?.trim() === check.documentNumber.trim())) {
+          return { ok: false, message: 'شماره سند چک تکراری است.' };
+        }
         const previous = state.checks.find((item) => item.id === check.id);
         const linkedPayment = state.payments.find((payment) => payment.checkId === check.id);
 
@@ -1182,7 +1249,7 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);

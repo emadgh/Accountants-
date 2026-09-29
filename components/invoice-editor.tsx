@@ -4,18 +4,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Ban, CheckCircle2, Copy, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
-import { invoiceTotal, money, nowFa, uid } from '@/lib/utils';
+import { invoiceTotal, money, uid } from '@/lib/utils';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-function blankInvoice(kind: InvoiceKind, customerName = ''): Invoice {
+function blankInvoice(kind: InvoiceKind, customerName = '', number = ''): Invoice {
   const now = new Date().toISOString();
   return {
     id: uid('inv'),
-    number: `${kind === 'sale' ? '3' : '5'}${String(Date.now()).slice(-5)}`,
+    number,
     kind,
     status: 'draft',
-    date: nowFa(),
+    date: todayIso(),
     customerId: '', customerName, customerPhone: '', customerAddress: '', customerNationalId: '', customerEconomicCode: '', customerPostalCode: '',
     items: [{ id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }],
     discount: 0, tax: 0, shipping: 0, notes: '', createdAt: now, updatedAt: now,
@@ -23,13 +25,17 @@ function blankInvoice(kind: InvoiceKind, customerName = ''): Invoice {
 }
 
 export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; invoiceId?: string | null; onBack?: () => void }) {
-  const { invoices, customers, products, settings, setSettings, saveInvoiceDraft, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+  const { invoices, customers, products, settings, setSettings, reserveDocumentNumber, saveInvoiceDraft, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
   const existing = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const [invoice, setInvoice] = useState<Invoice>(() => existing ? structuredClone(existing) : blankInvoice(kind));
   const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => {
-    setInvoice(existing ? structuredClone(existing) : blankInvoice(kind));
+    if (existing) {
+      setInvoice(structuredClone(existing));
+      return;
+    }
+    setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind)));
   }, [existing?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const subtotal = invoice.items.reduce((s, i) => s + Number(i.qty || 0) * Number(i.unitPrice || 0), 0);
@@ -135,8 +141,9 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     setInvoice({
       ...invoice,
       id: uid('inv'),
-      number: `${invoice.kind === 'sale' ? '3' : '5'}${String(Date.now()).slice(-5)}`,
+      number: reserveDocumentNumber(invoice.kind),
       status: 'draft',
+      date: todayIso(),
       revision: 0,
       finalizedAt: undefined,
       voidedAt: undefined,
@@ -212,7 +219,8 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           </div>
           <div className="space-y-1 sm:text-left">
             <InfoLine label="شماره" value={invoice.number} onChange={(v) => patch('number', v)} readOnly={!isDraft} />
-            <InfoLine label="تاریخ" value={invoice.date} onChange={(v) => patch('date', v)} />
+            <div className="screen-only flex items-center gap-2 sm:justify-end"><span className="font-bold">تاریخ:</span><PersianDateInput value={invoice.date} onChange={(value) => patch('date', value)} disabled={isVoid} /></div>
+            <div className="print-only"><b>تاریخ:</b> {formatPersianDate(invoice.date)}</div>
             <div className="flex gap-1 text-[10px] text-slate-500 sm:justify-end"><span>{customer?.code ? `کد شخص: ${customer.code}` : ''}</span></div>
           </div>
         </div>

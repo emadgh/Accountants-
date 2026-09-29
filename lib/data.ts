@@ -17,6 +17,13 @@ export const seedData: AccountingData = {
     footer: 'با تشکر از خرید شما',
     currency: 'تومان',
     defaultTax: 0,
+    numbering: {
+      sale: { prefix: 'S-', next: 1, padding: 6 },
+      purchase: { prefix: 'P-', next: 1, padding: 6 },
+      receipt: { prefix: 'R-', next: 1, padding: 6 },
+      payment: { prefix: 'PY-', next: 1, padding: 6 },
+      check: { prefix: 'C-', next: 1, padding: 6 },
+    },
   },
   customers: [
     {
@@ -50,10 +57,10 @@ export const seedData: AccountingData = {
   ],
   returns: [],
   payments: [
-    { id: 'pay_1', invoiceId: 'inv_demo', customerId: 'cus_mansouri', direction: 'receipt', method: 'card', amount: 12000000, date: '۱۴۰۵/۰۳/۰۵', reference: 'کارت به کارت' },
+    { id: 'pay_1', documentNumber: 'R-000001', invoiceId: 'inv_demo', customerId: 'cus_mansouri', direction: 'receipt', method: 'card', amount: 12000000, date: '۱۴۰۵/۰۳/۰۵', reference: 'کارت به کارت' },
   ],
   checks: [
-    { id: 'chk_1', direction: 'received', customerId: 'cus_mansouri', amount: 15000000, dueDate: '1405/03/20', number: '458721', bank: 'ملت', owner: 'پخش منصوری', status: 'pending' },
+    { id: 'chk_1', documentNumber: 'C-000001', direction: 'received', customerId: 'cus_mansouri', amount: 15000000, dueDate: '1405/03/20', number: '458721', bank: 'ملت', owner: 'پخش منصوری', status: 'pending' },
   ],
   adjustments: [],
   stockMovements: [],

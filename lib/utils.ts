@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { AccountAdjustment, CheckRecord, Customer, CustomerLedgerEntry, Invoice, Payment, PaymentDirection, ReturnDocument, ReturnItem } from './types';
+import { normalizeStoredDate } from './standards';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -77,12 +78,8 @@ export function settledForInvoice(invoice: Pick<Invoice, 'id' | 'kind'>, payment
 }
 
 export function normalizeDateKey(value: string) {
-  const ascii = (value || '')
-    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
-    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
-  const match = ascii.match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
-  if (!match) return ascii;
-  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+  if (!value || value === 'ابتدای دوره') return value;
+  return normalizeStoredDate(value);
 }
 
 export function buildCustomerLedger(

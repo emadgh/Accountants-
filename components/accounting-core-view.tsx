@@ -5,7 +5,9 @@ import { Ban, BookOpenCheck, Landmark, Plus, Scale, WalletCards } from 'lucide-r
 import { useAccountingStore } from '@/lib/store';
 import type { Account, AccountType, MoneyTransaction } from '@/lib/types';
 import { accountBalance, isBalancedJournal, journalTotals, systemAccountId } from '@/lib/accounting';
-import { money, todayFa, uid } from '@/lib/utils';
+import { money, uid } from '@/lib/utils';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { PersianDateInput } from '@/components/persian-date-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -145,7 +147,7 @@ export function AccountingCoreView() {
             return entry.lines.map((line, index) => {
               const account = accounts.find((item) => item.id === line.accountId);
               return <tr key={entry.id + '-' + line.id}>
-                <td>{index === 0 ? entry.date : ''}</td>
+                <td>{index === 0 ? (entry.date === 'ابتدای دوره' ? entry.date : formatPersianDate(entry.date)) : ''}</td>
                 <td>{index === 0 ? <div><div className="font-bold">{entry.description}</div><div className="mt-1 text-[10px] text-slate-500">{entry.sourceType} · {entry.sourceReference || entry.sourceId} · {entry.action}</div></div> : ''}</td>
                 <td className="font-bold">{account ? account.code + ' — ' + account.name : line.accountId}</td>
                 <td className="font-bold text-rose-700">{line.debit ? money(line.debit) : '—'}</td>
@@ -173,7 +175,7 @@ export function AccountingCoreView() {
               const settlement = accounts.find((account) => account.id === transaction.settlementAccountId);
               const category = accounts.find((account) => account.id === transaction.categoryAccountId);
               return <tr key={transaction.id}>
-                <td>{transaction.date}</td>
+                <td>{formatPersianDate(transaction.date)}</td>
                 <td>{transaction.kind === 'income' ? <Badge className="bg-emerald-50 text-emerald-700">درآمد</Badge> : <Badge className="bg-rose-50 text-rose-700">هزینه</Badge>}</td>
                 <td><div className="font-bold">{transaction.description}</div>{transaction.reference && <div className="mt-1 text-[10px] text-slate-500">{transaction.reference}</div>}</td>
                 <td>{settlement?.name || '—'}</td><td>{category?.name || '—'}</td>
@@ -206,7 +208,7 @@ export function AccountingCoreView() {
         <DialogHeader><DialogTitle className="text-lg font-black">{moneyDraft.kind === 'income' ? 'ثبت درآمد' : 'ثبت هزینه'}</DialogTitle><DialogDescription className="text-sm text-slate-500">ثبت قطعی است؛ برای اصلاح بعدی از ابطال و سند جدید استفاده کنید.</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.kind} onChange={(event) => { const kind = event.target.value as 'income' | 'expense'; const categories = kind === 'income' ? incomeAccounts : expenseAccounts; setMoneyDraft({ ...moneyDraft, kind, categoryAccountId: categories[0]?.id || '' }); }}><option value="income">درآمد</option><option value="expense">هزینه</option></select></Field>
-          <Field label="تاریخ"><Input value={moneyDraft.date} onChange={(event) => setMoneyDraft({ ...moneyDraft, date: event.target.value })} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={moneyDraft.date} onChange={(date) => setMoneyDraft({ ...moneyDraft, date })} /></Field>
           <Field label="حساب صندوق / بانک"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.settlementAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, settlementAccountId: event.target.value })}>{settlementAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
           <Field label="حساب درآمد / هزینه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.categoryAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, categoryAccountId: event.target.value })}>{(moneyDraft.kind === 'income' ? incomeAccounts : expenseAccounts).map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
           <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={moneyDraft.amount} onChange={(event) => setMoneyDraft({ ...moneyDraft, amount: Number(event.target.value) })} /></Field>
@@ -235,7 +237,7 @@ function blankMoney(accounts: Account[]): MoneyTransaction {
     id: uid('money'),
     kind: 'expense',
     status: 'final',
-    date: todayFa(),
+    date: todayIso(),
     amount: 0,
     settlementAccountId: accounts.find((account) => account.systemKey === 'cash')?.id || '',
     categoryAccountId: accounts.find((account) => account.systemKey === 'general-expense')?.id || '',

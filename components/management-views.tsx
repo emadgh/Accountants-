@@ -7,8 +7,10 @@ import {
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { AccountingData, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
-import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, todayFa, uid } from '@/lib/utils';
+import type { AccountingData, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
+import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
+import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
+import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +41,7 @@ export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; on
           const netTotal = Math.max(0, total - returned);
           const paid = settledForInvoice(i, payments, checks);
           return <tr key={i.id}>
-            <td className="font-black">{i.number}</td><td>{i.date}</td><td>{i.customerName || '—'}</td>
+            <td className="font-black">{i.number}</td><td>{formatPersianDate(i.date)}</td><td>{i.customerName || '—'}</td>
             <td><div className="flex flex-wrap gap-1"><InvoiceStatus status={i.status} /><ReturnProgressBadge returned={returned} total={total} /></div></td>
             <td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span>{returned > 0 && <div className="mt-1 text-[10px] font-normal text-rose-500">مرجوعی: {money(returned)} · خالص: {money(netTotal)}</div>}</td>
             <td>{money(paid)}</td>
@@ -86,6 +88,17 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
       openingBalance: 0,
     });
     setOpen(true);
+  };
+
+  const saveCustomer = () => {
+    if (!edit) return;
+    const errors = validateOfficialFields(edit);
+    if (errors.length) {
+      window.alert(errors.join('\n'));
+      return;
+    }
+    upsertCustomer(edit);
+    setOpen(false);
   };
 
   return <div className="space-y-5">
@@ -139,7 +152,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button>
-            <Button disabled={!edit.name.trim()} onClick={() => { upsertCustomer(edit); setOpen(false); }}><Check className="h-4 w-4" /> ذخیره</Button>
+            <Button disabled={!edit.name.trim()} onClick={saveCustomer}><Check className="h-4 w-4" /> ذخیره</Button>
           </div>
         </div>}
       </DialogContent>
@@ -162,7 +175,7 @@ export function CustomerLedgerView({
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustDirection, setAdjustDirection] = useState<'debit' | 'credit'>('debit');
   const [adjustAmount, setAdjustAmount] = useState(0);
-  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustDate, setAdjustDate] = useState(todayIso());
   const [adjustNote, setAdjustNote] = useState('');
 
   useEffect(() => {
@@ -208,7 +221,7 @@ export function CustomerLedgerView({
     }
     setAdjustAmount(0);
     setAdjustNote('');
-    setAdjustDate(todayFa());
+    setAdjustDate(todayIso());
     setAdjustOpen(false);
   };
 
@@ -244,7 +257,7 @@ export function CustomerLedgerView({
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th><th>مانده</th><th>وضعیت / سند</th></tr></thead>
           <tbody>
             {visible.map((entry) => <tr key={entry.id}>
-              <td>{entry.date || '—'}</td>
+              <td>{entry.date === 'ابتدای دوره' ? entry.date : formatPersianDate(entry.date)}</td>
               <td><div className="font-bold">{entry.title}</div>{entry.note && <div className="mt-1 max-w-[360px] text-[11px] leading-5 text-slate-500">{entry.note}</div>}{!entry.effective && entry.nominalAmount ? <div className="mt-1 text-[10px] text-amber-600">مبلغ اسمی {money(entry.nominalAmount)}؛ بدون اثر در مانده</div> : null}</td>
               <td>{entry.reference || '—'}</td>
               <td className="font-bold text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td>
@@ -264,7 +277,7 @@ export function CustomerLedgerView({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع اصلاحیه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustDirection} onChange={(e) => setAdjustDirection(e.target.value as 'debit' | 'credit')}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
           <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={adjustAmount} onChange={(e) => setAdjustAmount(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="طرف حساب"><Input value={customer?.name || ''} readOnly className="bg-slate-100" /></Field>
           <Field label="دلیل اصلاحیه *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً اصلاح مانده انتقالی طبق سند..." /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!customer || adjustAmount <= 0 || !adjustNote.trim()} onClick={submitAdjustment}>ثبت اصلاحیه</Button></div>
@@ -348,7 +361,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
   const [adjustProductId, setAdjustProductId] = useState('');
   const [adjustMode, setAdjustMode] = useState<'count' | 'delta'>('count');
   const [adjustQuantity, setAdjustQuantity] = useState(0);
-  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustDate, setAdjustDate] = useState(todayIso());
   const [adjustNote, setAdjustNote] = useState('');
 
   const list = products.filter((product) => product.kind === 'product').filter((product) => (product.name + product.code).toLowerCase().includes(q.toLowerCase()));
@@ -364,7 +377,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
     const product = products.find((item) => item.id === selected);
     setAdjustMode('count');
     setAdjustQuantity(product?.stock || 0);
-    setAdjustDate(todayFa());
+    setAdjustDate(todayIso());
     setAdjustNote('');
     setAdjustOpen(true);
   };
@@ -425,7 +438,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>سند</th></tr></thead>
           <tbody>
             {cardex.map((movement) => <tr key={movement.id}>
-              <td>{movement.date}</td>
+              <td>{movement.date === 'ابتدای دوره' ? movement.date : formatPersianDate(movement.date)}</td>
               <td><div className="font-bold">{stockMovementLabel(movement)}</div>{movement.note && <div className="mt-1 max-w-xs text-[10px] leading-5 text-slate-500">{movement.note}</div>}</td>
               <td>{movement.sourceReference || '—'}</td>
               <td className="font-bold text-emerald-700">{movement.quantity > 0 ? money(movement.quantity) : '—'}</td>
@@ -447,7 +460,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <Field label="کالا"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustProductId} onChange={(e) => changeAdjustmentProduct(e.target.value)}><option value="">انتخاب...</option>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name} · موجودی {money(product.stock)}</option>)}</select></Field>
           <Field label="نوع عملیات"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustMode} onChange={(e) => changeAdjustmentMode(e.target.value as 'count' | 'delta')}><option value="count">شمارش انبار (موجودی واقعی)</option><option value="delta">اصلاح افزایشی / کاهشی</option></select></Field>
           <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
           {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b>{adjustMode === 'count' ? ' · اختلاف ثبت‌شونده: ' + money(Number(adjustQuantity || 0) - adjustmentProduct.stock) : ''}</div>}
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim()} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
@@ -468,25 +481,26 @@ function stockMovementLabel(movement: StockMovement) {
 }
 
 export function PaymentsView() {
-  const { payments, customers, invoices, checks, addPayment, deletePayment, settings } = useAccountingStore();
+  const { payments, customers, invoices, checks, reserveDocumentNumber, addPayment, deletePayment, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const emptyPayment = (direction: Payment['direction'] = 'receipt'): Payment => ({
+  const emptyPayment = (direction: Payment['direction'] = 'receipt', documentNumber = ''): Payment => ({
     id: uid('pay'),
+    documentNumber,
     customerId: '',
     invoiceId: '',
     direction,
     method: 'cash',
     checkId: undefined,
     amount: 0,
-    date: todayFa(),
+    date: todayIso(),
     reference: '',
     notes: '',
   });
   const [form, setForm] = useState<Payment>(() => emptyPayment());
 
   const start = (direction: Payment['direction'] = 'receipt') => {
-    setForm(emptyPayment(direction));
+    setForm(emptyPayment(direction, reserveDocumentNumber(direction)));
     setOpen(true);
   };
 
@@ -495,7 +509,7 @@ export function PaymentsView() {
   const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, invoiceFor(payment));
 
   const list = payments.filter((payment) =>
-    (customerName(payment.customerId) + ' ' + (payment.reference || '') + ' ' + (directionOf(payment) === 'receipt' ? 'دریافت' : 'پرداخت'))
+    (customerName(payment.customerId) + ' ' + payment.documentNumber + ' ' + (payment.reference || '') + ' ' + (directionOf(payment) === 'receipt' ? 'دریافت' : 'پرداخت'))
       .toLowerCase()
       .includes(q.toLowerCase())
   );
@@ -528,6 +542,7 @@ export function PaymentsView() {
       invoiceId: invoice.id,
       customerId: invoice.customerId,
       direction,
+      documentNumber: direction === form.direction ? form.documentNumber : reserveDocumentNumber(direction),
       checkId: undefined,
       amount: remaining || form.amount,
     });
@@ -547,6 +562,7 @@ export function PaymentsView() {
       checkId: check.id,
       customerId: check.customerId,
       direction,
+      documentNumber: direction === form.direction ? form.documentNumber : reserveDocumentNumber(direction),
       amount: check.amount,
       reference: check.number,
       invoiceId: linkedInvoice && linkedInvoice.customerId === check.customerId && (linkedInvoice.kind === 'sale' ? 'receipt' : 'payment') === direction ? linkedInvoice.id : '',
@@ -571,7 +587,7 @@ export function PaymentsView() {
     <Card>
       <CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader>
       <div className="table-wrap"><table className="data-table">
-        <thead><tr><th>تاریخ</th><th>نوع</th><th>طرف حساب</th><th>روش</th><th>فاکتور</th><th>مبلغ</th><th>وضعیت اثر</th><th>مرجع</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>شماره سند</th><th>تاریخ</th><th>نوع</th><th>طرف حساب</th><th>روش</th><th>فاکتور</th><th>مبلغ</th><th>وضعیت اثر</th><th>مرجع</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((payment) => {
             const invoice = invoiceFor(payment);
@@ -579,7 +595,8 @@ export function PaymentsView() {
             const check = payment.checkId ? checks.find((item) => item.id === payment.checkId) : undefined;
             const effective = effectivePaymentAmount(payment, checks) > 0;
             return <tr key={payment.id}>
-              <td>{payment.date}</td>
+              <td className="font-black">{payment.documentNumber}</td>
+              <td>{formatPersianDate(payment.date)}</td>
               <td><Badge className={direction === 'receipt' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}>{direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Badge></td>
               <td className="font-bold">{customerName(payment.customerId)}</td>
               <td>{payment.method === 'cash' ? 'نقدی' : payment.method === 'card' ? 'کارت / واریز' : 'چک'}</td>
@@ -590,7 +607,7 @@ export function PaymentsView() {
               <td><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('تراکنش حذف شود؟') && deletePayment(payment.id)}><Trash2 className="h-4 w-4" /></Button></td>
             </tr>;
           })}
-          {!list.length && <EmptyRow cols={9} text="تراکنشی ثبت نشده است." />}
+          {!list.length && <EmptyRow cols={10} text="تراکنشی ثبت نشده است." />}
         </tbody>
       </table></div>
     </Card>
@@ -603,10 +620,11 @@ export function PaymentsView() {
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع تراکنش">
-            <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as Payment['direction'], invoiceId: '', checkId: undefined })}>
+            <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.direction} onChange={(e) => { const direction = e.target.value as Payment['direction']; setForm({ ...form, direction, documentNumber: reserveDocumentNumber(direction), invoiceId: '', checkId: undefined }); }}>
               <option value="receipt">دریافت</option><option value="payment">پرداخت</option>
             </select>
           </Field>
+          <Field label="شماره سند"><Input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} /></Field>
           <Field label="طرف حساب *">
             <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, invoiceId: '', checkId: undefined })}>
               <option value="">انتخاب...</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
@@ -628,7 +646,7 @@ export function PaymentsView() {
             </select>
           </Field>}
           <Field label={`مبلغ (${settings.currency}) *`}><Input type="number" min="0" value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="تاریخ"><Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={form.date} onChange={(date) => setForm({ ...form, date })} /></Field>
           <Field label="شماره پیگیری / مرجع"><Input value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
           <Field label="توضیحات"><Input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           {form.method === 'check' && <div className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">تراکنش چکی هنگام ثبت ایجاد می‌شود، اما تا زمانی که وضعیت چک «وصول/پاس شده» نباشد، مبلغ آن در مانده تسویه فاکتور محاسبه نمی‌شود.</div>}
@@ -640,13 +658,13 @@ export function PaymentsView() {
 }
 
 export function ChecksView() {
-  const { checks, payments, customers, upsertCheck, deleteCheck, settings } = useAccountingStore();
+  const { checks, payments, customers, reserveDocumentNumber, upsertCheck, deleteCheck, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('all');
-  const [form, setForm] = useState<CheckRecord>({ id: '', direction: 'received', customerId: '', amount: 0, dueDate: '', number: '', bank: '', owner: '', status: 'pending', notes: '' });
+  const [form, setForm] = useState<CheckRecord>({ id: '', documentNumber: '', direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
 
   const start = (check?: CheckRecord) => {
-    setForm(check ? { ...check } : { id: uid('chk'), direction: 'received', customerId: '', amount: 0, dueDate: '', number: '', bank: '', owner: '', status: 'pending', notes: '' });
+    setForm(check ? { ...check } : { id: uid('chk'), documentNumber: reserveDocumentNumber('check'), direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
     setOpen(true);
   };
   const list = checks.filter((check) => filter === 'all' || check.status === filter);
@@ -673,19 +691,20 @@ export function ChecksView() {
     <Card>
       <CardHeader><div className="flex flex-wrap gap-2">{[['all','همه'],['pending','در انتظار'],['cleared','وصول / پاس شده'],['bounced','برگشتی']].map(([key,label]) => <Button key={key} variant={filter === key ? 'default' : 'outline'} size="sm" onClick={() => setFilter(key)}>{label}</Button>)}</div></CardHeader>
       <div className="table-wrap"><table className="data-table">
-        <thead><tr><th>نوع</th><th>طرف حساب</th><th>شماره چک</th><th>بانک</th><th>مبلغ</th><th>سررسید</th><th>وضعیت</th><th>اتصال</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>شماره سند</th><th>نوع</th><th>طرف حساب</th><th>شماره چک</th><th>بانک</th><th>مبلغ</th><th>سررسید</th><th>وضعیت</th><th>اتصال</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((check) => {
             const linked = payments.find((payment) => payment.checkId === check.id);
             return <tr key={check.id}>
+              <td className="font-black">{check.documentNumber}</td>
               <td>{check.direction === 'received' ? <span className="font-bold text-emerald-700">دریافتی</span> : <span className="font-bold text-rose-700">پرداختی</span>}</td>
               <td className="font-bold">{customerName(check.customerId)}</td><td>{check.number}</td><td>{check.bank}</td>
-              <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate || '—'}</td><td><CheckStatus status={check.status} /></td>
+              <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate ? formatPersianDate(check.dueDate) : '—'}</td><td><CheckStatus status={check.status} /></td>
               <td>{linked ? <Badge className="bg-sky-50 text-sky-700">متصل به تراکنش</Badge> : <span className="text-slate-400">آزاد</span>}</td>
               <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(check)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => remove(check.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
             </tr>;
           })}
-          {!list.length && <EmptyRow cols={9} text="چکی در این وضعیت وجود ندارد." />}
+          {!list.length && <EmptyRow cols={10} text="چکی در این وضعیت وجود ندارد." />}
         </tbody>
       </table></div>
     </Card>
@@ -700,7 +719,7 @@ export function ChecksView() {
           <Field label="بانک"><Input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
           <Field label="صاحب چک"><Input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} /></Field>
           <Field label={`مبلغ (${settings.currency})`}><Input readOnly={!!linkedPayment} className={linkedPayment ? 'bg-slate-100' : ''} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="سررسید"><Input value={form.dueDate} placeholder="۱۴۰۵/۰۴/۱۵" onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
+          <Field label="سررسید"><PersianDateInput value={form.dueDate || todayIso()} onChange={(dueDate) => setForm({ ...form, dueDate })} /></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CheckRecord['status'] })}><option value="pending">در انتظار</option><option value="cleared">وصول / پاس شده</option><option value="bounced">برگشتی</option></select></Field>
           <Field label="توضیحات" className="sm:col-span-2"><Textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!form.customerId || form.amount <= 0} onClick={save}>ذخیره</Button></div>
@@ -749,10 +768,48 @@ export function ReportsView() {
 export function SettingsView() {
   const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
   const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, returns: store.returns, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, accounts: store.accounts, journalEntries: store.journalEntries, moneyTransactions: store.moneyTransactions, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
-  const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); replaceAll(parsed); setDraft(parsed.settings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
+  const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); const normalizedSettings: BusinessSettings = { ...settings, ...parsed.settings, numbering: { ...settings.numbering, ...(parsed.settings.numbering || {}) } }; replaceAll({ ...parsed, settings: normalizedSettings }); setDraft(normalizedSettings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
+  const saveSettings = () => {
+    const errors = validateOfficialFields(draft);
+    if (errors.length) {
+      window.alert(errors.join('\n'));
+      return;
+    }
+    setSettings(draft);
+  };
   return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
-    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><div className="sm:col-span-2 flex justify-end"><Button onClick={() => setSettings(draft)}>ذخیره تنظیمات</Button></div></CardContent></Card>
+    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><NumberingSettingsEditor draft={draft} onChange={setDraft} /><div className="sm:col-span-2 flex justify-end"><Button onClick={saveSettings}>ذخیره تنظیمات</Button></div></CardContent></Card>
       <div className="space-y-5"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-sky-600" /> پشتیبان‌گیری</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-600"><p>تمام داده‌ها در LocalStorage مرورگر نگهداری می‌شوند. برای انتقال به سیستم دیگر خروجی JSON بگیرید.</p><div className="grid gap-2"><Button variant="outline" onClick={exportData}><ArrowDownToLine className="h-4 w-4" /> دانلود نسخه پشتیبان</Button><Button variant="outline" onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> بازیابی نسخه پشتیبان</Button><input ref={fileRef} type="file" className="hidden" accept="application/json" onChange={(e) => importData(e.target.files?.[0])} /></div></CardContent></Card><Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card></div>
+    </div>
+  </div>;
+}
+
+function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings; onChange: (settings: BusinessSettings) => void }) {
+  const rows = [
+    ['sale', 'فاکتور فروش'],
+    ['purchase', 'فاکتور خرید'],
+    ['receipt', 'دریافت'],
+    ['payment', 'پرداخت'],
+    ['check', 'چک'],
+  ] as const;
+  const update = (key: keyof BusinessSettings['numbering'], field: 'prefix' | 'next' | 'padding', value: string | number) => {
+    onChange({
+      ...draft,
+      numbering: {
+        ...draft.numbering,
+        [key]: { ...draft.numbering[key], [field]: field === 'prefix' ? String(value) : Number(value) },
+      },
+    });
+  };
+  return <div className="sm:col-span-2 rounded-xl border border-slate-200 p-3">
+    <div className="mb-3 text-sm font-black">الگوی شماره‌گذاری اسناد</div>
+    <div className="grid gap-2">
+      {rows.map(([key, label]) => <div key={key} className="grid grid-cols-[1fr_.8fr_.7fr_.6fr] items-end gap-2">
+        <div className="text-xs font-bold text-slate-600">{label}</div>
+        <Field label="پیشوند"><Input value={draft.numbering[key].prefix} onChange={(e) => update(key, 'prefix', e.target.value)} /></Field>
+        <Field label="شماره بعدی"><Input type="number" min="1" value={draft.numbering[key].next} onChange={(e) => update(key, 'next', Number(e.target.value))} /></Field>
+        <Field label="تعداد رقم"><Input type="number" min="1" max="12" value={draft.numbering[key].padding} onChange={(e) => update(key, 'padding', Number(e.target.value))} /></Field>
+      </div>)}
     </div>
   </div>;
 }
