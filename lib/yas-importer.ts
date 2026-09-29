@@ -90,8 +90,8 @@ export interface YasMigrationAnalysis {
 }
 
 const aliases = {
-  id: ['id', '_id', 'rowid', 'code', 'kod', 'pk'],
-  code: ['code', 'kod', 'customer_code', 'customercode', 'personcode', 'codeperson', 'codehesab', 'productcode', 'kalacode', 'codekala'],
+  id: ['id', '_id', 'rowid', 'code', 'kod', 'cod', 'pk'],
+  code: ['code', 'kod', 'cod', 'customer_code', 'customercode', 'personcode', 'codeperson', 'codehesab', 'codhesab', 'productcode', 'kalacode', 'codekala', 'codkala'],
   name: ['name', 'nam', 'title', 'esm', 'fullname', 'namefamily', 'onvan'],
   phone: ['phone', 'tel', 'telephone', 'mobile', 'mob', 'tell'],
   address: ['address', 'adres', 'addr'],
@@ -104,11 +104,11 @@ const aliases = {
   stock: ['stock', 'mojoodi', 'inventory', 'tedadmojood', 'mande'],
   salePrice: ['saleprice', 'sale_price', 'gheymatforoosh', 'gheymatforosh', 'foroshprice'],
   buyPrice: ['buyprice', 'buy_price', 'gheymatkharid', 'kharidprice'],
-  number: ['number', 'no', 'serial', 'shomare', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
-  date: ['date', 'tarikh', 'createdate', 'factor_date', 'factordate'],
-  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'shakhs', 'ashkhasid'],
+  number: ['number', 'no', 'serial', 'shomare', 'shf', 'shfactor', 'shomarefactor', 'factorno', 'factornumber', 'documentnumber'],
+  date: ['date', 'tarikh', 'tarikhfaktor', 'createdate', 'factor_date', 'factordate'],
+  customerRef: ['customerid', 'customer_id', 'personid', 'person_id', 'hesabid', 'hesab_id', 'codeperson', 'customercode', 'tarafhesabid', 'codeh', 'codehesab', 'codhesab', 'shakhs', 'ashkhasid', 'codshakhs', 'codeshakhs', 'codashkhas', 'codeashkhas'],
   productRef: ['productid', 'product_id', 'kalaid', 'kala_id', 'codekala', 'codkala', 'kalacode', 'productcode'],
-  invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'number', 'shomare', 'shfactor', 'shomarefactor', 'factornumber', 'factorno'],
+  invoiceRef: ['invoiceid', 'invoice_id', 'factorid', 'factor_id', 'idfactor', 'number', 'shomare', 'shf', 'shfactor', 'shomarefactor', 'factornumber', 'factorno'],
   qty: ['qty', 'quantity', 'tedad', 'meghdar', 'count'],
   price: ['unitprice', 'unit_price', 'price', 'fee', 'fi', 'gheymat', 'gheymatvahed', 'mablaghvahed'],
   amount: ['amount', 'mablagh', 'total', 'sum', 'jam', 'price', 'mablaghkol'],
@@ -237,7 +237,8 @@ function scoreProduct(table: ExternalSqliteTable) {
 function scoreInvoiceHeader(table: ExternalSqliteTable) {
   if (isDerivedTable(table)) return -100;
   let score = 0;
-  if (tableNameIncludes(table, ['factor', 'faktor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) score += 6;
+  if (tableNameIncludes(table, ['faktorforoush', 'faktorkharid'])) score += 12;
+  else if (tableNameIncludes(table, ['factor', 'faktor', 'invoice', 'forosh', 'kharid', 'فاکتور'])) score += 6;
   if (hasColumn(table, aliases.number)) score += 3;
   if (hasColumn(table, aliases.date)) score += 2;
   if (hasColumn(table, aliases.customerRef)) score += 4;
@@ -469,7 +470,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     (table) =>
       !isDerivedTable(table) &&
       table.rowCount <= 100 &&
-      tableNameIncludes(table, ['financialaccount', 'bankaccount', 'hesabmali', 'hesabha', 'sandogh', 'bank', 'accounts'])
+      tableNameIncludes(table, ['financialaccount', 'bankaccount', 'hesabmali', 'hesabha', 'hesab', 'sandogh', 'bank', 'accounts'])
   );
   const financialAccountNames = new Map<string, string>();
   for (const table of financialAccountTables) {
