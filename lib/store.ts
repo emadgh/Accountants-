@@ -59,9 +59,9 @@ type Store = AccountingData & {
   deleteBusinessProfile: (id: string) => OperationResult;
   setDefaultBusinessProfile: (id: string) => OperationResult;
   upsertCustomer: (customer: Customer) => void;
-  deleteCustomer: (id: string) => void;
+  deleteCustomer: (id: string) => OperationResult;
   upsertProduct: (product: Product) => void;
-  deleteProduct: (id: string) => void;
+  deleteProduct: (id: string) => OperationResult;
   saveInvoiceDraft: (invoice: Invoice) => StoreOperationResult;
   finalizeInvoice: (invoice: Invoice) => StoreOperationResult;
   reviseInvoice: (invoice: Invoice, reason: string) => StoreOperationResult;
@@ -720,7 +720,20 @@ export const useAccountingStore = create<Store>()(
           };
         }),
 
-      deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((c) => c.id !== id) })),
+      deleteCustomer: (id) => {
+        const state = get();
+        const used =
+          state.invoices.some((invoice) => invoice.customerId === id) ||
+          state.returns.some((document) => document.customerId === id) ||
+          state.payments.some((payment) => payment.customerId === id) ||
+          state.checks.some((check) => check.customerId === id) ||
+          state.adjustments.some((adjustment) => adjustment.customerId === id);
+        if (used) {
+          return { ok: false, message: 'این طرف حساب دارای سند یا گردش است و برای حفظ یکپارچگی سوابق قابل حذف نیست.' };
+        }
+        set({ customers: state.customers.filter((customer) => customer.id !== id) });
+        return { ok: true };
+      },
 
       upsertProduct: (product) =>
         set((state) => {
@@ -769,7 +782,18 @@ export const useAccountingStore = create<Store>()(
           };
         }),
 
-      deleteProduct: (id) => set((s) => ({ products: s.products.filter((p) => p.id !== id) })),
+      deleteProduct: (id) => {
+        const state = get();
+        const used =
+          state.invoices.some((invoice) => invoice.items.some((item) => item.productId === id)) ||
+          state.returns.some((document) => document.items.some((item) => item.productId === id)) ||
+          state.stockMovements.some((movement) => movement.productId === id);
+        if (used) {
+          return { ok: false, message: 'این کالا/خدمت دارای سابقه سند یا کاردکس است و برای حفظ یکپارچگی سوابق قابل حذف نیست.' };
+        }
+        set({ products: state.products.filter((product) => product.id !== id) });
+        return { ok: true };
+      },
 
       saveInvoiceDraft: (invoice) => {
         const state = get();
