@@ -41,7 +41,7 @@ export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; on
           const netTotal = Math.max(0, total - returned);
           const paid = settledForInvoice(i, payments, checks);
           return <tr key={i.id}>
-            <td className="font-black">{i.number}</td><td>{i.date}</td><td>{i.customerName || '—'}</td>
+            <td className="font-black">{i.number}</td><td>{formatPersianDate(i.date)}</td><td>{i.customerName || '—'}</td>
             <td><div className="flex flex-wrap gap-1"><InvoiceStatus status={i.status} /><ReturnProgressBadge returned={returned} total={total} /></div></td>
             <td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span>{returned > 0 && <div className="mt-1 text-[10px] font-normal text-rose-500">مرجوعی: {money(returned)} · خالص: {money(netTotal)}</div>}</td>
             <td>{money(paid)}</td>
@@ -257,7 +257,7 @@ export function CustomerLedgerView({
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th><th>مانده</th><th>وضعیت / سند</th></tr></thead>
           <tbody>
             {visible.map((entry) => <tr key={entry.id}>
-              <td>{entry.date || '—'}</td>
+              <td>{entry.date === 'ابتدای دوره' ? entry.date : formatPersianDate(entry.date)}</td>
               <td><div className="font-bold">{entry.title}</div>{entry.note && <div className="mt-1 max-w-[360px] text-[11px] leading-5 text-slate-500">{entry.note}</div>}{!entry.effective && entry.nominalAmount ? <div className="mt-1 text-[10px] text-amber-600">مبلغ اسمی {money(entry.nominalAmount)}؛ بدون اثر در مانده</div> : null}</td>
               <td>{entry.reference || '—'}</td>
               <td className="font-bold text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td>
@@ -277,7 +277,7 @@ export function CustomerLedgerView({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع اصلاحیه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustDirection} onChange={(e) => setAdjustDirection(e.target.value as 'debit' | 'credit')}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
           <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={adjustAmount} onChange={(e) => setAdjustAmount(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="طرف حساب"><Input value={customer?.name || ''} readOnly className="bg-slate-100" /></Field>
           <Field label="دلیل اصلاحیه *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً اصلاح مانده انتقالی طبق سند..." /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!customer || adjustAmount <= 0 || !adjustNote.trim()} onClick={submitAdjustment}>ثبت اصلاحیه</Button></div>
@@ -438,7 +438,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>سند</th></tr></thead>
           <tbody>
             {cardex.map((movement) => <tr key={movement.id}>
-              <td>{movement.date}</td>
+              <td>{movement.date === 'ابتدای دوره' ? movement.date : formatPersianDate(movement.date)}</td>
               <td><div className="font-bold">{stockMovementLabel(movement)}</div>{movement.note && <div className="mt-1 max-w-xs text-[10px] leading-5 text-slate-500">{movement.note}</div>}</td>
               <td>{movement.sourceReference || '—'}</td>
               <td className="font-bold text-emerald-700">{movement.quantity > 0 ? money(movement.quantity) : '—'}</td>
@@ -460,7 +460,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <Field label="کالا"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustProductId} onChange={(e) => changeAdjustmentProduct(e.target.value)}><option value="">انتخاب...</option>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name} · موجودی {money(product.stock)}</option>)}</select></Field>
           <Field label="نوع عملیات"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustMode} onChange={(e) => changeAdjustmentMode(e.target.value as 'count' | 'delta')}><option value="count">شمارش انبار (موجودی واقعی)</option><option value="delta">اصلاح افزایشی / کاهشی</option></select></Field>
           <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
           {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b>{adjustMode === 'count' ? ' · اختلاف ثبت‌شونده: ' + money(Number(adjustQuantity || 0) - adjustmentProduct.stock) : ''}</div>}
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim()} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
@@ -592,7 +592,7 @@ export function PaymentsView() {
             const check = payment.checkId ? checks.find((item) => item.id === payment.checkId) : undefined;
             const effective = effectivePaymentAmount(payment, checks) > 0;
             return <tr key={payment.id}>
-              <td>{payment.date}</td>
+              <td>{formatPersianDate(payment.date)}</td>
               <td><Badge className={direction === 'receipt' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}>{direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Badge></td>
               <td className="font-bold">{customerName(payment.customerId)}</td>
               <td>{payment.method === 'cash' ? 'نقدی' : payment.method === 'card' ? 'کارت / واریز' : 'چک'}</td>
@@ -641,7 +641,7 @@ export function PaymentsView() {
             </select>
           </Field>}
           <Field label={`مبلغ (${settings.currency}) *`}><Input type="number" min="0" value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="تاریخ"><Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+          <Field label="تاریخ"><PersianDateInput value={form.date} onChange={(date) => setForm({ ...form, date })} /></Field>
           <Field label="شماره پیگیری / مرجع"><Input value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
           <Field label="توضیحات"><Input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           {form.method === 'check' && <div className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">تراکنش چکی هنگام ثبت ایجاد می‌شود، اما تا زمانی که وضعیت چک «وصول/پاس شده» نباشد، مبلغ آن در مانده تسویه فاکتور محاسبه نمی‌شود.</div>}
@@ -693,7 +693,7 @@ export function ChecksView() {
             return <tr key={check.id}>
               <td>{check.direction === 'received' ? <span className="font-bold text-emerald-700">دریافتی</span> : <span className="font-bold text-rose-700">پرداختی</span>}</td>
               <td className="font-bold">{customerName(check.customerId)}</td><td>{check.number}</td><td>{check.bank}</td>
-              <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate || '—'}</td><td><CheckStatus status={check.status} /></td>
+              <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate ? formatPersianDate(check.dueDate) : '—'}</td><td><CheckStatus status={check.status} /></td>
               <td>{linked ? <Badge className="bg-sky-50 text-sky-700">متصل به تراکنش</Badge> : <span className="text-slate-400">آزاد</span>}</td>
               <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(check)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => remove(check.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
             </tr>;
@@ -713,7 +713,7 @@ export function ChecksView() {
           <Field label="بانک"><Input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
           <Field label="صاحب چک"><Input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} /></Field>
           <Field label={`مبلغ (${settings.currency})`}><Input readOnly={!!linkedPayment} className={linkedPayment ? 'bg-slate-100' : ''} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="سررسید"><Input value={form.dueDate} placeholder="۱۴۰۵/۰۴/۱۵" onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
+          <Field label="سررسید"><PersianDateInput value={form.dueDate || todayIso()} onChange={(dueDate) => setForm({ ...form, dueDate })} /></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CheckRecord['status'] })}><option value="pending">در انتظار</option><option value="cleared">وصول / پاس شده</option><option value="bounced">برگشتی</option></select></Field>
           <Field label="توضیحات" className="sm:col-span-2"><Textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!form.customerId || form.amount <= 0} onClick={save}>ذخیره</Button></div>
