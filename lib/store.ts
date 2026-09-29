@@ -86,8 +86,7 @@ function validatePosting(products: Product[], invoice: Invoice, allInvoices: Inv
     (item) =>
       item.id !== invoice.id &&
       item.kind === invoice.kind &&
-      item.number.trim() === invoice.number.trim() &&
-      item.status !== 'void'
+      item.number.trim() === invoice.number.trim()
   );
   if (duplicateNumber) return { ok: false, message: 'شماره فاکتور برای این نوع سند تکراری است.' };
 
