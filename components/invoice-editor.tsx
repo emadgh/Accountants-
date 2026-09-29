@@ -9,6 +9,7 @@ import { formatPersianDate, todayIso } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
 
 function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = ''): Invoice {
   const now = new Date().toISOString();
@@ -56,6 +57,27 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   const isDirty = !!existing && invoiceEditableSignature(existing) !== invoiceEditableSignature(invoice);
   const statusLabel = invoice.status === 'draft' ? 'پیش‌نویس' : invoice.status === 'partial' ? 'بخشی تسویه' : invoice.status === 'settled' ? 'تسویه‌شده' : invoice.status === 'void' ? 'باطل' : 'قطعی';
   const statusClass = invoice.status === 'draft' ? '' : invoice.status === 'void' ? 'bg-rose-50 text-rose-700' : invoice.status === 'partial' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
+
+  const customerOptions: SearchableOption[] = [
+    { value: '', label: 'ورود دستی', description: 'نام و اطلاعات طرف حساب را دستی وارد کنید' },
+    ...customers
+      .filter((c) => invoice.kind === 'sale' ? c.kind !== 'supplier' : c.kind !== 'customer')
+      .map((c) => ({
+        value: c.id,
+        label: c.name,
+        description: [c.code, c.phone].filter(Boolean).join(' · '),
+        keywords: [c.code, c.phone, c.nationalId, c.economicCode].filter(Boolean).join(' '),
+      })),
+  ];
+  const productOptions: SearchableOption[] = [
+    { value: '', label: 'شرح دستی', description: 'ردیف بدون اتصال به کالا/خدمت' },
+    ...products.map((p) => ({
+      value: p.id,
+      label: p.name,
+      description: [p.code, p.kind === 'product' ? 'کالا' : 'خدمت', p.unit].join(' · '),
+      keywords: [p.code, p.name, p.notes].filter(Boolean).join(' '),
+    })),
+  ];
 
   const patch = <K extends keyof Invoice>(key: K, value: Invoice[K]) => setInvoice((x) => ({ ...x, [key]: value, updatedAt: new Date().toISOString() }));
   const patchItem = (id: string, values: Partial<InvoiceItem>) => setInvoice((x) => ({ ...x, items: x.items.map((item) => item.id === id ? { ...item, ...values } : item), updatedAt: new Date().toISOString() }));
@@ -163,6 +185,33 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     });
   };
 
+  const addRow = () => {
+    if (isVoid) return;
+    patch('items', [...invoice.items, { id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }]);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        persist();
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        print();
+        return;
+      }
+      if (modifier && event.key === 'Enter') {
+        event.preventDefault();
+        addRow();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   return <div className="space-y-4">
     <div className="screen-only sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
       <div className="flex items-center gap-2">
@@ -173,10 +222,10 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       <div className="flex flex-wrap items-center gap-2">
         {savedFlash && <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><CheckCircle2 className="h-4 w-4" /> ذخیره شد</span>}
         <Button variant="outline" size="sm" onClick={duplicate}><Copy className="h-4 w-4" /> کپی فاکتور</Button>
-        {!isVoid && <Button variant="outline" size="sm" onClick={persist}><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
+        {!isVoid && <Button variant="outline" size="sm" onClick={persist} title="Ctrl/Cmd + S"><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
         {isPosted && <Button variant="danger" size="sm" onClick={voidCurrent}><Ban className="h-4 w-4" /> ابطال</Button>}
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
-        <Button size="sm" onClick={print}><Printer className="h-4 w-4" /> {isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
+        <Button size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
     </div>
 
@@ -218,9 +267,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <div className="grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-[1.35fr_.65fr]">
           <div className="space-y-1">
             <div className="flex items-center gap-2"><span className="shrink-0 font-bold">طرف حساب:</span>
-              <select className="screen-editor invoice-inline-select font-bold" value={invoice.customerId} onChange={(e) => chooseCustomer(e.target.value)}>
-                <option value="">انتخاب / ورود دستی</option>{customers.filter((c) => invoice.kind === 'sale' ? c.kind !== 'supplier' : c.kind !== 'customer').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select><span className="print-only font-bold">{invoice.customerName || '—'}</span>
+              <div className="screen-only min-w-[210px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></div><span className="print-only font-bold">{invoice.customerName || '—'}</span>
               {!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}
             </div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
@@ -247,7 +294,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <tbody>{invoice.items.map((item, index) => <tr key={item.id}>
           <td className="text-center font-bold">{index + 1}</td>
           <td>
-            <select className="screen-editor invoice-inline-select desc" value={item.productId || ''} onChange={(e) => chooseProduct(item.id, e.target.value)}><option value="">شرح دستی...</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <div className="screen-only"><SearchableSelect value={item.productId || ''} options={productOptions} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
             <span className="print-only desc">{item.description || '—'}</span>
             {!item.productId && <input className="screen-editor invoice-inline-input desc" placeholder="شرح کالا یا خدمت" value={item.description} onChange={(e) => patchItem(item.id, { description: e.target.value })} />}
             <textarea className="screen-editor invoice-inline-textarea detail" placeholder="توضیحات ردیف..." value={item.details || ''} onChange={(e) => patchItem(item.id, { details: e.target.value })} />
@@ -260,7 +307,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           <td className="screen-only"><button aria-label="حذف ردیف" className="rounded-lg p-1 text-rose-500 hover:bg-rose-50" onClick={() => patch('items', invoice.items.filter((x) => x.id !== item.id))}><Trash2 className="h-4 w-4" /></button></td>
         </tr>)}</tbody>
       </table>
-      <div className="screen-only mt-2"><Button variant="outline" size="sm" onClick={() => patch('items', [...invoice.items, { id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }])}><Plus className="h-4 w-4" /> افزودن ردیف</Button></div>
+      <div className="screen-only mt-2"><Button variant="outline" size="sm" onClick={addRow} title="Ctrl/Cmd + Enter"><Plus className="h-4 w-4" /> افزودن ردیف <kbd className="mr-1 hidden rounded bg-slate-100 px-1 text-[9px] text-slate-500 sm:inline">Ctrl↵</kbd></Button></div>
 
       <div className="invoice-summary-block mt-4 grid grid-cols-1 gap-6 border-t border-blue-200 pt-3 sm:grid-cols-2">
         <div className="order-2 text-[12px] sm:order-1">
