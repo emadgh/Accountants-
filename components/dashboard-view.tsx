@@ -81,15 +81,11 @@ export function DashboardView() {
     </div>
 
     <div className="grid gap-4 sm:grid-cols-3">
-      <Mini icon={Users} label="طرف حساب‌ها" value={customers.length} />
-      <Mini icon={Boxes} label="کالا و خدمات" value={products.length} />
-      <Mini icon={CircleDollarSign} label="تراکنش‌های ثبت‌شده" value={payments.length} />
+      <MetricCard size="sm" icon={Users} title="طرف حساب‌ها" value={customers.length} />
+      <MetricCard size="sm" icon={Boxes} title="کالا و خدمات" value={products.length} />
+      <MetricCard size="sm" icon={CircleDollarSign} title="تراکنش‌های ثبت‌شده" value={payments.length} />
     </div>
   </div>;
-}
-
-function Mini({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: number }) {
-  return <MetricCard size="sm" icon={Icon} title={label} value={value} />;
 }
 
 function Status({ status }: { status: string }) {
