@@ -926,18 +926,34 @@ export const useAccountingStore = create<Store>()(
 
         const payments = [normalized, ...state.payments];
         const invoices = withInvoiceStatuses(state.invoices, payments, state.checks, state.returns);
-        set({ payments, invoices });
+        const linkedCheck = normalized.checkId ? state.checks.find((item) => item.id === normalized.checkId) : undefined;
+        const shouldPost = normalized.method !== 'check' || linkedCheck?.status === 'cleared';
+        const journalEntries = shouldPost
+          ? [...state.journalEntries, ...journalForPayment(normalized, state.accounts)]
+          : state.journalEntries;
+        set({ payments, invoices, journalEntries });
         return { ok: true };
       },
 
-      deletePayment: (id) =>
-        set((state) => {
-          const payments = state.payments.filter((payment) => payment.id !== id);
-          return {
-            payments,
-            invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
-          };
-        }),
+      deletePayment: (id) => {
+        const state = get();
+        const payment = state.payments.find((item) => item.id === id);
+        if (!payment) return;
+        const payments = state.payments.filter((item) => item.id !== id);
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'payment',
+          id,
+          todayFa(),
+          'برگشت تراکنش حذف‌شده',
+          'status-reversal'
+        );
+        set({
+          payments,
+          invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
+      },
 
       addAdjustment: (adjustment) => {
         const state = get();
@@ -956,7 +972,10 @@ export const useAccountingStore = create<Store>()(
           note: adjustment.note.trim(),
           createdAt: adjustment.createdAt || new Date().toISOString(),
         };
-        set({ adjustments: [normalized, ...(state.adjustments || [])] });
+        set({
+          adjustments: [normalized, ...(state.adjustments || [])],
+          journalEntries: [...state.journalEntries, ...journalForCustomerAdjustment(normalized, state.accounts)],
+        });
         return { ok: true };
       },
 
@@ -999,7 +1018,99 @@ export const useAccountingStore = create<Store>()(
           sourceReference: input.mode === 'count' ? 'شمارش انبار' : 'اصلاح موجودی',
           note: input.note.trim(),
         };
-        set({ products, stockMovements: [...state.stockMovements, movement] });
+        set({
+          products,
+          stockMovements: [...state.stockMovements, movement],
+          journalEntries: [...state.journalEntries, ...journalForStockAdjustment(movement, state.accounts)],
+        });
+        return { ok: true };
+      },
+
+      upsertAccount: (account) => {
+        const state = get();
+        const previous = state.accounts.find((item) => item.id === account.id);
+        if (previous?.systemKey) return { ok: false, message: 'حساب سیستمی قابل تغییر ساختاری نیست.' };
+        if (!account.code.trim() || !account.name.trim()) return { ok: false, message: 'کد و نام حساب الزامی است.' };
+        if (state.accounts.some((item) => item.id !== account.id && item.code.trim() === account.code.trim())) {
+          return { ok: false, message: 'کد حساب تکراری است.' };
+        }
+        const normalized: Account = { ...account, systemKey: undefined };
+        set({
+          accounts: previous
+            ? state.accounts.map((item) => item.id === account.id ? normalized : item)
+            : [...state.accounts, normalized],
+        });
+        return { ok: true };
+      },
+
+      deleteAccount: (id) => {
+        const state = get();
+        const account = state.accounts.find((item) => item.id === id);
+        if (!account) return { ok: false, message: 'حساب پیدا نشد.' };
+        if (account.systemKey) return { ok: false, message: 'حساب سیستمی قابل حذف نیست.' };
+        const usedInJournal = state.journalEntries.some((entry) => entry.lines.some((line) => line.accountId === id));
+        const usedInMoney = state.moneyTransactions.some((transaction) => transaction.settlementAccountId === id || transaction.categoryAccountId === id);
+        if (usedInJournal || usedInMoney) return { ok: false, message: 'حساب دارای گردش است و قابل حذف نیست؛ آن را غیرفعال کنید.' };
+        set({ accounts: state.accounts.filter((item) => item.id !== id) });
+        return { ok: true };
+      },
+
+      addMoneyTransaction: (transaction) => {
+        const state = get();
+        const amount = Number(transaction.amount || 0);
+        if (!Number.isFinite(amount) || amount <= 0) return { ok: false, message: 'مبلغ باید بزرگ‌تر از صفر باشد.' };
+        if (!transaction.description.trim()) return { ok: false, message: 'شرح تراکنش الزامی است.' };
+        const settlement = state.accounts.find((account) => account.id === transaction.settlementAccountId && account.active);
+        const category = state.accounts.find((account) => account.id === transaction.categoryAccountId && account.active);
+        if (!settlement || settlement.type !== 'asset') return { ok: false, message: 'حساب صندوق/بانک معتبر انتخاب کنید.' };
+        if (!category || (transaction.kind === 'income' ? category.type !== 'revenue' : category.type !== 'expense')) {
+          return { ok: false, message: transaction.kind === 'income' ? 'حساب درآمد معتبر انتخاب کنید.' : 'حساب هزینه معتبر انتخاب کنید.' };
+        }
+        const now = new Date().toISOString();
+        const normalized: MoneyTransaction = {
+          ...transaction,
+          status: 'final',
+          amount,
+          description: transaction.description.trim(),
+          createdAt: transaction.createdAt || now,
+          updatedAt: now,
+          voidedAt: undefined,
+          voidReason: undefined,
+        };
+        const journal = journalForMoneyTransaction(normalized, state.accounts);
+        if (!journal.length) return { ok: false, message: 'ثبت حسابداری تراکنش تراز نشد.' };
+        set({
+          moneyTransactions: [normalized, ...state.moneyTransactions],
+          journalEntries: [...state.journalEntries, ...journal],
+        });
+        return { ok: true };
+      },
+
+      voidMoneyTransaction: (id, reason) => {
+        const state = get();
+        const previous = state.moneyTransactions.find((item) => item.id === id);
+        if (!previous || previous.status !== 'final') return { ok: false, message: 'تراکنش قطعی فعال پیدا نشد.' };
+        if (!reason.trim()) return { ok: false, message: 'دلیل ابطال الزامی است.' };
+        const now = new Date().toISOString();
+        const transaction: MoneyTransaction = {
+          ...previous,
+          status: 'void',
+          voidedAt: now,
+          voidReason: reason.trim(),
+          updatedAt: now,
+        };
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'money-transaction',
+          id,
+          todayFa(),
+          'ابطال ' + previous.description + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          moneyTransactions: state.moneyTransactions.map((item) => item.id === id ? transaction : item),
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true };
       },
 
@@ -1025,7 +1136,27 @@ export const useAccountingStore = create<Store>()(
           ? state.checks.map((item) => (item.id === check.id ? check : item))
           : [check, ...state.checks];
         const invoices = withInvoiceStatuses(state.invoices, state.payments, checks, state.returns);
-        set({ checks, invoices });
+        let journalEntries = state.journalEntries;
+        if (linkedPayment) {
+          const wasEffective = previous?.status === 'cleared';
+          const isEffective = check.status === 'cleared';
+          if (!wasEffective && isEffective) {
+            journalEntries = [...journalEntries, ...journalForPayment(linkedPayment, state.accounts)];
+          } else if (wasEffective && !isEffective) {
+            journalEntries = [
+              ...journalEntries,
+              ...reverseActiveSourceEntries(
+                journalEntries,
+                'payment',
+                linkedPayment.id,
+                todayFa(),
+                'برگشت اثر چک ' + check.number + ' پس از تغییر وضعیت',
+                'status-reversal'
+              ),
+            ];
+          }
+        }
+        set({ checks, invoices, journalEntries });
         return { ok: true };
       },
 
@@ -1051,21 +1182,29 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
-        const products = normalizeProducts(state.products || []);
-        return {
+        const products = normalizeProducts(state.products || seedData.products);
+        return normalizeAccountingData({
+          ...seedData,
           ...state,
-          customers: (state.customers || []).map((customer) => ({
+          customers: (state.customers || seedData.customers).map((customer) => ({
             ...customer,
             openingBalance: Number(customer.openingBalance || 0),
           })),
           products,
+          invoices: state.invoices || seedData.invoices,
           returns: state.returns || [],
+          payments: state.payments || seedData.payments,
+          checks: state.checks || seedData.checks,
           adjustments: state.adjustments || [],
           stockMovements: state.stockMovements?.length ? state.stockMovements : buildOpeningMovements(products),
-        };
+          accounts: state.accounts || [],
+          journalEntries: state.journalEntries || [],
+          moneyTransactions: state.moneyTransactions || [],
+          settings: { ...seedData.settings, ...(state.settings || {}) },
+        });
       },
       partialize: (state) => ({
         customers: state.customers,
@@ -1076,6 +1215,9 @@ export const useAccountingStore = create<Store>()(
         checks: state.checks,
         adjustments: state.adjustments,
         stockMovements: state.stockMovements,
+        accounts: state.accounts,
+        journalEntries: state.journalEntries,
+        moneyTransactions: state.moneyTransactions,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),
