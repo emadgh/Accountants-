@@ -770,9 +770,47 @@ export function SettingsView() {
   const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
   const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, returns: store.returns, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, accounts: store.accounts, journalEntries: store.journalEntries, moneyTransactions: store.moneyTransactions, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); replaceAll(parsed); setDraft(parsed.settings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
+  const saveSettings = () => {
+    const errors = validateOfficialFields(draft);
+    if (errors.length) {
+      window.alert(errors.join('\n'));
+      return;
+    }
+    setSettings(draft);
+  };
   return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
-    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><div className="sm:col-span-2 flex justify-end"><Button onClick={() => setSettings(draft)}>ذخیره تنظیمات</Button></div></CardContent></Card>
+    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><NumberingSettingsEditor draft={draft} onChange={setDraft} /><div className="sm:col-span-2 flex justify-end"><Button onClick={saveSettings}>ذخیره تنظیمات</Button></div></CardContent></Card>
       <div className="space-y-5"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-sky-600" /> پشتیبان‌گیری</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-600"><p>تمام داده‌ها در LocalStorage مرورگر نگهداری می‌شوند. برای انتقال به سیستم دیگر خروجی JSON بگیرید.</p><div className="grid gap-2"><Button variant="outline" onClick={exportData}><ArrowDownToLine className="h-4 w-4" /> دانلود نسخه پشتیبان</Button><Button variant="outline" onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> بازیابی نسخه پشتیبان</Button><input ref={fileRef} type="file" className="hidden" accept="application/json" onChange={(e) => importData(e.target.files?.[0])} /></div></CardContent></Card><Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card></div>
+    </div>
+  </div>;
+}
+
+function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings; onChange: (settings: BusinessSettings) => void }) {
+  const rows = [
+    ['sale', 'فاکتور فروش'],
+    ['purchase', 'فاکتور خرید'],
+    ['receipt', 'دریافت'],
+    ['payment', 'پرداخت'],
+    ['check', 'چک'],
+  ] as const;
+  const update = (key: keyof BusinessSettings['numbering'], field: 'prefix' | 'next' | 'padding', value: string | number) => {
+    onChange({
+      ...draft,
+      numbering: {
+        ...draft.numbering,
+        [key]: { ...draft.numbering[key], [field]: field === 'prefix' ? String(value) : Number(value) },
+      },
+    });
+  };
+  return <div className="sm:col-span-2 rounded-xl border border-slate-200 p-3">
+    <div className="mb-3 text-sm font-black">الگوی شماره‌گذاری اسناد</div>
+    <div className="grid gap-2">
+      {rows.map(([key, label]) => <div key={key} className="grid grid-cols-[1fr_.8fr_.7fr_.6fr] items-end gap-2">
+        <div className="text-xs font-bold text-slate-600">{label}</div>
+        <Field label="پیشوند"><Input value={draft.numbering[key].prefix} onChange={(e) => update(key, 'prefix', e.target.value)} /></Field>
+        <Field label="شماره بعدی"><Input type="number" min="1" value={draft.numbering[key].next} onChange={(e) => update(key, 'next', Number(e.target.value))} /></Field>
+        <Field label="تعداد رقم"><Input type="number" min="1" max="12" value={draft.numbering[key].padding} onChange={(e) => update(key, 'padding', Number(e.target.value))} /></Field>
+      </div>)}
     </div>
   </div>;
 }
