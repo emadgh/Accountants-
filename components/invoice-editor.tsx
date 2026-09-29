@@ -6,7 +6,7 @@ import { useAccountingStore } from '@/lib/store';
 import type { BusinessProfile, Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
 import { invoiceTotal, money, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
-import { PersianDateInput } from '@/components/persian-date-input';
+import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Panel } from '@/components/ui/panel';
@@ -285,7 +285,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           </div>
           <div className="space-y-1 sm:text-left">
             <InfoLine label="شماره" value={invoice.number} onChange={(v) => patch('number', v)} readOnly={!isDraft} />
-            <div className="screen-only flex items-center gap-2 sm:justify-end"><span className="font-bold">تاریخ:</span><PersianDateInput value={invoice.date} onChange={(value) => patch('date', value)} disabled={isVoid} /></div>
+            <div className="screen-only flex items-center gap-2 sm:justify-end"><span className="font-bold">تاریخ:</span><JalaliDatePicker value={invoice.date} onChange={(value) => patch('date', value)} disabled={isVoid} /></div>
             <div className="print-only"><b>تاریخ:</b> {formatPersianDate(invoice.date)}</div>
             <div className="flex gap-1 text-[10px] text-slate-500 sm:justify-end"><span>{customer?.code ? `کد شخص: ${customer.code}` : ''}</span></div>
           </div>
