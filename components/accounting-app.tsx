@@ -28,7 +28,7 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
     const onPersistenceError = (event: Event) => {
       const message = (event as CustomEvent<string>).detail || 'خطای نامشخص دیتابیس';
       notify('ذخیره‌سازی SQLite انجام نشد: ' + message + ' — وضعیت از آخرین Commit بازیابی می‌شود.', 'error');
-      void useAccountingStore.persist.rehydrate().catch(() => undefined);
+      void Promise.resolve(useAccountingStore.persist.rehydrate()).catch(() => undefined);
     };
     window.addEventListener('accounting:persistence-error', onPersistenceError);
     return () => window.removeEventListener('accounting:persistence-error', onPersistenceError);
