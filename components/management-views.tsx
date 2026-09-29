@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock,
-  BookOpen, Check, CircleDollarSign, Download, Edit3, FileText, Package, Plus, Search, Settings2,
+  BookOpen, Check, CircleDollarSign, Edit3, FileText, Package, Plus, Search, Settings2,
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
