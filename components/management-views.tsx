@@ -140,7 +140,6 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
         {edit && <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
-          <Field label="شماره سند"><Input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
           <Field label="تلفن"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
           <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
