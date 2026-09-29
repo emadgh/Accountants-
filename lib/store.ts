@@ -1380,6 +1380,7 @@ export const useAccountingStore = create<Store>()(
       name: 'accountants-web-v1',
       storage: createJSONStorage(() => accountingStateStorage),
       version: ACCOUNTING_SCHEMA_VERSION,
+      skipHydration: true,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);
