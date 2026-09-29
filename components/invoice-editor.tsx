@@ -208,7 +208,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           </div>
           <div className="order-1 sm:order-2">
             <InfoLine label="فروشنده" value={businessProfile?.businessName || ''} onChange={(v) => updateBusinessProfile({ businessName: v })} />
-            <InfoLine label="تلفن" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} />
+            <InfoLine label="تلفن" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} rtlValue />
             <InfoLine label="آدرس" value={businessProfile?.address || ''} onChange={(v) => updateBusinessProfile({ address: v })} />
           </div>
         </div>
@@ -223,7 +223,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
               </select><span className="print-only font-bold">{invoice.customerName || '—'}</span>
               {!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}
             </div>
-            <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} />
+            <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} rtlValue />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
             {(invoice.customerNationalId || invoice.customerEconomicCode || invoice.customerPostalCode) && <div className="print-block text-[10px] text-slate-500">شناسه ملی: {invoice.customerNationalId || '—'} &nbsp; کد اقتصادی: {invoice.customerEconomicCode || '—'} &nbsp; کدپستی: {invoice.customerPostalCode || '—'}</div>}
             <div className="screen-only grid grid-cols-3 gap-1 pt-1">
@@ -278,8 +278,8 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       <div className="invoice-payment-block mt-8 grid grid-cols-2 gap-8 text-[12px]">
         <div className="leading-7">
           <div className="font-bold">اطلاعات پرداخت:</div>
-          <InfoLine label="شماره کارت" value={businessProfile?.cardNumber || ''} onChange={(v) => updateBusinessProfile({ cardNumber: v })} />
-          <InfoLine label="شبا" value={businessProfile?.iban || ''} onChange={(v) => updateBusinessProfile({ iban: v })} />
+          <InfoLine label="شماره کارت" value={businessProfile?.cardNumber || ''} onChange={(v) => updateBusinessProfile({ cardNumber: v })} rtlValue />
+          <InfoLine label="شبا" value={businessProfile?.iban || ''} onChange={(v) => updateBusinessProfile({ iban: v })} rtlValue />
           <InfoLine label="به نام" value={businessProfile?.ownerName || ''} onChange={(v) => updateBusinessProfile({ ownerName: v })} />
         </div>
         <div className="text-slate-500"><EditableArea value={businessProfile?.footer || ''} onChange={(v) => updateBusinessProfile({ footer: v })} placeholder="پاورقی فاکتور..." /></div>
@@ -301,8 +301,9 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   </div>;
 }
 
-function EditableText({ value, onChange, className = '', readOnly = false }: { value: string; onChange: (v: string) => void; className?: string; readOnly?: boolean }) {
-  return <><input readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} /><span className={`print-only ${className}`}>{value || '—'}</span></>;
+function EditableText({ value, onChange, className = '', readOnly = false, rtlValue = false }: { value: string; onChange: (v: string) => void; className?: string; readOnly?: boolean; rtlValue?: boolean }) {
+  const content = <><input readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} /><span className={`print-only ${className}`}>{value || '—'}</span></>;
+  return rtlValue ? <span dir="rtl" className="contents">{content}</span> : content;
 }
 function EditableArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <><textarea className="screen-editor invoice-inline-textarea" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /><div className="print-only print-block whitespace-pre-wrap leading-6">{value}</div></>;
@@ -311,7 +312,7 @@ function MiniEdit({ value, onChange, placeholder }: { value: string; onChange: (
 function NumberEdit({ value, onChange, formatted = false }: { value: number; onChange: (v: number) => void; formatted?: boolean }) {
   return <><input dir="ltr" type="number" min="0" className="screen-editor invoice-inline-input text-center" value={value} onChange={(e) => onChange(Number(e.target.value))} /><span className="print-only" dir="ltr">{formatted ? money(value) : value}</span></>;
 }
-function InfoLine({ label, value, onChange, readOnly = false }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean }) { return <div className="flex min-h-7 items-center gap-1"><span className="shrink-0 font-bold">{label}:</span><EditableText value={value} onChange={onChange} readOnly={readOnly} /></div>; }
+function InfoLine({ label, value, onChange, readOnly = false, rtlValue = false }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean; rtlValue?: boolean }) { return <div className="flex min-h-7 items-center gap-1"><span className="shrink-0 font-bold">{label}:</span><EditableText value={value} onChange={onChange} readOnly={readOnly} rtlValue={rtlValue} /></div>; }
 function AmountLine({ label, value, onChange, fixed }: { label: string; value: number; onChange?: (v: number) => void; fixed?: boolean }) { return <div className="flex min-h-8 items-center justify-between gap-4"><span className="font-bold text-slate-600">{label}</span>{fixed ? <span className="font-bold" dir="ltr">{money(value)}</span> : <div className="w-36"><NumberEdit value={value} onChange={onChange!} formatted /></div>}</div>; }
 
 
