@@ -3,6 +3,7 @@ import { sqliteQuery, sqliteTransaction } from './persistence/database';
 import {
   clearAccountingData,
   loadAccountingData,
+  resetApplicationDatabase,
   replaceAccountingData,
   syncAccountingData,
 } from './persistence/repositories/accounting';
@@ -36,6 +37,10 @@ type PragmaRow = Record<string, number>;
 
 let writeQueue: Promise<void> = Promise.resolve();
 let persistedCache: AccountingData | null | undefined;
+
+export function flushAccountingPersistence() {
+  return writeQueue;
+}
 
 function emitPersistenceError(error: unknown) {
   if (typeof window === 'undefined') return;
@@ -104,6 +109,36 @@ async function maybeCreateAutomaticSnapshot(currentData?: AccountingData | null)
   ]);
 }
 
+export async function initializeFirstRunAccountingData(data: AccountingData) {
+  writeQueue = writeQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await replaceAccountingData(data, { resetStorage: true });
+        persistedCache = data;
+      } catch (error) {
+        emitPersistenceError(error);
+        throw error;
+      }
+    });
+  return writeQueue;
+}
+
+export async function clearApplicationDatabase() {
+  writeQueue = writeQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await resetApplicationDatabase();
+        persistedCache = null;
+      } catch (error) {
+        emitPersistenceError(error);
+        throw error;
+      }
+    });
+  return writeQueue;
+}
+
 export const accountingStateStorage = {
   async getItem(_name: string) {
     await writeQueue;
@@ -118,7 +153,12 @@ export const accountingStateStorage = {
       .then(async () => {
         try {
           const next = extractAccountingData(value);
-          const previous = persistedCache === undefined ? await loadAccountingData() : persistedCache;
+          const onDisk = await loadAccountingData();
+          if (persistedCache !== undefined && JSON.stringify(onDisk) !== JSON.stringify(persistedCache)) {
+            persistedCache = onDisk;
+            throw new Error('دادهٔ فایل خارج از این تب تغییر کرده است؛ اطلاعات جدید دوباره بارگذاری می‌شود.');
+          }
+          const previous = onDisk;
           await maybeCreateAutomaticSnapshot(previous);
           if (previous) await syncAccountingData(previous, next);
           else await replaceAccountingData(next);
@@ -206,7 +246,7 @@ export async function getAccountingStorageInfo() {
   const pageSize = Number(pageSizeRows[0]?.page_size || 0);
 
   return {
-    backend: 'SQLite WASM / OPFS',
+    backend: 'SQLite file / data/accountants.sqlite3',
     payloadSize: pageCount * pageSize,
     snapshotCount: Number(snapshotRows[0]?.count || 0),
     schemaVersion: ACCOUNTING_SCHEMA_VERSION,

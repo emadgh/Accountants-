@@ -1,6 +1,7 @@
 import {
   createSession,
   createUser,
+  createUsers,
   findSessionById,
   findUserById,
   findUserByIdentity,
@@ -8,6 +9,8 @@ import {
   revokeSession,
   type StoredAuthUser,
 } from './persistence/repositories/auth';
+import { createEmptyAccountingData, seedData } from './data';
+import { initializeFirstRunAccountingData } from './storage';
 
 export type AuthRole = 'admin' | 'user';
 
@@ -32,8 +35,11 @@ export interface AuthSnapshot {
 }
 
 const SESSION_KEY = 'accountants-auth-session-v2';
+const LEGACY_USERS_KEY = 'accountants-auth-users-v1';
+const LEGACY_SESSION_KEY = 'accountants-auth-session-v1';
 const PASSWORD_ITERATIONS = 210_000;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+let authUsersPromise: Promise<StoredAuthUser[]> | null = null;
 
 const encoder = new TextEncoder();
 
@@ -140,6 +146,70 @@ function publicUser(user: StoredAuthUser): AuthenticatedUser {
   };
 }
 
+function isLegacyAuthUser(value: unknown): value is StoredAuthUser {
+  if (!value || typeof value !== 'object') return false;
+  const user = value as Partial<StoredAuthUser>;
+  return (
+    typeof user.id === 'string' &&
+    typeof user.username === 'string' &&
+    typeof user.normalizedUsername === 'string' &&
+    (user.email === undefined || typeof user.email === 'string') &&
+    (user.normalizedEmail === undefined || typeof user.normalizedEmail === 'string') &&
+    typeof user.displayName === 'string' &&
+    (user.role === 'admin' || user.role === 'user') &&
+    Array.isArray(user.permissions) &&
+    user.permissions.every((permission) => typeof permission === 'string') &&
+    typeof user.passwordHash === 'string' &&
+    typeof user.passwordSalt === 'string' &&
+    typeof user.passwordIterations === 'number' &&
+    Number.isInteger(user.passwordIterations) &&
+    Number(user.passwordIterations) > 0 &&
+    typeof user.createdAt === 'string'
+  );
+}
+
+async function loadAuthUsers() {
+  const users = await listUsers();
+  if (users.length) return users;
+
+  let rawUsers: string | null;
+  try {
+    rawUsers = window.localStorage.getItem(LEGACY_USERS_KEY);
+  } catch {
+    return users;
+  }
+  if (!rawUsers) return users;
+
+  let legacyUsers: unknown;
+  try {
+    legacyUsers = JSON.parse(rawUsers);
+  } catch {
+    return users;
+  }
+  if (!Array.isArray(legacyUsers) || !legacyUsers.length || !legacyUsers.every(isLegacyAuthUser)) {
+    return users;
+  }
+
+  const migratedUsers = legacyUsers as StoredAuthUser[];
+  await createUsers(migratedUsers);
+  try {
+    window.localStorage.removeItem(LEGACY_USERS_KEY);
+    window.localStorage.removeItem(LEGACY_SESSION_KEY);
+  } catch {
+    // The SQLite copy is authoritative once the transaction succeeds.
+  }
+  return listUsers();
+}
+
+async function getAuthUsers() {
+  if (!authUsersPromise) authUsersPromise = loadAuthUsers();
+  try {
+    return await authUsersPromise;
+  } finally {
+    authUsersPromise = null;
+  }
+}
+
 function makeId(prefix: string) {
   return (
     prefix +
@@ -168,7 +238,7 @@ async function issueSession(user: StoredAuthUser) {
 
 export async function getAuthSnapshot(): Promise<AuthSnapshot> {
   requireBrowser();
-  const users = await listUsers();
+  const users = await getAuthUsers();
   if (!users.length) {
     clearBrowserSession();
     return { hasUsers: false, user: null };
@@ -211,6 +281,7 @@ export async function getAuthSnapshot(): Promise<AuthSnapshot> {
 
 export async function loginWithPassword(identity: string, password: string) {
   requireBrowser();
+  await getAuthUsers();
   const normalized = normalizeIdentity(identity);
   const user = await findUserByIdentity(normalized);
 
@@ -229,9 +300,10 @@ export async function registerFirstAdmin(input: {
   email?: string;
   displayName?: string;
   password: string;
+  seedDemoData: boolean;
 }) {
   requireBrowser();
-  const users = await listUsers();
+  const users = await getAuthUsers();
   if (users.length) throw new Error('حساب مدیر قبلاً ایجاد شده است.');
 
   const username = input.username.trim();
@@ -260,6 +332,7 @@ export async function registerFirstAdmin(input: {
     createdAt: new Date().toISOString(),
   };
 
+  await initializeFirstRunAccountingData(input.seedDemoData ? seedData : createEmptyAccountingData());
   await createUser(user);
   return issueSession(user);
 }

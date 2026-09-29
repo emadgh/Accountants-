@@ -1,6 +1,8 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { DataTable } from '@/components/ui/data-table';
+
+import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, DatabaseZap, Download, FileSearch, ShieldCheck, Upload } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { AccountingData } from '@/lib/types';
@@ -25,6 +27,28 @@ export function YasImporterPanel() {
   const [filename, setFilename] = useState('');
   const [busy, setBusy] = useState(false);
   const [alreadyImported, setAlreadyImported] = useState(false);
+
+  const repairLinks = useMemo(() => {
+    if (!analysis) return [];
+    const sourceCustomers = new Map(analysis.data.customers.map((customer) => [customer.id, customer.code]));
+    const currentCustomers = new Map(store.customers.map((customer) => [customer.id, customer.code]));
+    const sourceInvoices = new Map(analysis.data.invoices.map((invoice) => [invoice.id, invoice]));
+    const currentInvoices = new Map(store.invoices.map((invoice) => [invoice.kind + ':' + invoice.number + ':' + currentCustomers.get(invoice.customerId), invoice]));
+    const sourcePayments = new Map(analysis.data.payments.filter((payment) => payment.invoiceId).map((payment) => [payment.documentNumber, payment]));
+    return store.payments.flatMap((payment) => {
+      if (payment.invoiceId) return [];
+      const sourcePayment = sourcePayments.get(payment.documentNumber);
+      if (!sourcePayment?.invoiceId || sourcePayment.direction !== payment.direction || Math.abs(sourcePayment.amount - payment.amount) > 0.01) return [];
+      const sourceCustomerCode = sourceCustomers.get(sourcePayment.customerId);
+      if (!sourceCustomerCode || sourceCustomerCode !== currentCustomers.get(payment.customerId)) return [];
+      const sourceInvoice = sourceInvoices.get(sourcePayment.invoiceId);
+      if (!sourceInvoice) return [];
+      const currentInvoice = currentInvoices.get(sourceInvoice.kind + ':' + sourceInvoice.number + ':' + sourceCustomerCode);
+      return currentInvoice && currentInvoice.status !== 'draft' && currentInvoice.status !== 'void'
+        ? [{ paymentId: payment.id, invoiceId: currentInvoice.id }]
+        : [];
+    });
+  }, [analysis, store.customers, store.invoices, store.payments]);
 
   const currentData = (): AccountingData => ({
     customers: store.customers,
@@ -116,6 +140,16 @@ export function YasImporterPanel() {
     }
   };
 
+  const repairCurrentLinks = () => {
+    if (!repairLinks.length) return;
+    const result = store.repairPaymentInvoiceLinks(repairLinks);
+    if (!result.ok) {
+      notify(result.message || 'ترمیم ارتباط دریافت‌ها انجام نشد.', 'error');
+      return;
+    }
+    notify((result.updated || 0) + ' ارتباط دریافت و فاکتور در دادهٔ فعلی ترمیم شد.', 'success');
+  };
+
   const report = analysis?.report;
   const blockingConflicts = report?.messages.filter(
     (message) => message.severity === 'conflict' && message.code !== 'known-anomaly-300051'
@@ -162,6 +196,12 @@ export function YasImporterPanel() {
           <MetricCard size="sm" title="پرداخت" value={report.counts.payments} align="center" />
         </div>
 
+        <Panel padding="sm" className="text-sm">
+          <div className="font-black">ارتباط دریافت‌ها با فاکتورها</div>
+          <div className="mt-1 text-slate-600">{report.paymentLinks.explicit} مورد با شمارهٔ فاکتور ثبت‌شده، {report.paymentLinks.ledger} مورد با تسویهٔ یک‌به‌یک در دفتر مشتری، و {report.paymentLinks.unresolved} مورد بدون ارتباط قطعی.</div>
+          {!!repairLinks.length && <div className="mt-2 text-slate-600">{repairLinks.length} ارتباط را می‌توان در دادهٔ فعلی ترمیم کرد؛ سایر داده‌ها جایگزین نمی‌شوند.</div>}
+        </Panel>
+
         <Panel padding="sm">
           <div className="mb-2 text-sm font-black">Mapping شناسایی‌شده</div>
           <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
@@ -192,7 +232,7 @@ export function YasImporterPanel() {
         <Panel padding="sm">
           <div className="mb-2 flex items-center gap-2 font-black"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Reconciliation</div>
           <div className="max-h-64 overflow-auto">
-            <table className="data-table min-w-[720px]">
+            <DataTable className="data-table min-w-[720px]">
               <thead><tr><th>مورد</th><th>منبع Yas</th><th>بعد از Migration</th><th>اختلاف</th><th>نتیجه</th></tr></thead>
               <tbody>
                 {report.reconciliation.map((item) => <tr key={item.kind + ':' + item.key}>
@@ -204,12 +244,13 @@ export function YasImporterPanel() {
                 </tr>)}
                 {!report.reconciliation.length && <tr><td colSpan={5} className="!py-8 text-center text-slate-400">جدول کاردکس/Total قابل Reconciliation خودکار شناسایی نشد؛ Mapping و هشدارها را بررسی کنید.</td></tr>}
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </Panel>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={downloadReport}><Download className="h-4 w-4" /> دانلود Migration Report</Button>
+          <Button variant="outline" disabled={busy || blockingConflicts > 0 || !repairLinks.length} onClick={repairCurrentLinks}>ترمیم {repairLinks.length} ارتباط در دادهٔ فعلی</Button>
           <Button disabled={busy || blockingConflicts > 0} onClick={() => void importData()}><DatabaseZap className="h-4 w-4" /> Import نهایی</Button>
         </div>
       </>}

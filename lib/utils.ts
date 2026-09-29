@@ -13,6 +13,42 @@ export function money(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value || 0));
 }
 
+export function numberToPersianWords(value: number) {
+  const units = ['', 'یک', 'دو', 'سه', 'چهار', 'پنج', 'شش', 'هفت', 'هشت', 'نه'];
+  const teens = ['ده', 'یازده', 'دوازده', 'سیزده', 'چهارده', 'پانزده', 'شانزده', 'هفده', 'هجده', 'نوزده'];
+  const tens = ['', '', 'بیست', 'سی', 'چهل', 'پنجاه', 'شصت', 'هفتاد', 'هشتاد', 'نود'];
+  const hundreds = ['', 'یکصد', 'دویست', 'سیصد', 'چهارصد', 'پانصد', 'ششصد', 'هفتصد', 'هشتصد', 'نهصد'];
+  const scales = ['', 'هزار', 'میلیون', 'میلیارد', 'تریلیون', 'کوادریلیون'];
+  const toWordsUnderThousand = (number: number) => {
+    const parts: string[] = [];
+    const hundred = Math.floor(number / 100);
+    let rest = number % 100;
+    if (hundred) parts.push(hundreds[hundred]);
+    if (rest >= 10 && rest < 20) {
+      parts.push(teens[rest - 10]);
+      rest = 0;
+    } else if (rest >= 20) {
+      parts.push(tens[Math.floor(rest / 10)]);
+      rest %= 10;
+    }
+    if (rest) parts.push(units[rest]);
+    return parts.join(' و ');
+  };
+
+  const numericValue = Number.isFinite(value) ? Math.round(Math.abs(value)) : 0;
+  if (!numericValue) return 'صفر';
+  let remaining = numericValue;
+  const groups: string[] = [];
+  let scaleIndex = 0;
+  while (remaining > 0 && scaleIndex < scales.length) {
+    const group = remaining % 1000;
+    if (group) groups.unshift([toWordsUnderThousand(group), scales[scaleIndex]].filter(Boolean).join(' '));
+    remaining = Math.floor(remaining / 1000);
+    scaleIndex += 1;
+  }
+  return (value < 0 ? 'منفی ' : '') + groups.join(' و ');
+}
+
 export function invoiceLineGross(item: Pick<Invoice['items'][number], 'qty' | 'unitPrice'>) {
   return Math.max(0, Number(item.qty || 0) * Number(item.unitPrice || 0));
 }
@@ -97,6 +133,18 @@ export function settledForInvoice(invoice: Pick<Invoice, 'id' | 'kind'>, payment
     .filter((payment) => payment.invoiceId === invoice.id)
     .filter((payment) => resolvedPaymentDirection(payment, invoice) === expected)
     .reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
+}
+
+export function invoiceOutstandingAmount(
+  invoice: Invoice,
+  payments: Payment[],
+  checks: CheckRecord[],
+  returns: ReturnDocument[] = []
+) {
+  const returned = returns
+    .filter((document) => document.originalInvoiceId === invoice.id && document.status === 'final')
+    .reduce((sum, document) => sum + Number(document.totalAmount || 0), 0);
+  return Math.max(0, invoiceTotal(invoice) - returned - settledForInvoice(invoice, payments, checks));
 }
 
 export function normalizeDateKey(value: string) {

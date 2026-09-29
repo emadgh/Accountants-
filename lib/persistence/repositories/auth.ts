@@ -94,26 +94,33 @@ export async function findUserById(id: string) {
   return rows[0] ? mapUser(rows[0]) : null;
 }
 
+function createUserStatement(user: StoredAuthUser, ignoreExisting = false) {
+  return {
+    sql: `${ignoreExisting ? 'INSERT OR IGNORE' : 'INSERT'} INTO users(id, username, normalized_username, email, normalized_email, display_name, role, permissions_json, password_hash, password_salt, password_iterations, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    bind: [
+      user.id,
+      user.username,
+      user.normalizedUsername,
+      user.email || null,
+      user.normalizedEmail || null,
+      user.displayName,
+      user.role,
+      JSON.stringify(user.permissions),
+      user.passwordHash,
+      user.passwordSalt,
+      user.passwordIterations,
+      user.createdAt,
+    ],
+  };
+}
+
 export async function createUser(user: StoredAuthUser) {
-  await sqliteTransaction([
-    {
-      sql: 'INSERT INTO users(id, username, normalized_username, email, normalized_email, display_name, role, permissions_json, password_hash, password_salt, password_iterations, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      bind: [
-        user.id,
-        user.username,
-        user.normalizedUsername,
-        user.email || null,
-        user.normalizedEmail || null,
-        user.displayName,
-        user.role,
-        JSON.stringify(user.permissions),
-        user.passwordHash,
-        user.passwordSalt,
-        user.passwordIterations,
-        user.createdAt,
-      ],
-    },
-  ]);
+  await sqliteTransaction([createUserStatement(user)]);
+}
+
+export async function createUsers(users: StoredAuthUser[]) {
+  if (!users.length) return;
+  await sqliteTransaction(users.map((user) => createUserStatement(user, true)));
 }
 
 export async function createSession(session: StoredAuthSession) {

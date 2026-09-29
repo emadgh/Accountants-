@@ -5,6 +5,9 @@ const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Vazirmatn Variable', 'Tahoma', 'Arial', 'sans-serif'],
+      },
       boxShadow: {
         soft: '0 14px 45px rgba(15, 23, 42, 0.08)',
         paper: '0 18px 60px rgba(15, 23, 42, 0.12)',

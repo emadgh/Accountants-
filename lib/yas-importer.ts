@@ -15,7 +15,7 @@ import {
   type ExternalSqliteTable,
   type ExternalSqliteValue,
 } from './persistence/database';
-import { seedData } from './data';
+import { createEmptyAccountingData } from './data';
 import { SYSTEM_ACCOUNTS } from './accounting';
 import { customerNetBalance, invoiceTotal } from './utils';
 import { normalizeStoredDate } from './standards';
@@ -78,6 +78,11 @@ export interface YasMigrationReport {
     receipts: number;
     payments: number;
     moneyTransactions: number;
+  };
+  paymentLinks: {
+    explicit: number;
+    ledger: number;
+    unresolved: number;
   };
   duplicates: string[];
   messages: YasMigrationMessage[];
@@ -166,6 +171,17 @@ function number(input: unknown, fallback = 0) {
     .replace(/[,٬\s]/g, '');
   const result = Number(raw);
   return Number.isFinite(result) ? result : fallback;
+}
+
+function normalizeDigits(input: string) {
+  return input
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+}
+
+function settlementInvoiceNumber(details: string) {
+  const match = normalizeDigits(details).match(/تسویه\s*فاکتور\s*[:：]?\s*(\d+)/);
+  return match?.[1] || '';
 }
 
 function activeState(input: unknown) {
@@ -507,7 +523,6 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       economicCode: text(value(row, aliases.economicCode)),
       postalCode: text(value(row, aliases.postalCode)),
       openingBalance: number(value(row, aliases.opening)),
-      notes: 'مهاجرت‌شده از Yas',
     };
     if (value(row, aliases.opening) != null && text(value(row, aliases.opening)) !== '') sourceOpeningKnown.add(customer.id);
     return customer;
@@ -536,7 +551,6 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       averageCost: number(value(row, aliases.buyPrice)),
       stock: kind === 'product' ? number(stockValue) : 0,
       minStock: 0,
-      notes: 'مهاجرت‌شده از Yas',
     };
     if (stockValue != null && text(stockValue) !== '') sourceStockKnown.add(product.id);
     return product;
@@ -632,6 +646,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         id: 'yas_invoice_' + keyPart(kind + '_' + source, String(index + 1)),
         number: numberValue,
         businessProfileId: 'business_default',
+        templateId: 'classic',
         kind,
         status: anomaly ? 'draft' : 'final',
         date: safeDate(value(row, aliases.date)),
@@ -666,6 +681,13 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
 
   const payments: Payment[] = [];
   const sourcePaymentDocumentNumbers: string[] = [];
+  const paymentLinks = { explicit: 0, ledger: 0, unresolved: 0 };
+  const ledgerByCustomerCode = new Map(
+    snapshot.tables
+      .filter((table) => /^t\d+$/i.test(table.name.trim()))
+      .map((table) => [normalizeName(table.name.slice(1)), table] as const)
+  );
+  const invoiceByNumber = new Map(invoices.map((invoice) => [normalizeName(invoice.number), invoice]));
   for (const table of paymentTables) {
     for (let index = 0; index < table.rows.length; index++) {
       const row = table.rows[index];
@@ -676,10 +698,48 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         messages.push({ severity: 'conflict', code: 'payment-customer-unmapped', entity: source, message: 'طرف‌حساب دریافت/پرداخت نگاشت نشد: ' + (customerRef || 'مرجع خالی') + '. Import تا رفع نگاشت متوقف می‌شود.' });
         continue;
       }
-      const invoiceRef = rowRef(row, aliases.invoiceRef);
-      const linkedInvoice = invoiceSourceMap.get(normalizeName(invoiceRef));
       const direction = inferPaymentDirection(table, row);
       const documentNumber = text(value(row, aliases.number)) || (direction === 'receipt' ? 'YR-' : 'YP-') + String(payments.length + 1).padStart(6, '0');
+      const invoiceRef = rowRef(row, aliases.invoiceRef);
+      let linkedInvoice = invoiceSourceMap.get(normalizeName(invoiceRef));
+      let linkSource: 'explicit' | 'ledger' | undefined = linkedInvoice ? 'explicit' : undefined;
+      const ledger = ledgerByCustomerCode.get(normalizeName(customer.code));
+      const ledgerRows = ledger?.rows || [];
+      const ledgerMatches = ledgerRows
+        .map((ledgerRow, ledgerIndex) => ({ ledgerRow, ledgerIndex }))
+        .filter(({ ledgerRow }) => rowRef(ledgerRow, aliases.number) === documentNumber);
+      const ledgerEntry = ledgerMatches.length === 1 ? ledgerMatches[0] : undefined;
+      if (!linkedInvoice && direction === 'receipt') {
+        const details = [text(value(row, aliases.details)), text(value(ledgerEntry?.ledgerRow || {}, aliases.details))].join(' ');
+        const statedNumber = settlementInvoiceNumber(details);
+        if (statedNumber) {
+          linkedInvoice = invoiceByNumber.get(normalizeName(statedNumber));
+          if (linkedInvoice) linkSource = 'explicit';
+        }
+        if (!linkedInvoice && ledgerEntry) {
+          const previous = ledgerRows[ledgerEntry.ledgerIndex - 1];
+          const candidate = previous && invoiceByNumber.get(normalizeName(rowRef(previous, aliases.number)));
+          const amount = Math.abs(number(value(row, aliases.amount)));
+          if (
+            candidate &&
+            candidate.kind === 'sale' &&
+            candidate.customerId === customer.id &&
+            Math.abs(number(value(previous, ['kh_f'])) - amount) < 0.01 &&
+            Math.abs(number(value(previous, ['mandekol'])) - amount) < 0.01 &&
+            Math.abs(number(value(ledgerEntry.ledgerRow, ['dar_par'])) + amount) < 0.01 &&
+            Math.abs(number(value(ledgerEntry.ledgerRow, ['mandekol']))) < 0.01
+          ) {
+            linkedInvoice = candidate;
+            linkSource = 'ledger';
+          }
+        }
+      }
+      if (linkedInvoice && (linkedInvoice.customerId !== customer.id || linkedInvoice.kind !== (direction === 'receipt' ? 'sale' : 'purchase'))) {
+        linkedInvoice = undefined;
+        linkSource = undefined;
+      }
+      if (linkSource) paymentLinks[linkSource]++;
+      else if (direction === 'receipt') paymentLinks.unresolved++;
       sourcePaymentDocumentNumbers.push(documentNumber);
       payments.push({
         id: 'yas_payment_' + keyPart(table.name + '_' + source, String(index + 1)),
@@ -691,10 +751,15 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
         amount: Math.abs(number(value(row, aliases.amount))),
         date: safeDate(value(row, aliases.date)),
         reference: text(value(row, aliases.details)) || source,
-        notes: 'مهاجرت‌شده از Yas',
       });
     }
   }
+
+  if (paymentLinks.unresolved) messages.push({
+    severity: 'warning',
+    code: 'payment-invoice-links-unresolved',
+    message: paymentLinks.unresolved + ' دریافت بدون ارتباط قطعی با فاکتور باقی ماند و به فاکتوری تخصیص داده نشد.',
+  });
 
   customerSource.forEach(({ source }, index) => {
     const customer = customers[index];
@@ -720,7 +785,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     });
   });
 
-  const settings = JSON.parse(JSON.stringify(seedData.settings)) as AccountingData['settings'];
+  const settings = createEmptyAccountingData().settings;
   const defaultProfile = settings.businessProfiles[0] as BusinessProfile;
   if (signatureTable?.rows.length) {
     const first = signatureTable.rows[0];
@@ -922,6 +987,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       payments: data.payments.filter((payment) => payment.direction === 'payment').length,
       moneyTransactions: data.moneyTransactions.length,
     },
+    paymentLinks,
     duplicates,
     messages,
     reconciliation,

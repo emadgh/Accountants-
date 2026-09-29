@@ -141,7 +141,7 @@ export function StorageBackupPanel() {
     try {
       const id = await createAccountingSnapshot('manual');
       if (!id) {
-        notify('Snapshot محلی در این مرورگر در دسترس نیست.', 'warning');
+        notify('Snapshot در فایل دیتابیس در دسترس نیست.', 'warning');
         return;
       }
       await refresh();
@@ -178,7 +178,7 @@ export function StorageBackupPanel() {
       <CardHeader>
         <div>
           <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-sky-600" /> ذخیره‌سازی و پشتیبان</CardTitle>
-          <div className="mt-1 text-xs text-slate-500">داده اصلی در SQLite روی OPFS نگهداری می‌شود و Snapshotها نیز داخل همان دیتابیس مدیریت می‌شوند.</div>
+          <div className="mt-1 text-xs text-slate-500">داده اصلی و Snapshotها در فایل data/accountants.sqlite3 روی دیسک پروژه نگهداری می‌شوند.</div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -197,7 +197,7 @@ export function StorageBackupPanel() {
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
           <div>
             <div className="text-sm font-black">Snapshotهای محلی</div>
-            <div className="mt-1 text-xs text-slate-500">Snapshot خودکار حداکثر هر ۶ ساعت قبل از تغییر بعدی ساخته می‌شود؛ حداکثر ۱۵ نسخه نگهداری می‌شود.</div>
+              <div className="mt-1 text-xs text-slate-500">Snapshot خودکار حداکثر هر ۶ ساعت قبل از تغییر بعدی داخل فایل دیتابیس ساخته می‌شود؛ حداکثر ۱۵ نسخه نگهداری می‌شود.</div>
           </div>
           <div className="flex gap-2">
             <Button variant="ghost" size="icon" disabled={busy} onClick={() => void refresh()} title="بروزرسانی"><RefreshCw className="h-4 w-4" /></Button>

@@ -19,6 +19,8 @@ export type ExternalSqliteSnapshot = {
 
 type WorkerCommand =
   | { type: 'init' }
+  | { type: 'export' }
+  | { type: 'remove' }
   | { type: 'exec'; sql: string; bind?: SqlBind }
   | { type: 'query'; sql: string; bind?: SqlBind }
   | { type: 'transaction'; statements: SqlStatement[] }
@@ -33,7 +35,9 @@ type WorkerResponse = {
   error?: string;
 };
 
-let clientPromise: Promise<SQLiteClient> | null = null;
+let legacyClientPromise: Promise<SQLiteClient> | null = null;
+let inspectorClient: SQLiteClient | null = null;
+let fileStoragePromise: Promise<void> | null = null;
 
 class SQLiteClient {
   private worker: Worker;
@@ -81,41 +85,107 @@ class SQLiteClient {
   }
 }
 
-async function getClient() {
-  if (!clientPromise) {
-    clientPromise = (async () => {
+async function getLegacyClient() {
+  if (!legacyClientPromise) {
+    legacyClientPromise = (async () => {
       const client = new SQLiteClient();
       await client.request({ type: 'init' });
       return client;
     })().catch((error) => {
-      clientPromise = null;
+      legacyClientPromise = null;
       throw error;
     });
   }
-  return clientPromise;
+  return legacyClientPromise;
+}
+
+async function legacyDatabaseExists() {
+  if (!navigator.storage?.getDirectory) return false;
+  const root = await navigator.storage.getDirectory();
+  try {
+    await root.getDirectoryHandle('accountants-sqlite-sahpool', { create: false });
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotFoundError') return false;
+    throw error;
+  }
+}
+
+async function ensureFileStorage() {
+  if (!fileStoragePromise) {
+    fileStoragePromise = (async () => {
+      const status = await fetch('/api/sqlite', { cache: 'no-store' });
+      if (!status.ok) throw new Error('File database status could not be read.');
+      const { hasDatabase, legacySha256 } = await status.json() as { hasDatabase: boolean; legacySha256?: string | null };
+      if (hasDatabase && !legacySha256) return;
+      if (!(await legacyDatabaseExists())) return;
+
+      const client = await getLegacyClient();
+      const bytes = await client.request<Uint8Array>({ type: 'export' });
+      const checksum = await crypto.subtle.digest('SHA-256', bytes);
+      const expectedHash = Array.from(new Uint8Array(checksum)).map((part) => part.toString(16).padStart(2, '0')).join('');
+      if (hasDatabase) {
+        if (expectedHash !== legacySha256) {
+          console.warn('The legacy browser database differs from the file copy and was retained.');
+          return;
+        }
+        try {
+          await client.request({ type: 'remove' });
+        } catch (error) {
+          console.warn('The legacy browser database could not be removed.', error);
+        }
+        return;
+      }
+      const migration = await fetch('/api/sqlite/migrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: bytes,
+      });
+      const result = await migration.json() as { sha256?: string; error?: string };
+      if (!migration.ok || result.sha256 !== expectedHash) throw new Error(result.error || 'Browser database migration failed verification.');
+      try {
+        await client.request({ type: 'remove' });
+      } catch (error) {
+        console.warn('The file database was saved, but the legacy browser copy could not be removed.', error);
+      }
+    })().catch((error) => {
+      fileStoragePromise = null;
+      throw error;
+    });
+  }
+  return fileStoragePromise;
+}
+
+async function fileRequest<T>(command: { type: 'exec' | 'query' | 'transaction'; sql?: string; bind?: SqlBind; statements?: SqlStatement[] }) {
+  await ensureFileStorage();
+  const response = await fetch('/api/sqlite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
+  });
+  const payload = await response.json() as { result?: T; error?: string };
+  if (!response.ok) throw new Error(payload.error || 'File database operation failed.');
+  return payload.result as T;
 }
 
 export async function sqliteExec(sql: string, bind?: SqlBind) {
-  const client = await getClient();
-  return client.request<void>({ type: 'exec', sql, bind });
+  await fileRequest<void>({ type: 'exec', sql, bind });
 }
 
 export async function sqliteQuery<T extends Record<string, unknown> = Record<string, unknown>>(
   sql: string,
   bind?: SqlBind
 ) {
-  const client = await getClient();
-  return client.request<T[]>({ type: 'query', sql, bind });
+  return fileRequest<T[]>({ type: 'query', sql, bind });
 }
 
 export async function sqliteTransaction(statements: SqlStatement[]) {
   if (!statements.length) return;
-  const client = await getClient();
-  return client.request<void>({ type: 'transaction', statements });
+  await fileRequest<void>({ type: 'transaction', statements });
 }
 
 
 export async function inspectExternalSqlite(bytes: ArrayBuffer) {
-  const client = await getClient();
-  return client.request<ExternalSqliteSnapshot>({ type: 'inspectExternal', bytes });
+  if (!inspectorClient) inspectorClient = new SQLiteClient();
+  return inspectorClient.request<ExternalSqliteSnapshot>({ type: 'inspectExternal', bytes });
 }

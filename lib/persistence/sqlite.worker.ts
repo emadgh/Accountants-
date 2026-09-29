@@ -1,5 +1,4 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { SQLITE_SCHEMA_SQL } from './schema';
 
 type SqlPrimitive = string | number | null;
 type SqlBind = SqlPrimitive[];
@@ -7,6 +6,8 @@ type SqlStatement = { sql: string; bind?: SqlBind };
 
 type WorkerRequest =
   | { id: number; type: 'init' }
+  | { id: number; type: 'export' }
+  | { id: number; type: 'remove' }
   | { id: number; type: 'exec'; sql: string; bind?: SqlBind }
   | { id: number; type: 'query'; sql: string; bind?: SqlBind }
   | { id: number; type: 'transaction'; statements: SqlStatement[] }
@@ -26,6 +27,7 @@ const workerScope = globalThis as unknown as {
 
 let sqlitePromise: Promise<any> | null = null;
 let databasePromise: Promise<any> | null = null;
+let poolPromise: Promise<any> | null = null;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -49,12 +51,12 @@ async function openDatabase() {
         directory: '/accountants-sqlite-sahpool',
         initialCapacity: 8,
       });
+      poolPromise = Promise.resolve(pool);
       const db = new pool.OpfsSAHPoolDb('/accountants.sqlite3');
 
       db.exec('PRAGMA foreign_keys = ON;');
       db.exec('PRAGMA busy_timeout = 5000;');
       db.exec('PRAGMA synchronous = FULL;');
-      db.exec(SQLITE_SCHEMA_SQL);
       return db;
     })().catch((error) => {
       databasePromise = null;
@@ -104,6 +106,21 @@ async function transaction(statements: SqlStatement[]) {
     }
     throw error;
   }
+}
+
+async function exportLegacyDatabase() {
+  const db = await openDatabase();
+  const sqlite3 = await getSqlite();
+  return sqlite3.capi.sqlite3_js_db_export(db) as Uint8Array;
+}
+
+async function removeLegacyDatabase() {
+  const db = await openDatabase();
+  db.close();
+  databasePromise = null;
+  const pool = await poolPromise;
+  if (!pool || !(await pool.removeVfs())) throw new Error('The legacy OPFS database could not be removed.');
+  poolPromise = null;
 }
 
 function isSqliteFile(bytes: Uint8Array) {
@@ -213,6 +230,16 @@ workerScope.onmessage = (event) => {
     try {
       if (message.type === 'init') {
         await openDatabase();
+        workerScope.postMessage({ id: message.id, ok: true });
+        return;
+      }
+      if (message.type === 'export') {
+        const bytes = await exportLegacyDatabase();
+        workerScope.postMessage({ id: message.id, ok: true, result: bytes });
+        return;
+      }
+      if (message.type === 'remove') {
+        await removeLegacyDatabase();
         workerScope.postMessage({ id: message.id, ok: true });
         return;
       }

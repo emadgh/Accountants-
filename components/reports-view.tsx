@@ -1,5 +1,7 @@
 'use client';
 
+import { DataTable } from '@/components/ui/data-table';
+
 import { useMemo, useState } from 'react';
 import {
   Archive,
@@ -8,12 +10,13 @@ import {
   CalendarClock,
   FileDown,
   FileSpreadsheet,
+  FileText,
   Printer,
   TrendingUp,
   Users,
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { Customer, Invoice, Product, ReturnDocument, StockMovement } from '@/lib/types';
+import type { Customer, Invoice, InvoiceKind, Product, ReturnDocument, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, invoiceTotal, money } from '@/lib/utils';
 import { formatPersianDate, normalizeStoredDate, todayIso } from '@/lib/standards';
 import { downloadCsv, downloadExcel, type ExportCell } from '@/lib/report-export';
@@ -22,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
+import { AppNavbarContent } from '@/components/app-navbar';
 
 type ReportTab = 'sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
 
@@ -114,7 +118,11 @@ function EmptyRow({ cols, text }: { cols: number; text: string }) {
   return <tr><td colSpan={cols} className="!py-14 text-center text-slate-400">{text}</td></tr>;
 }
 
-export function ReportsView() {
+export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
+  onOpenInvoice?: (invoiceId: string, kind: InvoiceKind) => void;
+  onOpenCustomer?: (customerId: string) => void;
+  onOpenCheck?: (checkId: string) => void;
+}) {
   const {
     customers,
     products,
@@ -193,6 +201,8 @@ export function ReportsView() {
       date: invoice.date,
       type: invoice.kind === 'sale' ? 'فروش' : 'خرید',
       number: invoice.number,
+      sourceInvoiceId: invoice.id,
+      sourceInvoiceKind: invoice.kind,
       customer: invoice.customerName,
       products: productNames(invoice, products, productId),
       amount: invoiceAmountForProduct(invoice, productId),
@@ -203,6 +213,8 @@ export function ReportsView() {
       date: document.date,
       type: document.kind === 'sale-return' ? 'مرجوعی فروش' : 'مرجوعی خرید',
       number: document.number,
+      sourceInvoiceId: document.originalInvoiceId,
+      sourceInvoiceKind: document.kind === 'sale-return' ? 'sale' as const : 'purchase' as const,
       customer: document.customerName,
       products: productId
         ? products.find((item) => item.id === productId)?.name || '—'
@@ -354,17 +366,15 @@ export function ReportsView() {
   ];
 
   return <div className="space-y-5">
-    <div className="screen-only flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-black text-slate-950">گزارش‌ها</h1>
-        <p className="mt-1 text-sm text-slate-500">گزارش‌های عملیاتی با فیلتر تاریخ و خروجی CSV، Excel و چاپ/PDF</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
+    <AppNavbarContent
+      title="گزارش‌ها"
+      subtitle="گزارش‌های عملیاتی با فیلتر تاریخ و خروجی CSV، Excel و چاپ/PDF"
+      actions={<>
         <Button variant="outline" onClick={exportCsv}><FileDown className="h-4 w-4" /> CSV</Button>
         <Button variant="outline" onClick={exportExcel}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
         <Button onClick={() => window.print()}><Printer className="h-4 w-4" /> چاپ / PDF</Button>
-      </div>
-    </div>
+      </>}
+    />
 
     <Card className="screen-only">
       <CardContent className="grid gap-4 lg:grid-cols-[1fr_1fr_1.2fr_1.2fr]">
@@ -395,10 +405,10 @@ export function ReportsView() {
         </div>
         <Card>
           <CardHeader><CardTitle>جزئیات فروش، خرید و مرجوعی</CardTitle></CardHeader>
-          <div className="table-wrap"><table className="data-table min-w-[920px]">
+          <div className="table-wrap"><DataTable className="data-table min-w-[920px]">
             <thead><tr><th>تاریخ</th><th>نوع</th><th>شماره</th><th>طرف حساب</th><th>کالا / خدمت</th><th>مبلغ</th></tr></thead>
-            <tbody>{salesRows.map((row) => <tr key={row.key}><td>{formatPersianDate(row.date)}</td><td><Badge className={row.sign < 0 ? 'bg-rose-50 text-rose-700' : row.type === 'فروش' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}>{row.type}</Badge></td><td className="font-bold">{row.number}</td><td>{row.customer}</td><td>{row.products || '—'}</td><td className={row.sign < 0 ? 'font-black text-rose-700' : 'font-black'}>{row.sign < 0 ? '− ' : ''}{money(row.amount)} {settings.currency}</td></tr>)}{!salesRows.length && <EmptyRow cols={6} text="سندی در این بازه و فیلتر وجود ندارد." />}</tbody>
-          </table></div>
+            <tbody>{salesRows.map((row) => <tr key={row.key}><td>{formatPersianDate(row.date)}</td><td><Badge className={row.sign < 0 ? 'bg-rose-50 text-rose-700' : row.type === 'فروش' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}>{row.type}</Badge></td><td className="font-bold">{onOpenInvoice ? <button type="button" className="text-sky-700 underline-offset-4 hover:underline" onClick={() => onOpenInvoice(row.sourceInvoiceId, row.sourceInvoiceKind)} aria-label={'نمایش فاکتور مرجع ' + row.number}>{row.number}</button> : row.number}</td><td>{row.customer}</td><td>{row.products || '—'}</td><td className={row.sign < 0 ? 'font-black text-rose-700' : 'font-black'}>{row.sign < 0 ? '− ' : ''}{money(row.amount)} {settings.currency}</td></tr>)}{!salesRows.length && <EmptyRow cols={6} text="سندی در این بازه و فیلتر وجود ندارد." />}</tbody>
+          </DataTable></div>
         </Card>
       </>}
 
@@ -408,10 +418,10 @@ export function ReportsView() {
           <MetricCard title="جمع بستانکاران پایان بازه" value={money(creditors) + ' ' + settings.currency} />
           <MetricCard title="تعداد طرف حساب دارای گردش/مانده" value={String(balanceRows.length)} />
         </div>
-        <Card><CardHeader><CardTitle>بدهکاران و بستانکاران</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[900px]">
-          <thead><tr><th>کد</th><th>طرف حساب</th><th>مانده ابتدای بازه</th><th>بدهکار بازه</th><th>بستانکار بازه</th><th>مانده پایان بازه</th><th>وضعیت</th></tr></thead>
-          <tbody>{balanceRows.map((row) => <tr key={row.customer.id}><td>{row.customer.code}</td><td className="font-bold">{row.customer.name}</td><td>{money(Math.abs(row.opening))}{row.opening > 0 ? ' بدهکار' : row.opening < 0 ? ' بستانکار' : ''}</td><td className="text-rose-700">{money(row.debit)}</td><td className="text-emerald-700">{money(row.credit)}</td><td className="font-black">{money(Math.abs(row.closing))}</td><td>{row.closing > 0 ? <Badge className="bg-rose-50 text-rose-700">بدهکار</Badge> : row.closing < 0 ? <Badge className="bg-emerald-50 text-emerald-700">بستانکار</Badge> : <Badge>تسویه</Badge>}</td></tr>)}{!balanceRows.length && <EmptyRow cols={7} text="گردش یا مانده‌ای در این بازه وجود ندارد." />}</tbody>
-        </table></div></Card>
+        <Card><CardHeader><CardTitle>بدهکاران و بستانکاران</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[900px]">
+          <thead><tr><th>کد</th><th>طرف حساب</th><th>مانده ابتدای بازه</th><th>بدهکار بازه</th><th>بستانکار بازه</th><th>مانده پایان بازه</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+          <tbody>{balanceRows.map((row) => <tr key={row.customer.id}><td>{row.customer.code}</td><td className="font-bold">{row.customer.name}</td><td>{money(Math.abs(row.opening))}{row.opening > 0 ? ' بدهکار' : row.opening < 0 ? ' بستانکار' : ''}</td><td className="text-rose-700">{money(row.debit)}</td><td className="text-emerald-700">{money(row.credit)}</td><td className="font-black">{money(Math.abs(row.closing))}</td><td>{row.closing > 0 ? <Badge className="bg-rose-50 text-rose-700">بدهکار</Badge> : row.closing < 0 ? <Badge className="bg-emerald-50 text-emerald-700">بستانکار</Badge> : <Badge>تسویه</Badge>}</td><td>{onOpenCustomer && <Button variant="ghost" size="sm" onClick={() => onOpenCustomer(row.customer.id)}><BookOpen className="h-3.5 w-3.5" /> دفتر حساب</Button>}</td></tr>)}{!balanceRows.length && <EmptyRow cols={8} text="گردش یا مانده‌ای در این بازه وجود ندارد." />}</tbody>
+        </DataTable></div></Card>
       </>}
 
       {tab === 'checks' && <>
@@ -420,10 +430,10 @@ export function ReportsView() {
           <MetricCard title="چک‌های آینده" value={money(futureChecks) + ' ' + settings.currency} />
           <MetricCard title="تعداد چک در بازه" value={String(checkRows.length)} />
         </div>
-        <Card><CardHeader><CardTitle>چک‌ها بر اساس سررسید</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[960px]">
-          <thead><tr><th>سند</th><th>شماره چک</th><th>طرف حساب</th><th>نوع</th><th>بانک</th><th>سررسید</th><th>مبلغ</th><th>وضعیت</th></tr></thead>
-          <tbody>{checkRows.map(({ check, customerName, timing }) => <tr key={check.id}><td className="font-bold">{check.documentNumber}</td><td>{check.number}</td><td>{customerName}</td><td>{check.direction === 'received' ? 'دریافتی' : 'پرداختی'}</td><td>{check.bank || '—'}</td><td>{formatPersianDate(check.dueDate)}</td><td className="font-black">{money(check.amount)} {settings.currency}</td><td><Badge className={timing === 'سررسید گذشته' ? 'bg-rose-50 text-rose-700' : timing === 'آینده' ? 'bg-amber-50 text-amber-700' : timing === 'برگشتی' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}>{timing}</Badge></td></tr>)}{!checkRows.length && <EmptyRow cols={8} text="چکی در این بازه وجود ندارد." />}</tbody>
-        </table></div></Card>
+        <Card><CardHeader><CardTitle>چک‌ها بر اساس سررسید</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[960px]">
+          <thead><tr><th>سند</th><th>شماره چک</th><th>طرف حساب</th><th>نوع</th><th>بانک</th><th>سررسید</th><th>مبلغ</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+          <tbody>{checkRows.map(({ check, customerName, timing }) => <tr key={check.id}><td className="font-bold">{check.documentNumber}</td><td>{check.number}</td><td>{customerName}</td><td>{check.direction === 'received' ? 'دریافتی' : 'پرداختی'}</td><td>{check.bank || '—'}</td><td>{formatPersianDate(check.dueDate)}</td><td className="font-black">{money(check.amount)} {settings.currency}</td><td><Badge className={timing === 'سررسید گذشته' ? 'bg-rose-50 text-rose-700' : timing === 'آینده' ? 'bg-amber-50 text-amber-700' : timing === 'برگشتی' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}>{timing}</Badge></td><td>{onOpenCheck && <Button variant="ghost" size="sm" onClick={() => onOpenCheck(check.id)}><FileText className="h-3.5 w-3.5" /> جزئیات</Button>}</td></tr>)}{!checkRows.length && <EmptyRow cols={9} text="چکی در این بازه وجود ندارد." />}</tbody>
+        </DataTable></div></Card>
       </>}
 
       {tab === 'inventory' && <>
@@ -432,10 +442,10 @@ export function ReportsView() {
           <MetricCard title="کالاهای زیر حداقل" value={String(belowMinimumCount)} />
           <MetricCard title="تعداد کالا" value={String(inventoryRows.length)} />
         </div>
-        <Card><CardHeader><CardTitle>موجودی و گردش کالا</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[980px]">
+        <Card><CardHeader><CardTitle>موجودی و گردش کالا</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[980px]">
           <thead><tr><th>کد</th><th>کالا</th><th>ورود</th><th>خروج</th><th>موجودی پایان بازه</th><th>میانگین هزینه</th><th>ارزش</th><th>حداقل</th><th>وضعیت</th></tr></thead>
           <tbody>{inventoryRows.map((row) => <tr key={row.product.id}><td>{row.product.code}</td><td className="font-bold">{row.product.name}</td><td className="text-emerald-700">{money(row.incoming)} {row.product.unit}</td><td className="text-rose-700">{money(row.outgoing)} {row.product.unit}</td><td className="font-black">{money(row.stock)} {row.product.unit}</td><td>{money(row.averageCost)} {settings.currency}</td><td>{money(row.value)} {settings.currency}</td><td>{money(row.product.minStock)}</td><td>{row.belowMin ? <Badge className="bg-rose-50 text-rose-700">زیر حداقل</Badge> : <Badge className="bg-emerald-50 text-emerald-700">مناسب</Badge>}</td></tr>)}{!inventoryRows.length && <EmptyRow cols={9} text="کالایی مطابق فیلتر وجود ندارد." />}</tbody>
-        </table></div></Card>
+        </DataTable></div></Card>
       </>}
 
       {tab === 'ledger' && <>
@@ -446,10 +456,10 @@ export function ReportsView() {
           <MetricCard title="بستانکار بازه" value={money(ledgerCredit) + ' ' + settings.currency} />
           <MetricCard title="مانده پایان بازه" value={money(Math.abs(ledgerClosing)) + (ledgerClosing > 0 ? ' بدهکار' : ledgerClosing < 0 ? ' بستانکار' : '')} />
         </div>
-        <Card><CardHeader><CardTitle>دفتر {selectedLedgerCustomer?.name || 'طرف حساب'}</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[840px]">
+        <Card><CardHeader><CardTitle>دفتر {selectedLedgerCustomer?.name || 'طرف حساب'}</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[840px]">
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
           <tbody>{ledgerRows.map((entry) => <tr key={entry.id}><td>{formatPersianDate(entry.date)}</td><td className="font-bold">{entry.title}</td><td>{entry.reference || '—'}</td><td className="text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td><td className="text-emerald-700">{entry.credit ? money(entry.credit) : '—'}</td></tr>)}{!ledgerRows.length && <EmptyRow cols={5} text="گردشی در این بازه وجود ندارد." />}</tbody>
-        </table></div></Card>
+        </DataTable></div></Card>
       </>}
 
       {tab === 'cardex' && <>
@@ -460,10 +470,10 @@ export function ReportsView() {
           <MetricCard title="موجودی پایان بازه" value={money(cardexAsOf.stock) + ' ' + (selectedCardexProduct?.unit || '')} />
           <MetricCard title="میانگین هزینه پایان بازه" value={money(cardexAsOf.averageCost) + ' ' + settings.currency} />
         </div>
-        <Card><CardHeader><CardTitle>کاردکس {selectedCardexProduct?.name || 'کالا'}</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[940px]">
+        <Card><CardHeader><CardTitle>کاردکس {selectedCardexProduct?.name || 'کالا'}</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[940px]">
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>بهای واحد</th></tr></thead>
           <tbody>{cardexRows.map((movement) => <tr key={movement.id}><td>{formatPersianDate(movement.date)}</td><td className="font-bold">{movementLabel(movement)}</td><td>{movement.sourceReference || '—'}</td><td className="text-emerald-700">{movement.quantity > 0 ? money(movement.quantity) : '—'}</td><td className="text-rose-700">{movement.quantity < 0 ? money(Math.abs(movement.quantity)) : '—'}</td><td className="font-black">{money(movement.balanceAfter)} {selectedCardexProduct?.unit}</td><td>{money(movement.averageCostAfter)} {settings.currency}</td><td>{money(movement.unitCost)} {settings.currency}</td></tr>)}{!cardexRows.length && <EmptyRow cols={8} text="حرکتی در این بازه وجود ندارد." />}</tbody>
-        </table></div></Card>
+        </DataTable></div></Card>
       </>}
     </div>
   </div>;

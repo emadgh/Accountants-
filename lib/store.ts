@@ -2,7 +2,8 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { seedData } from './data';
+import { createEmptyAccountingData, seedData } from './data';
+import { INVOICE_TEMPLATES, isInvoicePaperSize, isInvoiceTemplateId } from './invoice-templates';
 import type {
   Account,
   AccountAdjustment,
@@ -14,6 +15,7 @@ import type {
   DocumentSequenceKey,
   Invoice,
   InvoiceAuditAction,
+  InvoicePaperSize,
   MoneyTransaction,
   OperationResult,
   Payment,
@@ -29,6 +31,7 @@ import type {
 } from './types';
 import {
   expectedPaymentDirection,
+  invoiceOutstandingAmount,
   invoiceTotal,
   returnDocumentAmount,
   returnedQuantityForItem,
@@ -55,6 +58,7 @@ type Store = AccountingData & {
   hydrated: boolean;
   setHydrated: (v: boolean) => void;
   reserveDocumentNumber: (key: DocumentSequenceKey) => string;
+  createBusinessProfile: (profile: BusinessProfile) => OperationResult & { profile?: BusinessProfile };
   upsertBusinessProfile: (profile: BusinessProfile) => OperationResult;
   deleteBusinessProfile: (id: string) => OperationResult;
   setDefaultBusinessProfile: (id: string) => OperationResult;
@@ -63,6 +67,8 @@ type Store = AccountingData & {
   upsertProduct: (product: Product) => void;
   deleteProduct: (id: string) => OperationResult;
   saveInvoiceDraft: (invoice: Invoice) => StoreOperationResult;
+  setInvoiceTemplate: (id: string, templateId: Invoice['templateId']) => StoreOperationResult;
+  setInvoicePaperSize: (id: string, paperSize: InvoicePaperSize) => StoreOperationResult;
   finalizeInvoice: (invoice: Invoice) => StoreOperationResult;
   reviseInvoice: (invoice: Invoice, reason: string) => StoreOperationResult;
   voidInvoice: (id: string, reason: string) => StoreOperationResult;
@@ -72,7 +78,8 @@ type Store = AccountingData & {
   voidReturn: (id: string, reason: string) => ReturnOperationResult;
   deleteReturn: (id: string) => OperationResult;
   addPayment: (payment: Payment) => OperationResult;
-  deletePayment: (id: string) => void;
+  repairPaymentInvoiceLinks: (links: Array<{ paymentId: string; invoiceId: string }>) => OperationResult & { updated?: number };
+  deletePayment: (id: string, reason: string) => OperationResult;
   addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
   addStockAdjustment: (input: StockAdjustmentInput) => OperationResult;
   upsertAccount: (account: Account) => OperationResult;
@@ -88,6 +95,17 @@ type Store = AccountingData & {
 
 function isPosted(status: Invoice['status']) {
   return status === 'final' || status === 'partial' || status === 'settled';
+}
+
+function partialInvoiceContentSignature(invoice: Invoice) {
+  return JSON.stringify({
+    ...invoice,
+    notes: undefined,
+    status: undefined,
+    revision: undefined,
+    updatedAt: undefined,
+    auditTrail: undefined,
+  });
 }
 
 const MAIN_WAREHOUSE_ID = 'main';
@@ -503,11 +521,12 @@ function mirrorDefaultProfile(settings: BusinessSettings, profile: BusinessProfi
 }
 
 function normalizeBusinessSettings(input?: Partial<BusinessSettings>): BusinessSettings {
+  const defaults = createEmptyAccountingData().settings;
   const base: BusinessSettings = {
-    ...seedData.settings,
+    ...defaults,
     ...(input || {}),
     numbering: {
-      ...seedData.settings.numbering,
+      ...defaults.numbering,
       ...(input?.numbering || {}),
     },
     businessProfiles: [],
@@ -531,6 +550,12 @@ function normalizeBusinessSettings(input?: Partial<BusinessSettings>): BusinessS
     ...base,
     businessProfiles: profiles,
     defaultBusinessProfileId,
+    defaultInvoiceTemplateId: isInvoiceTemplateId(input?.defaultInvoiceTemplateId)
+      ? input.defaultInvoiceTemplateId
+      : defaults.defaultInvoiceTemplateId,
+    defaultInvoicePaperSize: isInvoicePaperSize(input?.defaultInvoicePaperSize)
+      ? input.defaultInvoicePaperSize
+      : defaults.defaultInvoicePaperSize,
   };
   return mirrorDefaultProfile(
     normalized,
@@ -543,7 +568,7 @@ function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invo
     const invoice = payment.invoiceId ? data.invoices.find((item) => item.id === payment.invoiceId) : undefined;
     return {
       ...payment,
-      direction: resolvedPaymentDirection(payment, invoice),
+      direction: invoice ? expectedPaymentDirection(invoice) : resolvedPaymentDirection(payment),
     };
   });
 }
@@ -559,6 +584,7 @@ export function normalizeAccountingData(data: AccountingData): AccountingData {
   const invoices = (data.invoices || []).map((invoice) => ({
     ...invoice,
     businessProfileId: invoice.businessProfileId || settings.defaultBusinessProfileId,
+    templateId: isInvoiceTemplateId(invoice.templateId) ? invoice.templateId : 'classic',
     date: normalizeStoredDate(invoice.date),
     items: (invoice.items || []).map((item) => ({
       ...item,
@@ -617,7 +643,7 @@ export function normalizeAccountingData(data: AccountingData): AccountingData {
 export const useAccountingStore = create<Store>()(
   persist(
     (set, get) => ({
-      ...normalizeAccountingData(seedData),
+      ...normalizeAccountingData(createEmptyAccountingData()),
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
 
@@ -652,6 +678,22 @@ export const useAccountingStore = create<Store>()(
           },
         });
         return candidate;
+      },
+
+      createBusinessProfile: (profile) => {
+        const state = get();
+        if (!profile.label.trim() || !profile.businessName.trim()) {
+          return { ok: false, message: 'عنوان پروفایل و نام کسب‌وکار الزامی است.' };
+        }
+        const profiles = state.settings.businessProfiles;
+        const existingIds = new Set(profiles.map((item) => item.id));
+        const baseId = profile.id.trim() || uid('business');
+        let id = baseId;
+        let suffix = 2;
+        while (existingIds.has(id)) id = `${baseId}_${suffix++}`;
+        const createdProfile = { ...profile, id };
+        set({ settings: { ...state.settings, businessProfiles: [...profiles, createdProfile] } });
+        return { ok: true, profile: createdProfile };
       },
 
       upsertBusinessProfile: (profile) => {
@@ -816,6 +858,43 @@ export const useAccountingStore = create<Store>()(
         return { ok: true, invoice: next };
       },
 
+      setInvoiceTemplate: (id, templateId) => {
+        if (!isInvoiceTemplateId(templateId)) return { ok: false, message: 'قالب فاکتور معتبر نیست.' };
+        const state = get();
+        const previous = state.invoices.find((invoice) => invoice.id === id);
+        if (!previous) return { ok: false, message: 'فاکتور برای تغییر قالب پیدا نشد.' };
+        if (previous.templateId === templateId) return { ok: true, invoice: previous };
+
+        const previousLabel = INVOICE_TEMPLATES.find((template) => template.id === previous.templateId)?.label || 'کلاسیک';
+        const nextLabel = INVOICE_TEMPLATES.find((template) => template.id === templateId)?.label || 'کلاسیک';
+        const next: Invoice = {
+          ...previous,
+          templateId,
+          updatedAt: new Date().toISOString(),
+          auditTrail: appendAudit(previous, 'template_changed', previous.revision || 0, `قالب چاپ: ${previousLabel} ← ${nextLabel}`),
+        };
+        set({ invoices: state.invoices.map((invoice) => invoice.id === id ? next : invoice) });
+        return { ok: true, invoice: next };
+      },
+
+      setInvoicePaperSize: (id, paperSize) => {
+        if (!isInvoicePaperSize(paperSize)) return { ok: false, message: 'اندازه کاغذ فاکتور معتبر نیست.' };
+        const state = get();
+        const previous = state.invoices.find((invoice) => invoice.id === id);
+        if (!previous) return { ok: false, message: 'فاکتور برای تغییر اندازه کاغذ پیدا نشد.' };
+        const previousPaperSize = previous.paperSize || 'A4';
+        if (previousPaperSize === paperSize) return { ok: true, invoice: previous };
+
+        const next: Invoice = {
+          ...previous,
+          paperSize,
+          updatedAt: new Date().toISOString(),
+          auditTrail: appendAudit(previous, 'paper_size_changed', previous.revision || 0, `اندازه کاغذ: ${previousPaperSize} ← ${paperSize}`),
+        };
+        set({ invoices: state.invoices.map((invoice) => invoice.id === id ? next : invoice) });
+        return { ok: true, invoice: next };
+      },
+
       finalizeInvoice: (invoice) => {
         const state = get();
         const previous = state.invoices.find((item) => item.id === invoice.id);
@@ -862,7 +941,32 @@ export const useAccountingStore = create<Store>()(
         if (!previous || !isPosted(previous.status)) {
           return { ok: false, message: 'فقط فاکتور قطعی قابل Revision است.' };
         }
+        if (previous.status === 'settled') {
+          return { ok: false, message: 'فاکتور تسویه‌شده قابل ویرایش نیست.' };
+        }
         if (!reason.trim()) return { ok: false, message: 'دلیل ویرایش سند قطعی را وارد کنید.' };
+        if (previous.status === 'partial') {
+          if (partialInvoiceContentSignature(previous) !== partialInvoiceContentSignature(invoice)) {
+            return { ok: false, message: 'فاکتور بخشی‌تسویه فقط از نظر توضیحات قابل ویرایش است.' };
+          }
+          const revision = Math.max(1, previous.revision || 1) + 1;
+          const next: Invoice = {
+            ...previous,
+            notes: invoice.notes,
+            revision,
+            updatedAt: new Date().toISOString(),
+            auditTrail: appendAudit(previous, 'revised', revision, reason),
+          };
+          const invoices = withInvoiceStatuses(
+            state.invoices.map((item) => item.id === next.id ? next : item),
+            state.payments,
+            state.checks,
+            state.returns
+          );
+          const saved = invoices.find((item) => item.id === next.id) || next;
+          set({ invoices });
+          return { ok: true, invoice: saved };
+        }
         if (state.returns.some((document) => document.originalInvoiceId === invoice.id && document.status === 'final')) {
           return { ok: false, message: 'این فاکتور مرجوعی قطعی دارد. ابتدا اسناد مرجوعی مرتبط را ابطال کنید.' };
         }
@@ -1118,11 +1222,22 @@ export const useAccountingStore = create<Store>()(
         if (linkedInvoice && (linkedInvoice.status === 'draft' || linkedInvoice.status === 'void')) {
           return { ok: false, message: 'به پیش‌نویس یا فاکتور باطل نمی‌توان تراکنش متصل کرد.' };
         }
+        if (linkedInvoice) {
+          const outstanding = invoiceOutstandingAmount(
+            linkedInvoice,
+            state.payments.filter((item) => item.id !== payment.id),
+            state.checks,
+            state.returns
+          );
+          if (Number(payment.amount) > outstanding + 0.0001) {
+            return { ok: false, message: 'مبلغ تراکنش از مانده فاکتور بیشتر است.' };
+          }
+        }
 
         let normalized: Payment = {
           ...payment,
           direction: linkedInvoice ? expectedPaymentDirection(linkedInvoice) : payment.direction,
-          customerId: linkedInvoice ? linkedInvoice.customerId : payment.customerId,
+          customerId: linkedInvoice ? (linkedInvoice.customerId || payment.customerId) : payment.customerId,
         };
 
         if (normalized.method === 'check') {
@@ -1157,24 +1272,32 @@ export const useAccountingStore = create<Store>()(
         return { ok: true };
       },
 
-      deletePayment: (id) => {
+      deletePayment: (id, reason) => {
         const state = get();
         const payment = state.payments.find((item) => item.id === id);
-        if (!payment) return;
+        if (!payment) return { ok: false, message: 'تراکنش پیدا نشد.' };
+        if (!reason.trim()) return { ok: false, message: 'دلیل حذف تراکنش الزامی است.' };
         const payments = state.payments.filter((item) => item.id !== id);
         const reversals = reverseActiveSourceEntries(
           state.journalEntries,
           'payment',
           id,
           todayFa(),
-          'برگشت تراکنش حذف‌شده',
+          'حذف تراکنش ' + payment.documentNumber + ' — ' + reason.trim(),
           'status-reversal'
         );
+        const checks = payment.checkId
+          ? state.checks.map((check) => check.id === payment.checkId
+            ? { ...check, notes: [check.notes?.trim(), 'تراکنش ' + payment.documentNumber + ' حذف شد: ' + reason.trim()].filter(Boolean).join('\n') }
+            : check)
+          : state.checks;
         set({
           payments,
-          invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
+          checks,
+          invoices: withInvoiceStatuses(state.invoices, payments, checks, state.returns),
           journalEntries: [...state.journalEntries, ...reversals],
         });
+        return { ok: true };
       },
 
       addAdjustment: (adjustment) => {
@@ -1398,12 +1521,35 @@ export const useAccountingStore = create<Store>()(
 
       setSettings: (settings) => set({ settings: normalizeBusinessSettings(settings) }),
 
+      repairPaymentInvoiceLinks: (links) => {
+        const state = get();
+        const invoiceById = new Map(state.invoices.map((invoice) => [invoice.id, invoice]));
+        const requested = new Map<string, string>();
+        for (const link of links) {
+          if (requested.has(link.paymentId) && requested.get(link.paymentId) !== link.invoiceId) {
+            return { ok: false, message: 'برای یک دریافت، چند فاکتور متفاوت پیشنهاد شده است.' };
+          }
+          requested.set(link.paymentId, link.invoiceId);
+        }
+        let updated = 0;
+        const payments = state.payments.map((payment) => {
+          const invoiceId = requested.get(payment.id);
+          if (!invoiceId || payment.invoiceId) return payment;
+          const invoice = invoiceById.get(invoiceId);
+          if (!invoice || invoice.customerId !== payment.customerId || invoice.status === 'draft' || invoice.status === 'void' || expectedPaymentDirection(invoice) !== payment.direction) return payment;
+          updated++;
+          return { ...payment, invoiceId };
+        });
+        if (updated) set({ payments, invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns) });
+        return { ok: true, updated };
+      },
+
       replaceAll: (data) => {
         set(normalizeAccountingData(data));
       },
 
       resetAll: () => {
-        set(normalizeAccountingData(seedData));
+        set(normalizeAccountingData(createEmptyAccountingData()));
       },
     }),
     {
@@ -1413,12 +1559,13 @@ export const useAccountingStore = create<Store>()(
       skipHydration: true,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
-        const products = normalizeProducts(state.products || seedData.products);
+        const defaults = createEmptyAccountingData();
+        const products = normalizeProducts(state.products ?? defaults.products);
         const mergedSettings: BusinessSettings = {
-          ...seedData.settings,
+          ...defaults.settings,
           ...(state.settings || {}),
           numbering: {
-            ...seedData.settings.numbering,
+            ...defaults.settings.numbering,
             ...(state.settings?.numbering || {}),
           },
           businessProfiles: state.settings?.businessProfiles || [],
@@ -1432,17 +1579,17 @@ export const useAccountingStore = create<Store>()(
               defaultBusinessProfileId: 'business_default',
             };
         return normalizeAccountingData({
-          ...seedData,
+          ...defaults,
           ...state,
-          customers: (state.customers || seedData.customers).map((customer) => ({
+          customers: (state.customers ?? defaults.customers).map((customer) => ({
             ...customer,
             openingBalance: Number(customer.openingBalance || 0),
           })),
           products,
-          invoices: state.invoices || seedData.invoices,
+          invoices: state.invoices ?? defaults.invoices,
           returns: state.returns || [],
-          payments: state.payments || seedData.payments,
-          checks: state.checks || seedData.checks,
+          payments: state.payments ?? defaults.payments,
+          checks: state.checks ?? defaults.checks,
           adjustments: state.adjustments || [],
           stockMovements: state.stockMovements?.length ? state.stockMovements : buildOpeningMovements(products),
           accounts: state.accounts || [],
@@ -1450,6 +1597,23 @@ export const useAccountingStore = create<Store>()(
           moneyTransactions: state.moneyTransactions || [],
           settings: migratedSettings,
         });
+      },
+      merge: (persistedState, currentState) => {
+        const defaults = createEmptyAccountingData();
+        const persisted = (persistedState || {}) as Partial<AccountingData>;
+        const data = {
+          ...defaults,
+          ...persisted,
+          settings: {
+            ...defaults.settings,
+            ...(persisted.settings || {}),
+            numbering: {
+              ...defaults.settings.numbering,
+              ...(persisted.settings?.numbering || {}),
+            },
+          },
+        } as AccountingData;
+        return { ...currentState, ...normalizeAccountingData(data) };
       },
       partialize: (state) => ({
         customers: state.customers,

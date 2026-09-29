@@ -1,14 +1,18 @@
 'use client';
 
+import { DataTable } from '@/components/ui/data-table';
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Archive, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock,
-  BookOpen, Check, CircleDollarSign, Edit3, FileText, Package, Plus, Search,
+  BookOpen, Check, CircleDollarSign, Edit3, Eye, FileText, Package, Plus, Search,
   Trash2, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
+import { INVOICE_TEMPLATES } from '@/lib/invoice-templates';
+import { clearApplicationDatabase } from '@/lib/storage';
 import type { BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
-import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
+import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceOutstandingAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Button } from '@/components/ui/button';
@@ -20,43 +24,65 @@ import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
 import { YasImporterPanel } from '@/components/yas-importer-panel';
-import { confirmDialog, notify } from '@/lib/feedback';
+import { InvoicePaymentDialog } from '@/components/invoice-payment-dialog';
+import { InvoicePaymentHistoryButton } from '@/components/invoice-payment-history';
+import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
+import { AppNavbarContent } from '@/components/app-navbar';
+import { Field } from '@/components/ui/field';
+import { RecordDetailsDialog } from '@/components/ui/record-details-dialog';
+import { UnsavedChangesBadge, useUnsavedDraft } from '@/components/ui/unsaved-changes';
 
 function PageHead({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
-  return <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-black text-slate-950">{title}</h1><p className="mt-1 text-sm text-slate-500">{subtitle}</p></div>{action}</div>;
+  return <AppNavbarContent title={title} subtitle={subtitle} actions={action} />;
 }
 
 function SearchBox({ value, onChange, placeholder = 'جستجو...' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <div className="relative w-full max-w-sm"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input className="pr-9" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} /></div>;
 }
 
-export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; onEdit: (id: string) => void; onNew: () => void }) {
-  const { invoices, returns, payments, checks, deleteInvoice, settings } = useAccountingStore();
+export function InvoiceListView({ kind, onView, onEdit, onNew }: { kind: InvoiceKind; onView: (id: string) => void; onEdit: (id: string) => void; onNew: () => void }) {
+  const { invoices, returns, payments, checks, deleteInvoice, reserveDocumentNumber, settings } = useAccountingStore();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
+  const [paymentAction, setPaymentAction] = useState<{ invoiceId: string; documentNumber: string } | null>(null);
   const list = invoices.filter((i) => i.kind === kind).filter((i) => (i.number + ' ' + i.customerName).toLowerCase().includes(q.toLowerCase())).filter((i) => status === 'all' || i.status === status);
   const label = kind === 'sale' ? 'فاکتورهای فروش' : 'فاکتورهای خرید';
+  const startPayment = (invoiceId: string) => {
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) return;
+    const direction = invoice.kind === 'sale' ? 'receipt' : 'payment';
+    setPaymentAction({ invoiceId, documentNumber: reserveDocumentNumber(direction) });
+  };
   return <div className="space-y-5">
     <PageHead title={label} subtitle="ثبت، جستجو، ویرایش و کنترل وضعیت فاکتورها" action={<Button onClick={onNew}><Plus className="h-4 w-4" /> {kind === 'sale' ? 'فاکتور فروش جدید' : 'فاکتور خرید جدید'}</Button>} />
     <Card><CardHeader className="flex-wrap"><SearchBox value={q} onChange={setQ} /><select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">همه وضعیت‌ها</option><option value="draft">پیش‌نویس</option><option value="final">قطعی</option><option value="partial">بخشی تسویه</option><option value="settled">تسویه‌شده</option><option value="void">باطل</option></select></CardHeader>
-      <div className="table-wrap"><table className="data-table"><thead><tr><th>شماره</th><th>تاریخ</th><th>طرف حساب</th><th>وضعیت</th><th>مبلغ کل</th><th>پرداخت</th><th>مانده</th><th>عملیات</th></tr></thead><tbody>
+      <div className="table-wrap"><DataTable className="data-table"><thead><tr><th>شماره</th><th>تاریخ</th><th>طرف حساب</th><th>وضعیت</th><th>مبلغ کل</th><th>پرداخت</th><th>مانده</th><th>عملیات</th></tr></thead><tbody>
         {list.map((i) => {
           const total = invoiceTotal(i);
           const returned = returns.filter((document) => document.originalInvoiceId === i.id && document.status === 'final').reduce((sum, document) => sum + document.totalAmount, 0);
           const netTotal = Math.max(0, total - returned);
           const paid = settledForInvoice(i, payments, checks);
+          const remaining = invoiceOutstandingAmount(i, payments, checks, returns);
+          const canReceive = i.status !== 'draft' && i.status !== 'void' && remaining > 0;
+          const canEdit = i.status !== 'settled' && i.status !== 'void';
           return <tr key={i.id}>
             <td className="font-black">{i.number}</td><td>{formatPersianDate(i.date)}</td><td>{i.customerName || '—'}</td>
             <td><div className="flex flex-wrap gap-1"><InvoiceStatus status={i.status} /><ReturnProgressBadge returned={returned} total={total} /></div></td>
             <td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span>{returned > 0 && <div className="mt-1 text-[10px] font-normal text-rose-500">مرجوعی: {money(returned)} · خالص: {money(netTotal)}</div>}</td>
-            <td>{money(paid)}</td>
+            <td><div dir="rtl" className="flex items-center gap-1.5">{i.status !== 'draft' && <InvoicePaymentHistoryButton invoiceId={i.id} />}{money(paid)}</div></td>
             <td className={netTotal - paid > 0 ? 'font-bold text-rose-600' : 'font-bold text-emerald-600'}>{money(Math.max(0, netTotal - paid))}</td>
-            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>{i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('پیش‌نویس حذف شود؟', { title: 'حذف پیش‌نویس', confirmLabel: 'حذف', danger: true })) deleteInvoice(i.id); }} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}</div></td>
+            <td><div className="flex flex-wrap items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={() => onView(i.id)} title="نمایش فاکتور"><Eye className="h-4 w-4" /></Button>
+              {canEdit && <Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title={i.status === 'partial' ? 'ویرایش محدود' : 'ویرایش'}><Edit3 className="h-4 w-4" /></Button>}
+              {canReceive && <Button variant="outline" size="sm" onClick={() => startPayment(i.id)}><CircleDollarSign className="h-3.5 w-3.5" />{kind === 'sale' ? 'دریافت / تسویه' : 'پرداخت / تسویه'}</Button>}
+              {i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('پیش‌نویس حذف شود؟', { title: 'حذف پیش‌نویس', confirmLabel: 'حذف', danger: true })) deleteInvoice(i.id); }} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}
+            </div></td>
           </tr>;
         })}
         {!list.length && <EmptyRow cols={8} text="فاکتوری مطابق فیلتر پیدا نشد." />}
-      </tbody></table></div>
+      </tbody></DataTable></div>
     </Card>
+    <InvoicePaymentDialog invoiceId={paymentAction?.invoiceId} documentNumber={paymentAction?.documentNumber} open={!!paymentAction} onOpenChange={(open) => { if (!open) setPaymentAction(null); }} />
   </div>;
 }
 
@@ -76,7 +102,9 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
   const { customers, invoices, returns, payments, checks, adjustments, upsertCustomer, deleteCustomer, settings } = useAccountingStore();
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<Customer | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [open, setOpen] = useState(false);
+  const customerDraft = useUnsavedDraft<Customer>('طرف حساب');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('active');
   const list = customers.filter((customer) =>
     (statusFilter === 'all' || customer.status === statusFilter) &&
@@ -84,7 +112,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
   );
   const balance = (customer: Customer) => customerNetBalance(customer.id, invoices, payments, checks, adjustments, customer.openingBalance || 0, returns);
   const startEdit = (customer?: Customer) => {
-    setEdit(customer ? { ...customer } : {
+    const draft: Customer = customer ? { ...customer } : {
       id: uid('cus'),
       code: String(100000 + customers.length + 1),
       name: '',
@@ -96,9 +124,13 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
       economicCode: '',
       postalCode: '',
       openingBalance: 0,
-    });
+    };
+    customerDraft.markClean(draft);
+    setEdit(draft);
     setOpen(true);
   };
+
+  const closeCustomerForm = () => customerDraft.requestClose(edit, () => setOpen(false));
 
   const saveCustomer = () => {
     if (!edit) return;
@@ -108,6 +140,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
       return;
     }
     upsertCustomer(edit);
+    customerDraft.markClean(edit);
     setOpen(false);
   };
 
@@ -120,7 +153,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           {([['active', 'فعال'], ['archived', 'آرشیو'], ['all', 'همه']] as const).map(([key, label]) => <Button key={key} size="sm" variant={statusFilter === key ? 'default' : 'outline'} onClick={() => setStatusFilter(key)}>{label}</Button>)}
         </div>
       </CardHeader>
-      <div className="table-wrap"><table className="data-table">
+      <div className="table-wrap"><DataTable className="data-table">
         <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>وضعیت</th><th>تلفن</th><th>آدرس</th><th>مانده حساب</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((customer) => {
@@ -137,6 +170,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               </td>
               <td><div className="flex gap-1">
                 {onOpenLedger && <Button variant="ghost" size="icon" onClick={() => onOpenLedger(customer.id)} title="دفتر حساب"><BookOpen className="h-4 w-4" /></Button>}
+                <Button variant="ghost" size="icon" onClick={() => setSelectedCustomer(customer)} title="نمایش جزئیات" aria-label={'نمایش جزئیات ' + customer.name}><Eye className="h-4 w-4" /></Button>
                 <Button variant="ghost" size="icon" onClick={() => startEdit(customer)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>
                 <Button variant="ghost" size="icon" className={customer.status === 'archived' ? 'text-emerald-600' : 'text-amber-600'} onClick={() => upsertCustomer({ ...customer, status: customer.status === 'archived' ? 'active' : 'archived' })} title={customer.status === 'archived' ? 'بازگردانی' : 'آرشیو کردن'}>{customer.status === 'archived' ? <Check className="h-4 w-4" /> : <Archive className="h-4 w-4" />}</Button>
                 <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('طرف حساب حذف شود؟', { title: 'حذف طرف حساب', confirmLabel: 'حذف', danger: true })) { const result = deleteCustomer(customer.id); if (!result.ok) notify(result.message || 'حذف طرف حساب انجام نشد.', 'error'); } }} title="حذف"><Trash2 className="h-4 w-4" /></Button>
@@ -145,13 +179,13 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           })}
           {!list.length && <EmptyRow cols={8} text="طرف حسابی پیدا نشد." />}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) setOpen(true); else void closeCustomerForm(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="text-lg font-black">{edit && customers.some((customer) => customer.id === edit.id) ? 'ویرایش طرف حساب' : 'طرف حساب جدید'}</DialogTitle>
+          <div className="flex flex-wrap items-center gap-2"><DialogTitle className="text-lg font-black">{edit && customers.some((customer) => customer.id === edit.id) ? 'ویرایش طرف حساب' : 'طرف حساب جدید'}</DialogTitle><UnsavedChangesBadge visible={customerDraft.hasChanges(edit)} /></div>
           <DialogDescription className="text-sm text-slate-500">اطلاعات حقوقی برای فاکتور رسمی قابل استفاده است. مانده اول دوره فقط هنگام ساخت طرف حساب تعیین می‌شود.</DialogDescription>
         </DialogHeader>
         {edit && <div className="grid gap-3 sm:grid-cols-2">
@@ -169,12 +203,29 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           </Field>
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button>
+            <Button variant="outline" onClick={() => void closeCustomerForm()}>انصراف</Button>
             <Button disabled={!edit.name.trim()} onClick={saveCustomer}><Check className="h-4 w-4" /> ذخیره</Button>
           </div>
         </div>}
       </DialogContent>
     </Dialog>
+    <RecordDetailsDialog
+      open={!!selectedCustomer}
+      onOpenChange={(open) => !open && setSelectedCustomer(null)}
+      title={selectedCustomer?.name || 'جزئیات طرف حساب'}
+      fields={selectedCustomer ? [
+        { label: 'کد شخص', value: selectedCustomer.code },
+        { label: 'نوع', value: selectedCustomer.kind === 'customer' ? 'مشتری' : selectedCustomer.kind === 'supplier' ? 'تأمین‌کننده' : 'مشتری و تأمین‌کننده' },
+        { label: 'وضعیت', value: selectedCustomer.status === 'active' ? 'فعال' : 'آرشیو' },
+        { label: 'تلفن', value: selectedCustomer.phone },
+        { label: 'شناسه ملی', value: selectedCustomer.nationalId },
+        { label: 'کد اقتصادی', value: selectedCustomer.economicCode },
+        { label: 'کد پستی', value: selectedCustomer.postalCode },
+        { label: 'آدرس', value: selectedCustomer.address, className: 'sm:col-span-2' },
+        { label: 'مانده حساب', value: money(Math.abs(balance(selectedCustomer))) + ' ' + settings.currency + (balance(selectedCustomer) > 0 ? ' بدهکار' : balance(selectedCustomer) < 0 ? ' بستانکار' : ' تسویه'), className: 'sm:col-span-2' },
+      ] : []}
+      onEdit={selectedCustomer ? () => { const customer = selectedCustomer; setSelectedCustomer(null); startEdit(customer); } : undefined}
+    />
   </div>;
 }
 
@@ -222,9 +273,16 @@ export function CustomerLedgerView({
   const visibleDebit = visible.reduce((sum, entry) => sum + entry.debit, 0);
   const visibleCredit = visible.reduce((sum, entry) => sum + entry.credit, 0);
 
-  const submitAdjustment = () => {
+  const submitAdjustment = async () => {
     if (!customer) return;
     const amount = Math.abs(Number(adjustAmount || 0));
+    if (amount <= 0 || !adjustNote.trim()) return;
+    const effect = adjustDirection === 'debit' ? amount : -amount;
+    const approved = await confirmDialog(
+      `اصلاحیه ${adjustDirection === 'debit' ? 'بدهکار' : 'بستانکار'} به مبلغ ${money(amount)} ${settings.currency} برای «${customer.name}» ثبت می‌شود. مانده از ${money(Math.abs(currentBalance))} ${currentBalance > 0 ? 'بدهکار' : currentBalance < 0 ? 'بستانکار' : 'تسویه'} به ${money(Math.abs(currentBalance + effect))} ${currentBalance + effect > 0 ? 'بدهکار' : currentBalance + effect < 0 ? 'بستانکار' : 'تسویه'} تغییر می‌کند. ادامه می‌دهید؟`,
+      { title: 'تأیید اصلاحیه حساب', confirmLabel: 'ثبت اصلاحیه' }
+    );
+    if (!approved) return;
     const result = addAdjustment({
       id: uid('adj'),
       customerId: customer.id,
@@ -271,7 +329,7 @@ export function CustomerLedgerView({
           <div><CardTitle>{customer.name}</CardTitle><div className="mt-1 text-xs text-slate-500">کد شخص {customer.code} · {visible.length} گردش در فیلتر فعلی</div></div>
           <Badge className={currentBalance > 0 ? 'bg-rose-50 text-rose-700' : currentBalance < 0 ? 'bg-emerald-50 text-emerald-700' : ''}>{currentBalance > 0 ? 'بدهکار' : currentBalance < 0 ? 'بستانکار' : 'تسویه'}</Badge>
         </CardHeader>
-        <div className="table-wrap"><table className="data-table min-w-[980px]">
+        <div className="table-wrap"><DataTable className="data-table min-w-[980px]">
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th><th>مانده</th><th>وضعیت / سند</th></tr></thead>
           <tbody>
             {visible.map((entry) => <tr key={entry.id}>
@@ -281,11 +339,11 @@ export function CustomerLedgerView({
               <td className="font-bold text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td>
               <td className="font-bold text-emerald-700">{entry.credit ? money(entry.credit) : '—'}</td>
               <td className={entry.balance > 0 ? 'font-black text-rose-700' : entry.balance < 0 ? 'font-black text-emerald-700' : 'font-black'}>{money(Math.abs(entry.balance))}{entry.balance > 0 ? ' بدهکار' : entry.balance < 0 ? ' بستانکار' : ''}</td>
-              <td><div className="flex items-center gap-2"><LedgerStatus status={entry.status} effective={entry.effective} kind={entry.kind} />{entry.invoiceId && entry.invoiceKind && onOpenInvoice && <Button variant="ghost" size="sm" onClick={() => onOpenInvoice(entry.invoiceId!, entry.invoiceKind!)}><FileText className="h-3.5 w-3.5" /> سند مبنا</Button>}</div></td>
+              <td><div className="flex flex-wrap items-center gap-2"><LedgerStatus status={entry.status} effective={entry.effective} kind={entry.kind} />{entry.invoiceId && entry.invoiceKind && onOpenInvoice && <Button variant="ghost" size="sm" onClick={() => onOpenInvoice(entry.invoiceId!, entry.invoiceKind!)}><FileText className="h-3.5 w-3.5" /> سند مبنا</Button>}{entry.invoiceId && entry.invoiceKind && (entry.kind === 'sale' || entry.kind === 'purchase' || entry.kind === 'void') && <InvoicePaymentHistoryButton invoiceId={entry.invoiceId} />}</div></td>
             </tr>)}
             {!visible.length && <EmptyRow cols={7} text="گردشی مطابق فیلتر فعلی وجود ندارد." />}
           </tbody>
-        </table></div>
+        </DataTable></div>
       </Card>
     </> : <Card><CardContent className="py-16 text-center text-slate-400">برای مشاهده دفتر حساب، یک طرف حساب انتخاب کنید.</CardContent></Card>}
 
@@ -319,19 +377,24 @@ export function ProductsView() {
   const { products, upsertProduct, deleteProduct, settings } = useAccountingStore();
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [open, setOpen] = useState(false);
+  const productDraft = useUnsavedDraft<Product>('کالا / خدمت');
   const list = products.filter((product) => (product.name + ' ' + product.code).toLowerCase().includes(q.toLowerCase()));
   const startEdit = (product?: Product) => {
-    setEdit(product ? { ...product } : { id: uid('prd'), code: String(1000 + products.length + 1), name: '', kind: 'product', unit: 'عدد', salePrice: 0, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 });
+    const draft = product ? { ...product } : { id: uid('prd'), code: String(1000 + products.length + 1), name: '', kind: 'product' as const, unit: 'عدد', salePrice: 0, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 };
+    productDraft.markClean(draft);
+    setEdit(draft);
     setOpen(true);
   };
+  const closeProductForm = () => productDraft.requestClose(edit, () => setOpen(false));
   const existing = edit ? products.some((product) => product.id === edit.id) : false;
 
   return <div className="space-y-5">
     <PageHead title="کالا و خدمات" subtitle="تعریف کالا، خدمت و قیمت‌ها؛ تغییر موجودی کالای موجود فقط از بخش انبار انجام می‌شود" action={<Button onClick={() => startEdit()}><Plus className="h-4 w-4" /> کالا / خدمت جدید</Button>} />
     <Card>
       <CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader>
-      <div className="table-wrap"><table className="data-table">
+      <div className="table-wrap"><DataTable className="data-table">
         <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>واحد</th><th>قیمت خرید</th><th>قیمت فروش</th><th>موجودی</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((product) => <tr key={product.id}>
@@ -340,16 +403,16 @@ export function ProductsView() {
             <td>{product.unit}</td><td>{money(product.buyPrice)}</td>
             <td className="font-bold">{money(product.salePrice)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td>
             <td className={product.kind === 'product' && product.stock <= product.minStock ? 'font-black text-rose-600' : ''}>{product.kind === 'product' ? money(product.stock) + ' ' + product.unit : '—'}</td>
-            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('این مورد حذف شود؟', { title: 'حذف کالا / خدمت', confirmLabel: 'حذف', danger: true })) { const result = deleteProduct(product.id); if (!result.ok) notify(result.message || 'حذف کالا / خدمت انجام نشد.', 'error'); } }}><Trash2 className="h-4 w-4" /></Button></div></td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => setSelectedProduct(product)} title="نمایش جزئیات" aria-label={'نمایش جزئیات ' + product.name}><Eye className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => startEdit(product)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('این مورد حذف شود؟', { title: 'حذف کالا / خدمت', confirmLabel: 'حذف', danger: true })) { const result = deleteProduct(product.id); if (!result.ok) notify(result.message || 'حذف کالا / خدمت انجام نشد.', 'error'); } }} title="حذف"><Trash2 className="h-4 w-4" /></Button></div></td>
           </tr>)}
           {!list.length && <EmptyRow cols={8} text="کالا یا خدمتی پیدا نشد." />}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) setOpen(true); else void closeProductForm(); }}>
       <DialogContent>
-        <DialogHeader><DialogTitle className="text-lg font-black">تعریف کالا / خدمت</DialogTitle><DialogDescription className="text-sm text-slate-500">موجودی اولیه فقط هنگام ایجاد کالا قابل ثبت است. بعد از آن هر تغییر موجودی در کاردکس ثبت می‌شود.</DialogDescription></DialogHeader>
+        <DialogHeader><div className="flex flex-wrap items-center gap-2"><DialogTitle className="text-lg font-black">تعریف کالا / خدمت</DialogTitle><UnsavedChangesBadge visible={productDraft.hasChanges(edit)} /></div><DialogDescription className="text-sm text-slate-500">موجودی اولیه فقط هنگام ایجاد کالا قابل ثبت است. بعد از آن هر تغییر موجودی در کاردکس ثبت می‌شود.</DialogDescription></DialogHeader>
         {edit && <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
@@ -364,10 +427,26 @@ export function ProductsView() {
             </Field>
             <Field label="حداقل موجودی"><Input type="number" min="0" value={edit.minStock} onChange={(e) => setEdit({ ...edit, minStock: Number(e.target.value) })} /></Field>
           </>}
-          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertProduct(edit); setOpen(false); }}>ذخیره</Button></div>
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => void closeProductForm()}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertProduct(edit); productDraft.markClean(edit); setOpen(false); }}>ذخیره</Button></div>
         </div>}
       </DialogContent>
     </Dialog>
+    <RecordDetailsDialog
+      open={!!selectedProduct}
+      onOpenChange={(open) => !open && setSelectedProduct(null)}
+      title={selectedProduct?.name || 'جزئیات کالا / خدمت'}
+      fields={selectedProduct ? [
+        { label: 'کد', value: selectedProduct.code },
+        { label: 'نوع', value: selectedProduct.kind === 'service' ? 'خدمت' : 'کالا' },
+        { label: 'واحد', value: selectedProduct.unit },
+        { label: 'قیمت خرید / مبنا', value: money(selectedProduct.buyPrice) + ' ' + settings.currency },
+        { label: 'قیمت فروش', value: money(selectedProduct.salePrice) + ' ' + settings.currency },
+        { label: 'موجودی', value: selectedProduct.kind === 'product' ? money(selectedProduct.stock) + ' ' + selectedProduct.unit : '—' },
+        { label: 'حداقل موجودی', value: selectedProduct.kind === 'product' ? money(selectedProduct.minStock) + ' ' + selectedProduct.unit : '—' },
+        { label: 'میانگین بهای تمام‌شده', value: selectedProduct.kind === 'product' ? money(selectedProduct.averageCost ?? selectedProduct.buyPrice) + ' ' + settings.currency : '—' },
+      ] : []}
+      onEdit={selectedProduct ? () => { const product = selectedProduct; setSelectedProduct(null); startEdit(product); } : undefined}
+    />
   </div>;
 }
 
@@ -388,6 +467,10 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
   const cardexProduct = products.find((product) => product.id === cardexProductId);
   const cardex = stockMovements.filter((movement) => movement.productId === cardexProductId).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const adjustmentProduct = products.find((product) => product.id === adjustProductId);
+  const adjustmentDelta = adjustmentProduct
+    ? adjustMode === 'count' ? Number(adjustQuantity || 0) - adjustmentProduct.stock : Number(adjustQuantity || 0)
+    : 0;
+  const projectedStock = adjustmentProduct ? adjustmentProduct.stock + adjustmentDelta : 0;
 
   const startAdjustment = (productId?: string) => {
     const selected = productId || list[0]?.id || '';
@@ -411,8 +494,13 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
     setAdjustQuantity(mode === 'count' ? adjustmentProduct?.stock || 0 : 0);
   };
 
-  const submitAdjustment = () => {
-    if (!adjustProductId) return;
+  const submitAdjustment = async () => {
+    if (!adjustProductId || !adjustmentProduct || !adjustNote.trim() || Math.abs(adjustmentDelta) < 0.0001 || projectedStock < -0.0001) return;
+    const approved = await confirmDialog(
+      `برای «${adjustmentProduct.name}» موجودی ${adjustMode === 'count' ? 'با ثبت شمارش' : 'با اصلاح دستی'} به اندازه ${adjustmentDelta > 0 ? '+' : '−'}${money(Math.abs(adjustmentDelta))} ${adjustmentProduct.unit} تغییر می‌کند. موجودی فعلی ${money(adjustmentProduct.stock)} و موجودی پس از ثبت ${money(Math.max(0, projectedStock))} ${adjustmentProduct.unit} خواهد بود. ادامه می‌دهید؟`,
+      { title: 'تأیید اصلاح موجودی', confirmLabel: 'ثبت در کاردکس' }
+    );
+    if (!approved) return;
     const result = addStockAdjustment({ productId: adjustProductId, date: adjustDate, mode: adjustMode, quantity: Number(adjustQuantity), note: adjustNote });
     if (!result.ok) {
       notify(result.message || 'ثبت اصلاح موجودی انجام نشد.', 'error');
@@ -431,7 +519,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
 
     <Card>
       <CardHeader className="flex-wrap"><SearchBox value={q} onChange={setQ} /><Badge className="bg-sky-50 text-sky-700">انبار اصلی · main</Badge></CardHeader>
-      <div className="table-wrap"><table className="data-table min-w-[980px]">
+      <div className="table-wrap"><DataTable className="data-table min-w-[980px]">
         <thead><tr><th>کد</th><th>کالا</th><th>واحد</th><th>موجودی</th><th>حداقل</th><th>میانگین موزون</th><th>ارزش موجودی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((product) => {
@@ -446,13 +534,13 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           })}
           {!list.length && <EmptyRow cols={9} text="کالایی برای نمایش نیست." />}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
     <Dialog open={!!cardexProductId} onOpenChange={(open) => !open && setCardexProductId(null)}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="w-full max-w-5xl">
         <DialogHeader><DialogTitle className="text-lg font-black">کاردکس {cardexProduct?.name || ''}</DialogTitle><DialogDescription className="text-sm text-slate-500">هر حرکت موجودی با منبع، مقدار ورود/خروج، مانده و میانگین موزون بعد از حرکت ثبت می‌شود.</DialogDescription></DialogHeader>
-        <div className="max-h-[65vh] overflow-auto"><table className="data-table min-w-[900px]">
+        <div className="max-h-[65vh] overflow-auto"><DataTable className="data-table min-w-[900px]">
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>سند</th></tr></thead>
           <tbody>
             {cardex.map((movement) => <tr key={movement.id}>
@@ -467,7 +555,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
             </tr>)}
             {!cardex.length && <EmptyRow cols={8} text="حرکتی برای این کالا ثبت نشده است." />}
           </tbody>
-        </table></div>
+        </DataTable></div>
       </DialogContent>
     </Dialog>
 
@@ -480,8 +568,11 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
           <Field label="تاریخ"><JalaliDatePicker value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
-          {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b>{adjustMode === 'count' ? ' · اختلاف ثبت‌شونده: ' + money(Number(adjustQuantity || 0) - adjustmentProduct.stock) : ''}</div>}
-          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim()} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
+          {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-600">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b><span>اختلاف: <b className={adjustmentDelta < 0 ? 'text-rose-700' : 'text-emerald-700'}>{adjustmentDelta > 0 ? '+' : ''}{money(adjustmentDelta)} {adjustmentProduct.unit}</b></span><span>موجودی پس از ثبت: <b>{money(Math.max(0, projectedStock))} {adjustmentProduct.unit}</b></span></div>
+            {projectedStock < -0.0001 && <div className="mt-2 font-bold text-rose-700">موجودی نهایی نمی‌تواند منفی باشد.</div>}
+          </div>}
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim() || Math.abs(adjustmentDelta) < 0.0001 || projectedStock < -0.0001} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
         </div>
       </DialogContent>
     </Dialog>
@@ -499,8 +590,9 @@ function stockMovementLabel(movement: StockMovement) {
 }
 
 export function PaymentsView() {
-  const { payments, customers, invoices, checks, reserveDocumentNumber, addPayment, deletePayment, settings } = useAccountingStore();
+  const { payments, customers, invoices, checks, returns, reserveDocumentNumber, addPayment, deletePayment, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [q, setQ] = useState('');
   const emptyPayment = (direction: Payment['direction'] = 'receipt', documentNumber = ''): Payment => ({
     id: uid('pay'),
@@ -535,6 +627,7 @@ export function PaymentsView() {
   const invoiceOptions = invoices.filter((invoice) =>
     invoice.status !== 'draft' &&
     invoice.status !== 'void' &&
+    invoiceOutstandingAmount(invoice, payments, checks, returns) > 0 &&
     invoice.kind === (form.direction === 'receipt' ? 'sale' : 'purchase') &&
     (!form.customerId || invoice.customerId === form.customerId)
   );
@@ -554,7 +647,7 @@ export function PaymentsView() {
     const invoice = invoices.find((item) => item.id === invoiceId);
     if (!invoice) return;
     const direction: Payment['direction'] = invoice.kind === 'sale' ? 'receipt' : 'payment';
-    const remaining = Math.max(0, invoiceTotal(invoice) - settledForInvoice(invoice, payments, checks));
+    const remaining = invoiceOutstandingAmount(invoice, payments, checks, returns);
     setForm({
       ...form,
       invoiceId: invoice.id,
@@ -562,7 +655,7 @@ export function PaymentsView() {
       direction,
       documentNumber: direction === form.direction ? form.documentNumber : reserveDocumentNumber(direction),
       checkId: undefined,
-      amount: remaining || form.amount,
+      amount: remaining,
     });
   };
 
@@ -604,7 +697,7 @@ export function PaymentsView() {
     />
     <Card>
       <CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader>
-      <div className="table-wrap"><table className="data-table">
+      <div className="table-wrap"><DataTable className="data-table">
         <thead><tr><th>شماره سند</th><th>تاریخ</th><th>نوع</th><th>طرف حساب</th><th>روش</th><th>فاکتور</th><th>مبلغ</th><th>وضعیت اثر</th><th>مرجع</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((payment) => {
@@ -618,16 +711,35 @@ export function PaymentsView() {
               <td><Badge className={direction === 'receipt' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}>{direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Badge></td>
               <td className="font-bold">{customerName(payment.customerId)}</td>
               <td>{payment.method === 'cash' ? 'نقدی' : payment.method === 'card' ? 'کارت / واریز' : 'چک'}</td>
-              <td>{invoice?.number || '—'}</td>
+              <td>{invoice ? <div className="flex flex-wrap items-center gap-1.5"><span>{invoice.number}</span><InvoicePaymentHistoryButton invoiceId={invoice.id} /></div> : '—'}</td>
               <td className={direction === 'receipt' ? 'font-black text-emerald-700' : 'font-black text-rose-700'}>{money(payment.amount)} {settings.currency}</td>
               <td>{payment.method !== 'check' ? <Badge className="bg-emerald-50 text-emerald-700">اعمال‌شده</Badge> : effective ? <Badge className="bg-emerald-50 text-emerald-700">وصول / پاس شده</Badge> : <Badge className={check?.status === 'bounced' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}>{check?.status === 'bounced' ? 'برگشتی؛ بدون اثر' : check ? 'در انتظار؛ بدون اثر' : 'چک نامعتبر'}</Badge>}</td>
               <td>{payment.reference || check?.number || '—'}</td>
-              <td><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('تراکنش حذف شود؟', { title: 'حذف تراکنش', confirmLabel: 'حذف', danger: true })) deletePayment(payment.id); }}><Trash2 className="h-4 w-4" /></Button></td>
+              <td><div className="flex gap-1">
+                <Button variant="ghost" size="icon" onClick={() => setSelectedPayment(payment)} title="نمایش جزئیات" aria-label={'نمایش جزئیات سند ' + payment.documentNumber}><Eye className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="text-rose-600" title="حذف تراکنش" onClick={async () => {
+                  const linkedInvoice = invoiceFor(payment);
+                  const currentBalance = linkedInvoice ? invoiceOutstandingAmount(linkedInvoice, payments, checks, returns) : null;
+                  const balanceAfterRemoval = linkedInvoice
+                    ? invoiceOutstandingAmount(linkedInvoice, payments.filter((item) => item.id !== payment.id), checks, returns)
+                    : null;
+                  const impact = linkedInvoice
+                    ? `مانده فاکتور ${linkedInvoice.number}: اکنون ${money(currentBalance!)} و پس از حذف ${money(balanceAfterRemoval!)} ${settings.currency}.`
+                    : 'این سند به فاکتوری متصل نیست و حذف آن مانده فاکتور را تغییر نمی‌دهد.';
+                  const reason = await promptDialog(
+                    `حذف سند ${payment.documentNumber}. ${impact} در صورت ثبت حسابداری، سند معکوس ایجاد می‌شود. دلیل حذف را وارد کنید:`,
+                    { title: 'حذف تراکنش', confirmLabel: 'حذف و ثبت دلیل', danger: true, placeholder: 'دلیل حذف...' }
+                  );
+                  if (!reason?.trim()) return;
+                  const result = deletePayment(payment.id, reason);
+                  if (!result.ok) notify(result.message || 'حذف تراکنش انجام نشد.', 'error');
+                }}><Trash2 className="h-4 w-4" /></Button>
+              </div></td>
             </tr>;
           })}
           {!list.length && <EmptyRow cols={10} text="تراکنشی ثبت نشده است." />}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
     <Dialog open={open} onOpenChange={setOpen}>
@@ -650,7 +762,7 @@ export function PaymentsView() {
           </Field>
           <Field label="فاکتور مرتبط">
             <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.invoiceId || ''} onChange={(e) => selectInvoice(e.target.value)}>
-              <option value="">بدون اتصال</option>{invoiceOptions.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.kind === 'sale' ? 'فروش' : 'خرید'} {invoice.number} — مانده {money(Math.max(0, invoiceTotal(invoice) - settledForInvoice(invoice, payments, checks)))}</option>)}
+              <option value="">بدون اتصال</option>{invoiceOptions.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.kind === 'sale' ? 'فروش' : 'خرید'} {invoice.number} — مانده {money(invoiceOutstandingAmount(invoice, payments, checks, returns))}</option>)}
             </select>
           </Field>
           <Field label="روش">
@@ -672,14 +784,42 @@ export function PaymentsView() {
         </div>
       </DialogContent>
     </Dialog>
+    <RecordDetailsDialog
+      open={!!selectedPayment}
+      onOpenChange={(open) => !open && setSelectedPayment(null)}
+      title={'سند ' + (selectedPayment?.documentNumber || '')}
+      description={selectedPayment?.notes || undefined}
+      fields={selectedPayment ? [
+        { label: 'نوع', value: directionOf(selectedPayment) === 'receipt' ? 'دریافت' : 'پرداخت' },
+        { label: 'تاریخ', value: formatPersianDate(selectedPayment.date) },
+        { label: 'طرف حساب', value: customerName(selectedPayment.customerId) },
+        { label: 'فاکتور', value: invoiceFor(selectedPayment)?.number || 'بدون اتصال' },
+        { label: 'روش', value: selectedPayment.method === 'cash' ? 'نقدی' : selectedPayment.method === 'card' ? 'کارت / واریز' : 'چک' },
+        { label: 'مبلغ', value: money(selectedPayment.amount) + ' ' + settings.currency },
+        { label: 'شماره پیگیری / مرجع', value: selectedPayment.reference },
+        { label: 'شماره چک', value: selectedPayment.checkId ? checks.find((item) => item.id === selectedPayment.checkId)?.number : '—' },
+      ] : []}
+    />
   </div>;
 }
 
-export function ChecksView() {
+export function ChecksView({ initialCheckId }: { initialCheckId?: string | null } = {}) {
   const { checks, payments, customers, reserveDocumentNumber, upsertCheck, deleteCheck, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
+  const [selectedCheck, setSelectedCheck] = useState<CheckRecord | null>(null);
   const [filter, setFilter] = useState('all');
   const [form, setForm] = useState<CheckRecord>({ id: '', documentNumber: '', direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
+
+  useEffect(() => {
+    if (!initialCheckId) return;
+    const check = checks.find((item) => item.id === initialCheckId);
+    if (check) {
+      setSelectedCheck(check);
+      setFilter(check.status);
+    }
+    // Apply this only when a report deep-link is selected, not after local check updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCheckId]);
 
   const start = (check?: CheckRecord) => {
     setForm(check ? { ...check } : { id: uid('chk'), documentNumber: reserveDocumentNumber('check'), direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
@@ -689,7 +829,22 @@ export function ChecksView() {
   const customerName = (id: string) => customers.find((customer) => customer.id === id)?.name || '—';
   const linkedPayment = payments.find((payment) => payment.checkId === form.id);
 
-  const save = () => {
+  const save = async () => {
+    const previous = checks.find((item) => item.id === form.id);
+    const linked = payments.find((payment) => payment.checkId === form.id);
+    if (previous && linked && previous.status !== form.status) {
+      const wasEffective = previous.status === 'cleared';
+      const becomingEffective = form.status === 'cleared';
+      const changesFinancialEffect = wasEffective !== becomingEffective;
+      const statusLabel = (status: CheckRecord['status']) => status === 'cleared' ? 'وصول / پاس‌شده' : status === 'bounced' ? 'برگشتی' : 'در انتظار';
+      const approved = await confirmDialog(
+        changesFinancialEffect
+          ? `${becomingEffective ? 'وصول / پاس شدن' : 'خارج شدن از وضعیت وصول‌شده'} این چک، مبلغ ${money(linked.amount)} ${settings.currency} را ${becomingEffective ? 'در مانده فاکتور اعمال و سند روزنامه ثبت' : 'از مانده فاکتور خارج و اثر سند روزنامه را معکوس'} می‌کند. ادامه می‌دهید؟`
+          : `وضعیت این چک از «${statusLabel(previous.status)}» به «${statusLabel(form.status)}» تغییر می‌کند. این تراکنش در مانده فاکتور اثری نداشته و نخواهد داشت. ادامه می‌دهید؟`,
+        { title: 'تأیید تغییر وضعیت چک', confirmLabel: 'تأیید و ذخیره' }
+      );
+      if (!approved) return;
+    }
     const result = upsertCheck(form);
     if (!result.ok) {
       notify(result.message || 'ذخیره چک انجام نشد.', 'error');
@@ -708,7 +863,7 @@ export function ChecksView() {
     <PageHead title="چک‌ها و سررسید" subtitle="چک‌های دریافتی و پرداختی؛ اثر مالی چک فقط پس از وصول/پاس شدن اعمال می‌شود" action={<Button onClick={() => start()}><Plus className="h-4 w-4" /> چک جدید</Button>} />
     <Card>
       <CardHeader><div className="flex flex-wrap gap-2">{[['all','همه'],['pending','در انتظار'],['cleared','وصول / پاس شده'],['bounced','برگشتی']].map(([key,label]) => <Button key={key} variant={filter === key ? 'default' : 'outline'} size="sm" onClick={() => setFilter(key)}>{label}</Button>)}</div></CardHeader>
-      <div className="table-wrap"><table className="data-table">
+      <div className="table-wrap"><DataTable className="data-table">
         <thead><tr><th>شماره سند</th><th>نوع</th><th>طرف حساب</th><th>شماره چک</th><th>بانک</th><th>مبلغ</th><th>سررسید</th><th>وضعیت</th><th>اتصال</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((check) => {
@@ -719,12 +874,12 @@ export function ChecksView() {
               <td className="font-bold">{customerName(check.customerId)}</td><td>{check.number}</td><td>{check.bank}</td>
               <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate ? formatPersianDate(check.dueDate) : '—'}</td><td><CheckStatus status={check.status} /></td>
               <td>{linked ? <Badge className="bg-sky-50 text-sky-700">متصل به تراکنش</Badge> : <span className="text-slate-400">آزاد</span>}</td>
-              <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(check)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => remove(check.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
+              <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => setSelectedCheck(check)} title="نمایش جزئیات" aria-label={'نمایش جزئیات چک ' + check.number}><Eye className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={() => start(check)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => remove(check.id)} title="حذف"><Trash2 className="h-4 w-4" /></Button></div></td>
             </tr>;
           })}
           {!list.length && <EmptyRow cols={10} text="چکی در این وضعیت وجود ندارد." />}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
     <Dialog open={open} onOpenChange={setOpen}>
@@ -744,6 +899,24 @@ export function ChecksView() {
         </div>
       </DialogContent>
     </Dialog>
+    <RecordDetailsDialog
+      open={!!selectedCheck}
+      onOpenChange={(open) => !open && setSelectedCheck(null)}
+      title={'چک ' + (selectedCheck?.number || '')}
+      description={selectedCheck?.notes || undefined}
+      fields={selectedCheck ? [
+        { label: 'شماره سند', value: selectedCheck.documentNumber },
+        { label: 'نوع', value: selectedCheck.direction === 'received' ? 'دریافتی' : 'پرداختی' },
+        { label: 'طرف حساب', value: customerName(selectedCheck.customerId) },
+        { label: 'بانک', value: selectedCheck.bank },
+        { label: 'صاحب چک', value: selectedCheck.owner },
+        { label: 'مبلغ', value: money(selectedCheck.amount) + ' ' + settings.currency },
+        { label: 'سررسید', value: selectedCheck.dueDate ? formatPersianDate(selectedCheck.dueDate) : '—' },
+        { label: 'وضعیت', value: selectedCheck.status === 'cleared' ? 'وصول / پاس‌شده' : selectedCheck.status === 'bounced' ? 'برگشتی' : 'در انتظار' },
+        { label: 'اتصال', value: payments.some((payment) => payment.checkId === selectedCheck.id) ? 'متصل به تراکنش' : 'آزاد' },
+      ] : []}
+      onEdit={selectedCheck ? () => { const check = selectedCheck; setSelectedCheck(null); start(check); } : undefined}
+    />
   </div>;
 }
 
@@ -763,29 +936,73 @@ export function SettingsView() {
       currency: draft.currency,
       defaultTax: Number(draft.defaultTax || 0),
       numbering: draft.numbering,
+      defaultInvoiceTemplateId: draft.defaultInvoiceTemplateId,
+      defaultInvoicePaperSize: draft.defaultInvoicePaperSize || 'A4',
     });
   };
 
+  const resetDatabase = async () => {
+    const approved = await confirmDialog(
+      'همه اطلاعات این مرورگر، از جمله اسناد، نسخه‌های پشتیبان و حساب‌های ورود حذف می‌شوند. پس از پاک‌سازی باید حساب مدیر اول را دوباره بسازید. این عملیات قابل بازگشت نیست.',
+      { title: 'پاک‌کردن کل پایگاه داده', confirmLabel: 'پاک‌کردن و شروع دوباره', danger: true }
+    );
+    if (!approved) return;
+    try {
+      await clearApplicationDatabase();
+      window.location.reload();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'پاک‌کردن پایگاه داده انجام نشد.', 'error');
+    }
+  };
+
   return <div className="space-y-5">
-    <PageHead title="تنظیمات" subtitle="تنظیمات عمومی اسناد، شماره‌گذاری و نسخه پشتیبان" />
+    <PageHead title="تنظیمات" subtitle="تنظیمات عمومی اسناد، شماره‌گذاری و نسخه پشتیبان" action={<Button onClick={saveGlobalSettings}>ذخیره تنظیمات عمومی</Button>} />
     <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]">
       <Card>
         <CardHeader><CardTitle>تنظیمات عمومی اسناد</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field>
           <Field label="مالیات پیش‌فرض"><Input type="number" min="0" value={draft.defaultTax} onChange={(e) => setDraft({ ...draft, defaultTax: Number(e.target.value) })} /></Field>
+          <Field label="اندازه پیش‌فرض کاغذ فاکتورهای جدید"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.defaultInvoicePaperSize || 'A4'} onChange={(e) => setDraft({ ...draft, defaultInvoicePaperSize: e.target.value === 'A5' ? 'A5' : 'A4' })}><option value="A4">A4 · ۲۱۰ × ۲۹۷ میلی‌متر</option><option value="A5">A5 · ۱۴۸ × ۲۱۰ میلی‌متر</option></select></Field>
+          <div className="sm:col-span-2">
+            <div className="mb-2 text-sm font-bold text-slate-700">قالب پیش‌فرض فاکتورهای جدید</div>
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4" role="group" aria-label="انتخاب قالب پیش‌فرض فاکتور">
+              {INVOICE_TEMPLATES.map((template) => <button
+                key={template.id}
+                type="button"
+                aria-pressed={draft.defaultInvoiceTemplateId === template.id}
+                onClick={() => setDraft({ ...draft, defaultInvoiceTemplateId: template.id })}
+                className={'invoice-template-choice text-right ' + (draft.defaultInvoiceTemplateId === template.id ? 'invoice-template-choice-selected' : '')}
+              >
+                <InvoiceTemplateThumbnail templateId={template.id} />
+                <span className="mt-2 block text-sm font-black">{template.label}</span>
+                <span className="mt-1 block text-xs leading-5 text-slate-500">{template.description}</span>
+                {draft.defaultInvoiceTemplateId === template.id && <Badge className="mt-2 bg-sky-50 text-sky-700">پیش‌فرض</Badge>}
+              </button>)}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">این انتخاب برای فاکتورهای تازه استفاده می‌شود. قالب فاکتورهای موجود جداگانه انتخاب می‌شود.</p>
+          </div>
           <NumberingSettingsEditor draft={draft} onChange={setDraft} />
-          <div className="sm:col-span-2 flex justify-end"><Button onClick={saveGlobalSettings}>ذخیره تنظیمات عمومی</Button></div>
         </CardContent>
       </Card>
 
       <div className="space-y-5">
         <StorageBackupPanel />
         <YasImporterPanel />
-        <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={async () => { if (await confirmDialog('همه داده‌ها بازنشانی شوند؟ این عملیات داده فعلی را با داده نمونه جایگزین می‌کند.', { title: 'بازنشانی کامل', confirmLabel: 'بازنشانی', danger: true })) resetAll(); }}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-rose-700">پاک‌کردن داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">همه اسناد حسابداری حذف می‌شوند و فقط پروفایل خالی و سرفصل‌های پایه باقی می‌مانند.</p><Button variant="danger" onClick={async () => { if (await confirmDialog('همه داده‌های حسابداری این مرورگر پاک شوند؟ این عملیات قابل بازگشت نیست.', { title: 'پاک‌کردن داده‌ها', confirmLabel: 'پاک‌کردن', danger: true })) resetAll(); }}><Trash2 className="h-4 w-4" /> پاک‌کردن داده‌ها</Button></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-rose-700">شروع دوباره</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">تمام پایگاه داده محلی، شامل کاربران، نسخه‌های پشتیبان و اطلاعات حسابداری پاک می‌شود و برنامه به راه‌اندازی مدیر اول برمی‌گردد.</p><Button variant="danger" onClick={resetDatabase}><Trash2 className="h-4 w-4" /> پاک‌کردن کل پایگاه داده</Button></CardContent></Card>
       </div>
     </div>
   </div>;
+}
+function InvoiceTemplateThumbnail({ templateId }: { templateId: (typeof INVOICE_TEMPLATES)[number]['id'] }) {
+  return <span className={'invoice-template-thumbnail invoice-template-thumbnail-' + templateId} aria-hidden="true">
+    <span className="invoice-template-thumbnail-heading" />
+    <span className="invoice-template-thumbnail-meta"><i /><i /></span>
+    <span className="invoice-template-thumbnail-row" />
+    <span className="invoice-template-thumbnail-row short" />
+    <span className="invoice-template-thumbnail-total" />
+  </span>;
 }
 function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings; onChange: (settings: BusinessSettings) => void }) {
   const rows = [
@@ -817,6 +1034,5 @@ function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings;
   </Panel>;
 }
 
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) { return <label className={`space-y-1.5 ${className}`}><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>; }
 function EmptyRow({ cols, text }: { cols: number; text: string }) { return <tr><td colSpan={cols} className="!py-14 text-center text-slate-400">{text}</td></tr>; }
 

@@ -2,6 +2,8 @@ export type CustomerKind = 'customer' | 'supplier' | 'both';
 export type CustomerStatus = 'active' | 'archived';
 export type ProductKind = 'product' | 'service';
 export type InvoiceKind = 'sale' | 'purchase';
+export type InvoiceTemplateId = 'classic' | 'modern' | 'compact' | 'blue-ledger' | 'violet-ledger' | 'official' | 'storefront' | 'green-brand';
+export type InvoicePaperSize = 'A4' | 'A5';
 export type ReturnKind = 'sale-return' | 'purchase-return';
 export type ReturnStatus = 'draft' | 'final' | 'void';
 export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
@@ -59,7 +61,7 @@ export interface InvoiceItem {
   discountPercent?: number;
 }
 
-export type InvoiceAuditAction = 'created' | 'draft_saved' | 'finalized' | 'revised' | 'voided';
+export type InvoiceAuditAction = 'created' | 'draft_saved' | 'finalized' | 'revised' | 'voided' | 'template_changed' | 'paper_size_changed';
 
 export interface InvoiceAuditEntry {
   id: string;
@@ -73,6 +75,8 @@ export interface Invoice {
   id: string;
   number: string;
   businessProfileId: string;
+  templateId: InvoiceTemplateId;
+  paperSize?: InvoicePaperSize;
   kind: InvoiceKind;
   status: InvoiceStatus;
   date: string;
@@ -334,6 +338,7 @@ export interface BusinessProfile {
   bankName: string;
   invoiceTitle: string;
   footer: string;
+  logoImage?: string;
   signatureImage?: string;
   showSignature?: boolean;
 }
@@ -356,6 +361,8 @@ export interface BusinessSettings {
   numbering: DocumentNumberingSettings;
   businessProfiles: BusinessProfile[];
   defaultBusinessProfileId: string;
+  defaultInvoiceTemplateId: InvoiceTemplateId;
+  defaultInvoicePaperSize: InvoicePaperSize;
 }
 
 export interface AccountingData {

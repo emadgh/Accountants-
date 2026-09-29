@@ -160,7 +160,7 @@ export function GlobalSearchDialog({ open, onOpenChange, onNavigate, onOpenCusto
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl gap-0 overflow-hidden p-0" showCloseButton={false}>
+      <DialogContent className="w-full max-w-3xl gap-0 overflow-hidden p-0" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>جست‌وجوی سراسری</DialogTitle>
           <DialogDescription>جست‌وجو در بخش‌ها، اشخاص و فاکتورهای برنامه</DialogDescription>

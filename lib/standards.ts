@@ -136,10 +136,16 @@ export function validateEconomicCode(value: string) {
   return /^\d{11,14}$/.test(code);
 }
 
-export function validateCardNumber(value: string) {
+export function validateCardNumberFormat(value: string) {
   const card = toEnglishDigits(value).replace(/\D/g, '');
   if (!card) return true;
-  if (!/^\d{16}$/.test(card) || /^0{8,}/.test(card)) return false;
+  return /^\d{16}$/.test(card) && !/^0{8,}/.test(card);
+}
+
+export function validateCardNumber(value: string) {
+  const card = toEnglishDigits(value).replace(/\D/g, '');
+  if (!validateCardNumberFormat(value)) return false;
+  if (!card) return true;
   const sum = card.split('').reduce((total, digit, index) => {
     const weight = index % 2 === 0 ? 2 : 1;
     const product = Number(digit) * weight;
@@ -165,12 +171,15 @@ export function validateOfficialFields(data: {
   postalCode?: string;
   cardNumber?: string;
   iban?: string;
-}) {
+}, options: { cardNumberValidation?: 'checksum' | 'format' } = {}) {
   const errors: string[] = [];
   if (!validateNationalId(data.nationalId || '')) errors.push('کد ملی/شناسه ملی باید معتبر و ۱۰ یا ۱۱ رقمی باشد.');
   if (!validateEconomicCode(data.economicCode || '')) errors.push('کد اقتصادی باید ۱۱ تا ۱۴ رقم باشد.');
   if (!validatePostalCode(data.postalCode || '')) errors.push('کد پستی باید ۱۰ رقم معتبر باشد.');
-  if (!validateCardNumber(data.cardNumber || '')) errors.push('شماره کارت معتبر نیست.');
+  const validateCard = options.cardNumberValidation === 'format' ? validateCardNumberFormat : validateCardNumber;
+  if (!validateCard(data.cardNumber || '')) {
+    errors.push(options.cardNumberValidation === 'format' ? 'شماره کارت باید ۱۶ رقم باشد.' : 'شماره کارت معتبر نیست.');
+  }
   if (!validateIban(data.iban || '')) errors.push('شماره شبا معتبر نیست.');
   return errors;
 }

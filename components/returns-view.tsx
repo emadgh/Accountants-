@@ -1,7 +1,9 @@
 'use client';
 
+import { DataTable } from '@/components/ui/data-table';
+
 import { useMemo, useState } from 'react';
-import { Ban, CheckCircle2, Edit3, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { Ban, CheckCircle2, Edit3, Eye, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, ReturnDocument, ReturnItem } from '@/lib/types';
 import { invoiceLineDiscount, invoiceLineNet, money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
@@ -13,6 +15,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
+import { AppNavbarContent } from '@/components/app-navbar';
+import { Field } from '@/components/ui/field';
+import { RecordDetailsDialog } from '@/components/ui/record-details-dialog';
 
 function blankReturn(invoice?: Invoice): ReturnDocument {
   const now = new Date().toISOString();
@@ -57,6 +62,7 @@ export function ReturnsView() {
 
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ReturnDocument>(() => blankReturn());
+  const [selectedReturn, setSelectedReturn] = useState<ReturnDocument | null>(null);
   const [filter, setFilter] = useState<'all' | 'sale-return' | 'purchase-return'>('all');
 
   const eligibleInvoices = invoices.filter(
@@ -68,6 +74,10 @@ export function ReturnsView() {
     [invoices, draft.originalInvoiceId]
   );
   const previewAmount = original ? returnDocumentAmount(original, draft.items) : 0;
+  const selectedReturnInvoice = selectedReturn ? invoices.find((invoice) => invoice.id === selectedReturn.originalInvoiceId) : undefined;
+  const selectedReturnAmount = selectedReturn?.status === 'draft' && selectedReturnInvoice
+    ? returnDocumentAmount(selectedReturnInvoice, selectedReturn.items)
+    : selectedReturn?.totalAmount || 0;
 
   const startNew = () => {
     const invoice = eligibleInvoices[0];
@@ -112,7 +122,13 @@ export function ReturnsView() {
     setOpen(false);
   };
 
-  const finalize = () => {
+  const finalize = async () => {
+    const itemCount = draft.items.filter((item) => item.qty > 0).length;
+    const approved = await confirmDialog(
+      `مرجوعی ${draft.number} با ${itemCount} ردیف و مبلغ ${money(previewAmount)} ${settings.currency} قطعی می‌شود. موجودی انبار و مانده طرف حساب بر اساس فاکتور اصلی دوباره محاسبه خواهند شد. ادامه می‌دهید؟`,
+      { title: 'تأیید ثبت نهایی مرجوعی', confirmLabel: 'ثبت نهایی' }
+    );
+    if (!approved) return;
     const result = finalizeReturn(draft);
     if (!result.ok || !result.returnDocument) {
       notify(result.message || 'ثبت نهایی مرجوعی انجام نشد.', 'error');
@@ -136,13 +152,11 @@ export function ReturnsView() {
   };
 
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-black text-slate-950">مرجوعی فروش و خرید</h1>
-        <p className="mt-1 text-sm text-slate-500">سند مستقل و قابل ردیابی با ارجاع به فاکتور اصلی؛ مرجوعی جزئی و کامل پشتیبانی می‌شود.</p>
-      </div>
-      <Button disabled={!eligibleInvoices.length} onClick={startNew}><Plus className="h-4 w-4" /> مرجوعی جدید</Button>
-    </div>
+    <AppNavbarContent
+      title="مرجوعی فروش و خرید"
+      subtitle="سند مستقل و قابل ردیابی با ارجاع به فاکتور اصلی؛ مرجوعی جزئی و کامل پشتیبانی می‌شود."
+      actions={<Button disabled={!eligibleInvoices.length} onClick={startNew}><Plus className="h-4 w-4" /> مرجوعی جدید</Button>}
+    />
 
     <Card>
       <CardHeader className="flex-wrap">
@@ -155,7 +169,7 @@ export function ReturnsView() {
           ].map(([key, label]) => <Button key={key} variant={filter === key ? 'default' : 'outline'} size="sm" onClick={() => setFilter(key as typeof filter)}>{label}</Button>)}
         </div>
       </CardHeader>
-      <div className="table-wrap"><table className="data-table min-w-[900px]">
+      <div className="table-wrap"><DataTable className="data-table min-w-[900px]">
         <thead><tr><th>شماره</th><th>نوع</th><th>فاکتور اصلی</th><th>طرف حساب</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th>عملیات</th></tr></thead>
         <tbody>
           {visible.map((document) => <tr key={document.id}>
@@ -167,6 +181,7 @@ export function ReturnsView() {
             <td className="font-black">{money(document.totalAmount)} {settings.currency}</td>
             <td><ReturnStatusBadge document={document} /></td>
             <td><div className="flex gap-1">
+              <Button variant="ghost" size="icon" onClick={() => setSelectedReturn(document)} title="نمایش جزئیات" aria-label={'نمایش جزئیات مرجوعی ' + document.number}><Eye className="h-4 w-4" /></Button>
               {document.status === 'draft' && <Button variant="ghost" size="icon" onClick={() => editDraft(document)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>}
               {document.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => removeDraft(document)} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}
               {document.status === 'final' && <Button variant="danger" size="sm" onClick={() => voidDocument(document)}><Ban className="h-4 w-4" /> ابطال</Button>}
@@ -174,11 +189,11 @@ export function ReturnsView() {
           </tr>)}
           {!visible.length && <tr><td colSpan={8} className="!py-14 text-center text-slate-400">سند مرجوعی ثبت نشده است.</td></tr>}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>
 
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="w-full max-w-5xl">
         <DialogHeader>
           <DialogTitle className="text-lg font-black">{draft.kind === 'sale-return' ? 'مرجوعی فروش' : 'مرجوعی خرید'}</DialogTitle>
           <DialogDescription className="text-sm text-slate-500">فقط مقدار کالا/خدمت برگشتی را وارد کنید. مبلغ مالی مرجوعی با نسبت مبلغ خالص فاکتور اصلی محاسبه می‌شود.</DialogDescription>
@@ -197,7 +212,7 @@ export function ReturnsView() {
         </div>
 
         {original ? <div className="max-h-[46vh] overflow-auto rounded-xl border border-slate-200">
-          <table className="data-table min-w-[780px]">
+          <DataTable className="data-table min-w-[780px]">
             <thead><tr><th>شرح</th><th>مقدار فاکتور</th><th>قبلاً مرجوع</th><th>قابل مرجوعی</th><th>مقدار این سند</th><th>قیمت واحد</th><th>تخفیف ردیف</th><th>قیمت خالص</th></tr></thead>
             <tbody>
               {draft.items.map((item) => {
@@ -217,7 +232,7 @@ export function ReturnsView() {
                 </tr>;
               })}
             </tbody>
-          </table>
+          </DataTable>
         </div> : <div className="rounded-xl bg-slate-50 py-10 text-center text-sm text-slate-400">ابتدا فاکتور اصلی را انتخاب کنید.</div>}
 
         <div className="grid gap-3 md:grid-cols-[1fr_.45fr]">
@@ -236,6 +251,32 @@ export function ReturnsView() {
         </div>
       </DialogContent>
     </Dialog>
+    <RecordDetailsDialog
+      open={!!selectedReturn}
+      onOpenChange={(open) => !open && setSelectedReturn(null)}
+      title={'مرجوعی ' + (selectedReturn?.number || '')}
+      description={selectedReturn?.status === 'void' ? 'این سند باطل شده است و فقط برای مشاهده نگهداری می‌شود.' : selectedReturn?.status === 'final' ? 'این سند قطعی شده و بر موجودی و مانده طرف حساب اثر گذاشته است.' : 'این سند هنوز پیش‌نویس است.'}
+      fields={selectedReturn ? [
+        { label: 'نوع', value: selectedReturn.kind === 'sale-return' ? 'مرجوعی فروش' : 'مرجوعی خرید' },
+        { label: 'فاکتور اصلی', value: selectedReturn.originalInvoiceNumber },
+        { label: 'طرف حساب', value: selectedReturn.customerName },
+        { label: 'تاریخ', value: formatPersianDate(selectedReturn.date) },
+        { label: 'وضعیت', value: selectedReturn.status === 'final' ? 'قطعی' : selectedReturn.status === 'void' ? 'باطل' : 'پیش‌نویس' },
+        { label: 'مبلغ', value: money(selectedReturnAmount) + ' ' + settings.currency },
+        { label: 'توضیحات', value: selectedReturn.notes, className: 'sm:col-span-2' },
+        ...(selectedReturn.status === 'void' ? [{ label: 'دلیل ابطال', value: selectedReturn.voidReason, className: 'sm:col-span-2' }] : []),
+      ] : []}
+      onEdit={selectedReturn?.status === 'draft' ? () => { const document = selectedReturn; setSelectedReturn(null); editDraft(document); } : undefined}
+    >
+      {selectedReturn && <div className="max-h-[35vh] overflow-auto rounded-xl border border-slate-200">
+        <DataTable className="data-table min-w-[420px]">
+          <thead><tr><th>شرح</th><th>مقدار</th><th>قیمت واحد</th></tr></thead>
+          <tbody>{selectedReturn.items.filter((item) => item.qty > 0).map((item) => <tr key={item.id}>
+            <td className="font-bold">{item.description}</td><td>{money(item.qty)} {item.unit}</td><td>{money(item.unitPrice)} {settings.currency}</td>
+          </tr>)}</tbody>
+        </DataTable>
+      </div>}
+    </RecordDetailsDialog>
   </div>;
 }
 
@@ -243,8 +284,4 @@ function ReturnStatusBadge({ document }: { document: ReturnDocument }) {
   if (document.status === 'void') return <Badge className="bg-rose-50 text-rose-700"><Ban className="ml-1 h-3 w-3" /> باطل</Badge>;
   if (document.status === 'final') return <Badge className="bg-emerald-50 text-emerald-700"><CheckCircle2 className="ml-1 h-3 w-3" /> قطعی</Badge>;
   return <Badge><RotateCcw className="ml-1 h-3 w-3" /> پیش‌نویس</Badge>;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>;
 }

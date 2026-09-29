@@ -17,9 +17,9 @@ export interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const variants: Record<PanelVariant, string> = {
-  default: 'border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950',
-  subtle: 'border-slate-200/70 bg-slate-50/70 shadow-sm dark:border-slate-800 dark:bg-slate-900/70',
-  elevated: 'border-slate-200/80 bg-white shadow-lg shadow-slate-950/5 dark:border-slate-800 dark:bg-slate-950 dark:shadow-black/20',
+  default: 'border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90',
+  subtle: 'border-slate-200/70 bg-slate-50/85 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/85',
+  elevated: 'border-slate-200/80 bg-white/90 shadow-lg shadow-slate-950/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90 dark:shadow-black/20',
   dark: 'border-slate-800/80 bg-slate-950/90 text-slate-100 shadow-2xl shadow-black/40 backdrop-blur-xl',
 };
 

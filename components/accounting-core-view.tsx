@@ -1,5 +1,7 @@
 'use client';
 
+import { DataTable } from '@/components/ui/data-table';
+
 import { useMemo, useState } from 'react';
 import { Ban, BookOpenCheck, Landmark, Plus, Scale, WalletCards } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
@@ -14,7 +16,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
+import { Field } from '@/components/ui/field';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
+import { AppNavbarContent } from '@/components/app-navbar';
 
 type Tab = 'accounts' | 'journal' | 'money';
 
@@ -80,7 +84,14 @@ export function AccountingCoreView() {
     setMoneyOpen(true);
   };
 
-  const saveMoney = () => {
+  const saveMoney = async () => {
+    const settlement = accounts.find((account) => account.id === moneyDraft.settlementAccountId);
+    const category = accounts.find((account) => account.id === moneyDraft.categoryAccountId);
+    const approved = await confirmDialog(
+      `ثبت نهایی ${moneyDraft.kind === 'income' ? 'درآمد' : 'هزینه'} «${moneyDraft.description || 'بدون شرح'}» به مبلغ ${money(moneyDraft.amount)} ${settings.currency} انجام می‌شود و سند روزنامه آن قطعی خواهد شد. حساب صندوق/بانک: ${settlement?.name || '—'} · حساب ${moneyDraft.kind === 'income' ? 'درآمد' : 'هزینه'}: ${category?.name || '—'}. ادامه می‌دهید؟`,
+      { title: 'تأیید ثبت قطعی', confirmLabel: 'ثبت قطعی و تراز' }
+    );
+    if (!approved) return;
     const result = addMoneyTransaction(moneyDraft);
     if (!result.ok) {
       notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
@@ -97,17 +108,20 @@ export function AccountingCoreView() {
   };
 
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-black text-slate-950">حسابداری دوبل</h1>
-        <p className="mt-1 text-sm text-slate-500">کدینگ حساب‌ها، دفتر روزنامه تراز و درآمد/هزینه مستقل</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
+    <AppNavbarContent
+      title="حسابداری دوبل"
+      subtitle="کدینگ حساب‌ها، دفتر روزنامه تراز و درآمد/هزینه مستقل"
+      actions={<>
         <Button variant={tab === 'accounts' ? 'default' : 'outline'} onClick={() => setTab('accounts')}><Landmark className="h-4 w-4" /> حساب‌ها</Button>
         <Button variant={tab === 'journal' ? 'default' : 'outline'} onClick={() => setTab('journal')}><BookOpenCheck className="h-4 w-4" /> دفتر روزنامه</Button>
         <Button variant={tab === 'money' ? 'default' : 'outline'} onClick={() => setTab('money')}><WalletCards className="h-4 w-4" /> درآمد / هزینه</Button>
-      </div>
-    </div>
+        {tab === 'accounts' && <Button onClick={startAccount}><Plus className="h-4 w-4" /> حساب جدید</Button>}
+        {tab === 'money' && <>
+          <Button onClick={() => startMoney('income')}><Plus className="h-4 w-4" /> ثبت درآمد</Button>
+          <Button variant="outline" onClick={() => startMoney('expense')}><Plus className="h-4 w-4" /> ثبت هزینه</Button>
+        </>}
+      </>}
+    />
 
     <div className="grid gap-4 sm:grid-cols-3">
       <MetricCard title="تعداد ثبت‌های روزنامه" value={journalEntries.length} />
@@ -121,9 +135,8 @@ export function AccountingCoreView() {
           <CardTitle>Chart of Accounts</CardTitle>
           <div className="mt-1 text-xs text-slate-500">مانده‌ها مستقیماً از Journal محاسبه می‌شوند.</div>
         </div>
-        <Button onClick={startAccount}><Plus className="h-4 w-4" /> حساب جدید</Button>
       </CardHeader>
-      <div className="table-wrap"><table className="data-table min-w-[860px]">
+      <div className="table-wrap"><DataTable className="data-table min-w-[860px]">
         <thead><tr><th>کد</th><th>نام حساب</th><th>گروه</th><th>ماهیت</th><th>مانده</th><th>نوع</th><th>عملیات</th></tr></thead>
         <tbody>
           {trialBalance.map(({ account, balance }) => <tr key={account.id}>
@@ -136,12 +149,12 @@ export function AccountingCoreView() {
             <td>{!account.systemKey ? <Button variant="ghost" size="sm" className="text-rose-600" onClick={async () => { if (!(await confirmDialog('حساب حذف شود؟', { title: 'حذف حساب', confirmLabel: 'حذف', danger: true }))) return; const result = deleteAccount(account.id); if (!result.ok) notify(result.message || 'حذف حساب انجام نشد.', 'error'); }}>حذف</Button> : '—'}</td>
           </tr>)}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>}
 
     {tab === 'journal' && <Card>
       <CardHeader><div><CardTitle>دفتر روزنامه</CardTitle><div className="mt-1 text-xs text-slate-500">هر ثبت دارای منبع عملیاتی و کنترل Debit = Credit است.</div></div></CardHeader>
-      <div className="table-wrap"><table className="data-table min-w-[1000px]">
+      <div className="table-wrap"><DataTable className="data-table min-w-[1000px]">
         <thead><tr><th>تاریخ</th><th>شرح / منبع</th><th>حساب</th><th>بدهکار</th><th>بستانکار</th><th>وضعیت</th></tr></thead>
         <tbody>
           {journalEntries.slice().reverse().flatMap((entry) => {
@@ -160,17 +173,13 @@ export function AccountingCoreView() {
           })}
           {!journalEntries.length && <tr><td colSpan={6} className="!py-14 text-center text-slate-400">ثبت روزنامه‌ای وجود ندارد.</td></tr>}
         </tbody>
-      </table></div>
+      </DataTable></div>
     </Card>}
 
     {tab === 'money' && <div className="space-y-4">
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button onClick={() => startMoney('income')}><Plus className="h-4 w-4" /> ثبت درآمد</Button>
-        <Button variant="outline" onClick={() => startMoney('expense')}><Plus className="h-4 w-4" /> ثبت هزینه</Button>
-      </div>
       <Card>
         <CardHeader><div><CardTitle>درآمد و هزینه مستقل</CardTitle><div className="mt-1 text-xs text-slate-500">هر تراکنش همزمان یک JournalEntry تراز ایجاد می‌کند.</div></div></CardHeader>
-        <div className="table-wrap"><table className="data-table min-w-[900px]">
+        <div className="table-wrap"><DataTable className="data-table min-w-[900px]">
           <thead><tr><th>تاریخ</th><th>نوع</th><th>شرح</th><th>حساب تسویه</th><th>دسته حساب</th><th>مبلغ</th><th>وضعیت</th><th>عملیات</th></tr></thead>
           <tbody>
             {moneyTransactions.map((transaction) => {
@@ -188,7 +197,7 @@ export function AccountingCoreView() {
             })}
             {!moneyTransactions.length && <tr><td colSpan={8} className="!py-14 text-center text-slate-400">تراکنش مستقلی ثبت نشده است.</td></tr>}
           </tbody>
-        </table></div>
+        </DataTable></div>
       </Card>
     </div>}
 
@@ -256,10 +265,6 @@ function accountTypeLabel(type: AccountType) {
   if (type === 'equity') return 'حقوق مالکانه';
   if (type === 'revenue') return 'درآمد';
   return 'هزینه';
-}
-
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
-  return <label className={'space-y-1.5 ' + className}><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>;
 }
 
 

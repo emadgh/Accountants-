@@ -30,6 +30,23 @@ export function RollingNumber({
   style,
   ...props
 }: RollingNumberProps) {
+  const [hasPainted, setHasPainted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!rolling) return;
+
+    // Let the zero position reach the screen before enabling the transition.
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => setHasPainted(true));
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [rolling]);
+
   const formatted = React.useMemo(
     () => new Intl.NumberFormat(locale, {
       maximumFractionDigits: 0,
@@ -76,8 +93,8 @@ export function RollingNumber({
                 <span
                   className={styles.strip}
                   style={{
-                    transform: `translateY(-${digit * 10}%)`,
-                    transitionDuration: rolling ? `${Math.max(0, durationMs)}ms` : '0ms',
+                    transform: `translateY(-${(rolling && !hasPainted ? 0 : digit) * 10}%)`,
+                    transitionDuration: rolling && hasPainted ? `${Math.max(0, durationMs)}ms` : '0ms',
                   }}
                 >
                   {digitSystem.map((systemDigit, digitIndex) => (

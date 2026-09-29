@@ -1,5 +1,7 @@
 'use client';
 
+import { DataTable } from '@/components/ui/data-table';
+
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Boxes, CircleDollarSign, Clock3, FileText, Users } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import { invoiceTotal, money, settledForInvoice } from '@/lib/utils';
@@ -8,6 +10,7 @@ import { FadeContent } from '@/components/reactbits/fade-content';
 import { Badge } from '@/components/ui/badge';
 import { MetricCard, type MetricTone } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
+import { AppNavbarContent } from '@/components/app-navbar';
 
 export function DashboardView() {
   const { invoices, returns, payments, customers, products, checks, settings } = useAccountingStore();
@@ -40,11 +43,7 @@ export function DashboardView() {
   ];
 
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div><h1 className="text-2xl font-black text-slate-950">داشبورد</h1><p className="mt-1 text-sm text-slate-500">نمای کلی فروش، خرید، انبار و سررسیدها</p></div>
-      <Badge className="bg-sky-50 text-sky-700">واحد پول: {settings.currency}</Badge>
-    </div>
-
+    <AppNavbarContent title="داشبورد" subtitle="نمای کلی فروش، خرید، انبار و سررسیدها" actions={<Badge className="bg-sky-50 text-sky-700">واحد پول: {settings.currency}</Badge>} />
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card, index) => (
         <FadeContent key={card.label} delay={index * 70}>
@@ -64,10 +63,10 @@ export function DashboardView() {
     <div className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
       <Panel padding="none" spotlight interactive>
         <div className="border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-2 font-black"><FileText className="h-5 w-5 text-sky-600" /> آخرین فاکتورها</div></div>
-        <div className="overflow-x-auto"><table className="data-table min-w-[620px]"><thead><tr><th>شماره</th><th>طرف حساب</th><th>نوع</th><th>وضعیت</th><th>مبلغ کل</th></tr></thead><tbody>
+        <div className="overflow-x-auto"><DataTable className="data-table min-w-[620px]"><thead><tr><th>شماره</th><th>طرف حساب</th><th>نوع</th><th>وضعیت</th><th>مبلغ کل</th></tr></thead><tbody>
           {invoices.slice(0, 7).map((invoice) => <tr key={invoice.id}><td className="font-bold">{invoice.number}</td><td>{invoice.customerName}</td><td>{invoice.kind === 'sale' ? 'فروش' : 'خرید'}</td><td><Status status={invoice.status} /></td><td className="font-bold">{money(invoiceTotal(invoice))}</td></tr>)}
           {!invoices.length && <tr><td colSpan={5} className="py-12 text-center text-slate-400">فاکتوری ثبت نشده است.</td></tr>}
-        </tbody></table></div>
+        </tbody></DataTable></div>
       </Panel>
 
       <div className="space-y-5">

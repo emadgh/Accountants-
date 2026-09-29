@@ -4,6 +4,7 @@ import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getDialogAnimationStyle } from '@/lib/animation-config';
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -13,11 +14,12 @@ export const DialogClose = DialogPrimitive.Close;
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+>(({ className, style, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     data-slot="dialog-overlay"
-    className={cn('fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-sm transition-opacity data-[state=open]:opacity-100 data-[state=closed]:opacity-0', className)}
+    className={cn('fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-sm', className)}
+    style={{ ...getDialogAnimationStyle('dialog'), ...style }}
     {...props}
   />
 ));
@@ -27,7 +29,7 @@ export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeo
   showCloseButton?: boolean;
 }
 
-export function DialogContent({ className, children, showCloseButton = true, ...props }: DialogContentProps) {
+export function DialogContent({ className, children, showCloseButton = true, style, ...props }: DialogContentProps) {
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -35,9 +37,10 @@ export function DialogContent({ className, children, showCloseButton = true, ...
         dir="rtl"
         data-slot="dialog-content"
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl outline-none transition duration-200 data-[state=open]:scale-100 data-[state=closed]:scale-95 data-[state=closed]:opacity-0 sm:p-6',
+          'fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-fit min-w-[min(20rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl outline-none sm:p-6',
           className
         )}
+        style={{ ...getDialogAnimationStyle('dialog'), ...style }}
         {...props}
       >
         {children}

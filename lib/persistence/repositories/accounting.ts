@@ -4,6 +4,7 @@ import type {
   DocumentSequenceKey,
   Invoice,
   JournalEntry,
+  Payment,
   ReturnDocument,
 } from '@/lib/types';
 import { sqliteQuery, sqliteTransaction, type SqlStatement } from '../database';
@@ -60,8 +61,31 @@ export async function clearAccountingData() {
   await sqliteTransaction(DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })));
 }
 
-export async function replaceAccountingData(data: AccountingData) {
-  const statements: SqlStatement[] = DELETE_ACCOUNTING_SQL.map((sql) => ({ sql }));
+export async function resetApplicationDatabase() {
+  await sqliteTransaction([
+    ...DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })),
+    { sql: 'DELETE FROM snapshots' },
+    { sql: 'DELETE FROM auth_sessions' },
+    { sql: 'DELETE FROM users' },
+    { sql: "DELETE FROM app_meta WHERE key <> 'sqlite_schema_version'" },
+  ]);
+}
+
+export async function replaceAccountingData(
+  data: AccountingData,
+  options: { resetStorage?: boolean } = {}
+) {
+  const resetStatements: SqlStatement[] = options.resetStorage
+    ? [
+        { sql: 'DELETE FROM snapshots' },
+        { sql: 'DELETE FROM auth_sessions' },
+        { sql: "DELETE FROM app_meta WHERE key <> 'sqlite_schema_version'" },
+      ]
+    : [];
+  const statements: SqlStatement[] = [
+    ...resetStatements,
+    ...DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })),
+  ];
 
   add(statements, 'INSERT INTO settings(id, payload) VALUES (1, ?)', [json(data.settings)]);
 
@@ -535,7 +559,7 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     invoiceItemRows,
     returnRows,
     returnItemRows,
-    payments,
+    paymentRows,
     checks,
     adjustments,
     stockMovements,
@@ -554,7 +578,9 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     sqliteQuery<{ invoice_id: string; payload: string }>('SELECT invoice_id, payload FROM invoice_items ORDER BY invoice_id, position'),
     sqliteQuery<{ id: string; payload: string }>('SELECT id, payload FROM returns ORDER BY rowid'),
     sqliteQuery<{ return_id: string; payload: string }>('SELECT return_id, payload FROM return_items ORDER BY return_id, position'),
-    payloads<AccountingData['payments'][number]>('SELECT payload FROM payments ORDER BY rowid'),
+    sqliteQuery<{ invoice_id: string | null; payload: string }>(
+      'SELECT invoice_id, payload FROM payments ORDER BY rowid'
+    ),
     payloads<AccountingData['checks'][number]>('SELECT payload FROM checks ORDER BY rowid'),
     payloads<AccountingData['adjustments'][number]>('SELECT payload FROM account_adjustments ORDER BY rowid'),
     payloads<AccountingData['stockMovements'][number]>('SELECT payload FROM stock_movements ORDER BY rowid'),
@@ -578,6 +604,10 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     ...parse<Invoice>(row.payload),
     items: invoiceItems.get(row.id) || [],
   }));
+  const payments: Payment[] = paymentRows.map((row) => {
+    const payment = parse<Payment>(row.payload);
+    return { ...payment, invoiceId: row.invoice_id || payment.invoiceId };
+  });
 
   const returnItems = new Map<string, ReturnDocument['items']>();
   for (const row of returnItemRows) {
