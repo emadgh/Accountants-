@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { CheckRecord, Invoice, Payment, PaymentDirection } from './types';
+import type { AccountAdjustment, CheckRecord, Customer, CustomerLedgerEntry, Invoice, Payment, PaymentDirection } from './types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -47,41 +47,186 @@ export function settledForInvoice(invoice: Pick<Invoice, 'id' | 'kind'>, payment
     .reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
 }
 
+export function normalizeDateKey(value: string) {
+  const ascii = (value || '')
+    .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+  const match = ascii.match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
+  if (!match) return ascii;
+  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+}
+
+export function buildCustomerLedger(
+  customer: Customer,
+  invoices: Invoice[],
+  payments: Payment[],
+  checks: CheckRecord[],
+  adjustments: AccountAdjustment[] = []
+): CustomerLedgerEntry[] {
+  const entries: Omit<CustomerLedgerEntry, 'balance'>[] = [];
+  const opening = Number(customer.openingBalance || 0);
+
+  if (Math.abs(opening) > 0.0001) {
+    entries.push({
+      id: `opening_${customer.id}`,
+      customerId: customer.id,
+      date: 'ابتدای دوره',
+      sortKey: '0000-00-00|0000',
+      kind: 'opening',
+      title: 'مانده اول دوره',
+      debit: opening > 0 ? opening : 0,
+      credit: opening < 0 ? Math.abs(opening) : 0,
+      nominalAmount: Math.abs(opening),
+      effective: true,
+    });
+  }
+
+  adjustments
+    .filter((item) => item.customerId === customer.id)
+    .forEach((item) => {
+      const amount = Number(item.amount || 0);
+      entries.push({
+        id: item.id,
+        customerId: customer.id,
+        date: item.date,
+        sortKey: `${normalizeDateKey(item.date)}|${item.createdAt || item.id}`,
+        kind: 'adjustment',
+        title: amount >= 0 ? 'اصلاحیه بدهکار' : 'اصلاحیه بستانکار',
+        reference: item.id,
+        debit: amount > 0 ? amount : 0,
+        credit: amount < 0 ? Math.abs(amount) : 0,
+        nominalAmount: Math.abs(amount),
+        effective: true,
+        note: item.note,
+      });
+    });
+
+  invoices
+    .filter((invoice) => invoice.customerId === customer.id && invoice.status !== 'draft')
+    .forEach((invoice) => {
+      const sortDate = invoice.voidedAt || invoice.finalizedAt || invoice.updatedAt || invoice.createdAt;
+      if (invoice.status === 'void') {
+        entries.push({
+          id: `void_${invoice.id}`,
+          customerId: customer.id,
+          date: invoice.date,
+          sortKey: `${normalizeDateKey(invoice.date)}|${sortDate}`,
+          kind: 'void',
+          title: `ابطال فاکتور ${invoice.kind === 'sale' ? 'فروش' : 'خرید'}`,
+          reference: invoice.number,
+          debit: 0,
+          credit: 0,
+          nominalAmount: invoiceTotal(invoice),
+          effective: false,
+          status: 'void',
+          note: invoice.voidReason,
+          invoiceId: invoice.id,
+          invoiceKind: invoice.kind,
+        });
+        return;
+      }
+
+      const total = invoiceTotal(invoice);
+      entries.push({
+        id: `invoice_${invoice.id}`,
+        customerId: customer.id,
+        date: invoice.date,
+        sortKey: `${normalizeDateKey(invoice.date)}|${invoice.finalizedAt || invoice.updatedAt || invoice.createdAt}`,
+        kind: invoice.kind === 'sale' ? 'sale' : 'purchase',
+        title: invoice.kind === 'sale' ? 'فاکتور فروش' : 'فاکتور خرید',
+        reference: invoice.number,
+        debit: invoice.kind === 'sale' ? total : 0,
+        credit: invoice.kind === 'purchase' ? total : 0,
+        nominalAmount: total,
+        effective: true,
+        status: invoice.status,
+        invoiceId: invoice.id,
+        invoiceKind: invoice.kind,
+      });
+    });
+
+  const linkedCheckIds = new Set<string>();
+  payments
+    .filter((payment) => payment.customerId === customer.id)
+    .forEach((payment) => {
+      const invoice = payment.invoiceId ? invoices.find((item) => item.id === payment.invoiceId) : undefined;
+      const direction = resolvedPaymentDirection(payment, invoice);
+      const effectiveAmount = effectivePaymentAmount(payment, checks);
+      const nominalAmount = Number(payment.amount || 0);
+      const check = payment.checkId ? checks.find((item) => item.id === payment.checkId) : undefined;
+      if (payment.checkId) linkedCheckIds.add(payment.checkId);
+
+      entries.push({
+        id: `payment_${payment.id}`,
+        customerId: customer.id,
+        date: payment.date,
+        sortKey: `${normalizeDateKey(payment.date)}|${payment.id}`,
+        kind: direction === 'receipt' ? 'receipt' : 'payment',
+        title: payment.method === 'check'
+          ? direction === 'receipt' ? 'چک دریافتی' : 'چک پرداختی'
+          : direction === 'receipt' ? 'دریافت' : 'پرداخت',
+        reference: payment.reference || check?.number || payment.id,
+        debit: direction === 'payment' ? effectiveAmount : 0,
+        credit: direction === 'receipt' ? effectiveAmount : 0,
+        nominalAmount,
+        effective: effectiveAmount > 0,
+        status: payment.method === 'check' ? check?.status || 'missing-check' : 'effective',
+        note: payment.notes,
+        invoiceId: payment.invoiceId,
+        invoiceKind: invoice?.kind,
+      });
+    });
+
+  checks
+    .filter((check) => check.customerId === customer.id && !linkedCheckIds.has(check.id))
+    .forEach((check) => {
+      entries.push({
+        id: `check_${check.id}`,
+        customerId: customer.id,
+        date: check.dueDate,
+        sortKey: `${normalizeDateKey(check.dueDate)}|${check.id}`,
+        kind: 'check',
+        title: check.direction === 'received' ? 'چک دریافتی ثبت‌شده' : 'چک پرداختی ثبت‌شده',
+        reference: check.number,
+        debit: 0,
+        credit: 0,
+        nominalAmount: Number(check.amount || 0),
+        effective: false,
+        status: check.status,
+        note: check.notes,
+      });
+    });
+
+  const sorted = entries.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'en'));
+  let balance = 0;
+  return sorted.map((entry) => {
+    balance += Number(entry.debit || 0) - Number(entry.credit || 0);
+    return { ...entry, balance };
+  });
+}
+
 export function customerNetBalance(
   customerId: string,
   invoices: Invoice[],
   payments: Payment[],
-  checks: CheckRecord[]
+  checks: CheckRecord[],
+  adjustments: AccountAdjustment[] = [],
+  openingBalance = 0
 ) {
-  const posted = invoices.filter(
-    (invoice) => invoice.customerId === customerId && invoice.status !== 'draft' && invoice.status !== 'void'
-  );
-  const sales = posted
-    .filter((invoice) => invoice.kind === 'sale')
-    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  const purchases = posted
-    .filter((invoice) => invoice.kind === 'purchase')
-    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-
-  const effective = payments
-    .filter((payment) => payment.customerId === customerId)
-    .map((payment) => {
-      const invoice = payment.invoiceId ? invoices.find((item) => item.id === payment.invoiceId) : undefined;
-      return {
-        direction: resolvedPaymentDirection(payment, invoice),
-        amount: effectivePaymentAmount(payment, checks),
-      };
-    });
-
-  const receipts = effective
-    .filter((item) => item.direction === 'receipt')
-    .reduce((sum, item) => sum + item.amount, 0);
-  const outgoing = effective
-    .filter((item) => item.direction === 'payment')
-    .reduce((sum, item) => sum + item.amount, 0);
-
-  // Positive = طرف حساب بدهکار است. Negative = طرف حساب بستانکار است.
-  return sales - purchases - receipts + outgoing;
+  const customer: Customer = {
+    id: customerId,
+    code: '',
+    name: '',
+    kind: 'both',
+    phone: '',
+    address: '',
+    nationalId: '',
+    economicCode: '',
+    postalCode: '',
+    openingBalance,
+  };
+  const ledger = buildCustomerLedger(customer, invoices, payments, checks, adjustments);
+  return ledger.length ? ledger[ledger.length - 1].balance : Number(openingBalance || 0);
 }
 
 export function todayFa() {
