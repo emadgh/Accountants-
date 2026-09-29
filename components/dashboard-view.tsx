@@ -9,8 +9,8 @@ import { Badge } from '@/components/ui/badge';
 
 export function DashboardView() {
   const { invoices, payments, customers, products, checks, settings } = useAccountingStore();
-  const saleInvoices = invoices.filter((i) => i.kind === 'sale' && i.status !== 'draft');
-  const purchaseInvoices = invoices.filter((i) => i.kind === 'purchase' && i.status !== 'draft');
+  const saleInvoices = invoices.filter((i) => i.kind === 'sale' && i.status !== 'draft' && i.status !== 'void');
+  const purchaseInvoices = invoices.filter((i) => i.kind === 'purchase' && i.status !== 'draft' && i.status !== 'void');
   const totalSales = saleInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
   const totalPurchases = purchaseInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
   const receivable = saleInvoices.reduce((s, i) => s + Math.max(0, invoiceTotal(i) - paidForInvoice(i.id, payments)), 0);
@@ -71,7 +71,7 @@ function Mini({ icon: Icon, label, value }: { icon: typeof Users; label: string;
 }
 
 function Status({ status }: { status: string }) {
-  const map: Record<string, string> = { draft: 'پیش‌نویس', final: 'قطعی', partial: 'بخشی تسویه', settled: 'تسویه‌شده' };
-  const cls: Record<string, string> = { draft: 'bg-slate-100 text-slate-600', final: 'bg-sky-50 text-sky-700', partial: 'bg-amber-50 text-amber-700', settled: 'bg-emerald-50 text-emerald-700' };
+  const map: Record<string, string> = { draft: 'پیش‌نویس', final: 'قطعی', partial: 'بخشی تسویه', settled: 'تسویه‌شده', void: 'باطل' };
+  const cls: Record<string, string> = { draft: 'bg-slate-100 text-slate-600', final: 'bg-sky-50 text-sky-700', partial: 'bg-amber-50 text-amber-700', settled: 'bg-emerald-50 text-emerald-700', void: 'bg-rose-50 text-rose-700' };
   return <Badge className={cls[status]}>{map[status] || status}</Badge>;
 }
