@@ -52,7 +52,7 @@ export function AccountingApp() {
         {view === 'customers' && <CustomersView onOpenLedger={(id) => { setSelectedCustomerId(id); setView('ledger'); }} />}
         {view === 'ledger' && <CustomerLedgerView initialCustomerId={selectedCustomerId} onOpenInvoice={editInvoice} />}
         {view === 'products' && <ProductsView />}
-        {view === 'inventory' && <InventoryView />}
+        {view === 'inventory' && <InventoryView onOpenInvoice={editInvoice} />}
         {view === 'payments' && <PaymentsView />}
         {view === 'checks' && <ChecksView />}
         {view === 'reports' && <ReportsView />}

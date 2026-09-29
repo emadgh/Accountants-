@@ -7,7 +7,7 @@ import {
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { AccountingData, CheckRecord, Customer, InvoiceKind, Payment, Product } from '@/lib/types';
+import type { AccountingData, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, todayFa, uid } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -267,23 +267,183 @@ function LedgerStatus({ status, effective, kind }: { status?: string; effective:
 
 export function ProductsView() {
   const { products, upsertProduct, deleteProduct, settings } = useAccountingStore();
-  const [q, setQ] = useState(''); const [edit, setEdit] = useState<Product | null>(null); const [open, setOpen] = useState(false);
-  const list = products.filter((p) => (p.name + ' ' + p.code).toLowerCase().includes(q.toLowerCase()));
-  const start = (p?: Product) => { setEdit(p ? { ...p } : { id: uid('prd'), code: String(1000 + products.length + 1), name: '', kind: 'product', unit: 'عدد', salePrice: 0, buyPrice: 0, stock: 0, minStock: 0 }); setOpen(true); };
-  return <div className="space-y-5"><PageHead title="کالا و خدمات" subtitle="تعریف کالا، خدمت، قیمت خرید و فروش و حداقل موجودی" action={<Button onClick={() => start()}><Plus className="h-4 w-4" /> کالا / خدمت جدید</Button>} />
-    <Card><CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader><div className="table-wrap"><table className="data-table"><thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>واحد</th><th>قیمت خرید</th><th>قیمت فروش</th><th>موجودی</th><th>عملیات</th></tr></thead><tbody>{list.map((p) => <tr key={p.id}><td className="font-bold">{p.code}</td><td className="font-bold">{p.name}</td><td><Badge className={p.kind === 'service' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}>{p.kind === 'service' ? 'خدمت' : 'کالا'}</Badge></td><td>{p.unit}</td><td>{money(p.buyPrice)}</td><td className="font-bold">{money(p.salePrice)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td><td className={p.kind === 'product' && p.stock <= p.minStock ? 'font-black text-rose-600' : ''}>{p.kind === 'product' ? `${money(p.stock)} ${p.unit}` : '—'}</td><td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(p)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('این مورد حذف شود؟') && deleteProduct(p.id)}><Trash2 className="h-4 w-4" /></Button></div></td></tr>)}{!list.length && <EmptyRow cols={8} text="کالا یا خدمتی پیدا نشد." />}</tbody></table></div></Card>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle className="text-lg font-black">تعریف کالا / خدمت</DialogTitle><DialogDescription className="text-sm text-slate-500">خدمات روی موجودی انبار اثر نمی‌گذارند.</DialogDescription></DialogHeader>{edit && <div className="grid gap-3 sm:grid-cols-2"><Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field><Field label="کد"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field><Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Product['kind'] })}><option value="product">کالا</option><option value="service">خدمت</option></select></Field><Field label="واحد"><Input value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} /></Field><Field label="قیمت خرید"><Input type="number" min="0" value={edit.buyPrice} onChange={(e) => setEdit({ ...edit, buyPrice: Number(e.target.value) })} /></Field><Field label="قیمت فروش"><Input type="number" min="0" value={edit.salePrice} onChange={(e) => setEdit({ ...edit, salePrice: Number(e.target.value) })} /></Field>{edit.kind === 'product' && <><Field label="موجودی اولیه / فعلی"><Input type="number" value={edit.stock} onChange={(e) => setEdit({ ...edit, stock: Number(e.target.value) })} /></Field><Field label="حداقل موجودی"><Input type="number" min="0" value={edit.minStock} onChange={(e) => setEdit({ ...edit, minStock: Number(e.target.value) })} /></Field></>}<div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertProduct(edit); setOpen(false); }}>ذخیره</Button></div></div>}</DialogContent></Dialog>
+  const [q, setQ] = useState('');
+  const [edit, setEdit] = useState<Product | null>(null);
+  const [open, setOpen] = useState(false);
+  const list = products.filter((product) => (product.name + ' ' + product.code).toLowerCase().includes(q.toLowerCase()));
+  const startEdit = (product?: Product) => {
+    setEdit(product ? { ...product } : { id: uid('prd'), code: String(1000 + products.length + 1), name: '', kind: 'product', unit: 'عدد', salePrice: 0, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 });
+    setOpen(true);
+  };
+  const existing = edit ? products.some((product) => product.id === edit.id) : false;
+
+  return <div className="space-y-5">
+    <PageHead title="کالا و خدمات" subtitle="تعریف کالا، خدمت و قیمت‌ها؛ تغییر موجودی کالای موجود فقط از بخش انبار انجام می‌شود" action={<Button onClick={() => startEdit()}><Plus className="h-4 w-4" /> کالا / خدمت جدید</Button>} />
+    <Card>
+      <CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader>
+      <div className="table-wrap"><table className="data-table">
+        <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>واحد</th><th>قیمت خرید</th><th>قیمت فروش</th><th>موجودی</th><th>عملیات</th></tr></thead>
+        <tbody>
+          {list.map((product) => <tr key={product.id}>
+            <td className="font-bold">{product.code}</td><td className="font-bold">{product.name}</td>
+            <td><Badge className={product.kind === 'service' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}>{product.kind === 'service' ? 'خدمت' : 'کالا'}</Badge></td>
+            <td>{product.unit}</td><td>{money(product.buyPrice)}</td>
+            <td className="font-bold">{money(product.salePrice)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td>
+            <td className={product.kind === 'product' && product.stock <= product.minStock ? 'font-black text-rose-600' : ''}>{product.kind === 'product' ? money(product.stock) + ' ' + product.unit : '—'}</td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('این مورد حذف شود؟') && deleteProduct(product.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
+          </tr>)}
+          {!list.length && <EmptyRow cols={8} text="کالا یا خدمتی پیدا نشد." />}
+        </tbody>
+      </table></div>
+    </Card>
+
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader><DialogTitle className="text-lg font-black">تعریف کالا / خدمت</DialogTitle><DialogDescription className="text-sm text-slate-500">موجودی اولیه فقط هنگام ایجاد کالا قابل ثبت است. بعد از آن هر تغییر موجودی در کاردکس ثبت می‌شود.</DialogDescription></DialogHeader>
+        {edit && <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+          <Field label="کد"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
+          <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Product['kind'] })}><option value="product">کالا</option><option value="service">خدمت</option></select></Field>
+          <Field label="واحد"><Input value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} /></Field>
+          <Field label="قیمت خرید / مبنا"><Input type="number" min="0" value={edit.buyPrice} onChange={(e) => setEdit({ ...edit, buyPrice: Number(e.target.value) })} /></Field>
+          <Field label="قیمت فروش"><Input type="number" min="0" value={edit.salePrice} onChange={(e) => setEdit({ ...edit, salePrice: Number(e.target.value) })} /></Field>
+          {edit.kind === 'product' && <>
+            <Field label={existing ? 'موجودی فعلی' : 'موجودی اولیه'}>
+              <Input type="number" disabled={existing} className={existing ? 'bg-slate-100' : ''} value={edit.stock} onChange={(e) => setEdit({ ...edit, stock: Number(e.target.value) })} />
+              {existing && <span className="mt-1 block text-[10px] leading-5 text-slate-400">برای تغییر موجودی از «انبار → شمارش / اصلاح موجودی» استفاده کنید.</span>}
+            </Field>
+            <Field label="حداقل موجودی"><Input type="number" min="0" value={edit.minStock} onChange={(e) => setEdit({ ...edit, minStock: Number(e.target.value) })} /></Field>
+          </>}
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertProduct(edit); setOpen(false); }}>ذخیره</Button></div>
+        </div>}
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 
-export function InventoryView() {
-  const { products, settings } = useAccountingStore(); const [q, setQ] = useState('');
-  const list = products.filter((p) => p.kind === 'product').filter((p) => (p.name + p.code).toLowerCase().includes(q.toLowerCase()));
-  const total = list.reduce((s, p) => s + p.stock * p.buyPrice, 0); const low = list.filter((p) => p.stock <= p.minStock).length;
-  return <div className="space-y-5"><PageHead title="انبار" subtitle="موجودی کالا از روی فاکتورهای قطعی خرید و فروش به‌روزرسانی می‌شود" />
-    <div className="grid gap-4 sm:grid-cols-3"><Metric icon={Boxes} title="تعداد اقلام" value={String(list.length)} /><Metric icon={Archive} title="ارزش موجودی" value={`${money(total)} ${settings.currency}`} /><Metric icon={AlertTriangle} title="زیر حداقل موجودی" value={String(low)} danger={low > 0} /></div>
-    <Card><CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader><div className="table-wrap"><table className="data-table"><thead><tr><th>کد</th><th>کالا</th><th>واحد</th><th>موجودی</th><th>حداقل</th><th>قیمت خرید</th><th>ارزش موجودی</th><th>وضعیت</th></tr></thead><tbody>{list.map((p) => <tr key={p.id}><td>{p.code}</td><td className="font-bold">{p.name}</td><td>{p.unit}</td><td className="font-black">{money(p.stock)}</td><td>{money(p.minStock)}</td><td>{money(p.buyPrice)}</td><td>{money(p.stock * p.buyPrice)}</td><td>{p.stock <= p.minStock ? <Badge className="bg-rose-50 text-rose-700">نیاز به تامین</Badge> : <Badge className="bg-emerald-50 text-emerald-700">مناسب</Badge>}</td></tr>)}{!list.length && <EmptyRow cols={8} text="کالایی برای نمایش نیست." />}</tbody></table></div></Card>
+export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: string, kind: InvoiceKind) => void }) {
+  const { products, stockMovements, addStockAdjustment, settings } = useAccountingStore();
+  const [q, setQ] = useState('');
+  const [cardexProductId, setCardexProductId] = useState<string | null>(null);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustProductId, setAdjustProductId] = useState('');
+  const [adjustMode, setAdjustMode] = useState<'count' | 'delta'>('count');
+  const [adjustQuantity, setAdjustQuantity] = useState(0);
+  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustNote, setAdjustNote] = useState('');
+
+  const list = products.filter((product) => product.kind === 'product').filter((product) => (product.name + product.code).toLowerCase().includes(q.toLowerCase()));
+  const total = list.reduce((sum, product) => sum + product.stock * Number(product.averageCost ?? product.buyPrice ?? 0), 0);
+  const low = list.filter((product) => product.stock <= product.minStock).length;
+  const cardexProduct = products.find((product) => product.id === cardexProductId);
+  const cardex = stockMovements.filter((movement) => movement.productId === cardexProductId).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const adjustmentProduct = products.find((product) => product.id === adjustProductId);
+
+  const startAdjustment = (productId?: string) => {
+    const selected = productId || list[0]?.id || '';
+    setAdjustProductId(selected);
+    const product = products.find((item) => item.id === selected);
+    setAdjustMode('count');
+    setAdjustQuantity(product?.stock || 0);
+    setAdjustDate(todayFa());
+    setAdjustNote('');
+    setAdjustOpen(true);
+  };
+
+  const changeAdjustmentProduct = (productId: string) => {
+    setAdjustProductId(productId);
+    const product = products.find((item) => item.id === productId);
+    setAdjustQuantity(adjustMode === 'count' ? product?.stock || 0 : 0);
+  };
+
+  const changeAdjustmentMode = (mode: 'count' | 'delta') => {
+    setAdjustMode(mode);
+    setAdjustQuantity(mode === 'count' ? adjustmentProduct?.stock || 0 : 0);
+  };
+
+  const submitAdjustment = () => {
+    if (!adjustProductId) return;
+    const result = addStockAdjustment({ productId: adjustProductId, date: adjustDate, mode: adjustMode, quantity: Number(adjustQuantity), note: adjustNote });
+    if (!result.ok) {
+      window.alert(result.message || 'ثبت اصلاح موجودی انجام نشد.');
+      return;
+    }
+    setAdjustOpen(false);
+  };
+
+  return <div className="space-y-5">
+    <PageHead title="انبار" subtitle="انبار اصلی؛ موجودی و میانگین موزون از روی کاردکس قابل ردیابی است" action={<Button disabled={!list.length} onClick={() => startAdjustment()}><Plus className="h-4 w-4" /> شمارش / اصلاح موجودی</Button>} />
+    <div className="grid gap-4 sm:grid-cols-3">
+      <Metric icon={Boxes} title="تعداد اقلام" value={String(list.length)} />
+      <Metric icon={Archive} title="ارزش موجودی (میانگین موزون)" value={money(total) + ' ' + settings.currency} />
+      <Metric icon={AlertTriangle} title="زیر حداقل موجودی" value={String(low)} danger={low > 0} />
+    </div>
+
+    <Card>
+      <CardHeader className="flex-wrap"><SearchBox value={q} onChange={setQ} /><Badge className="bg-sky-50 text-sky-700">انبار اصلی · main</Badge></CardHeader>
+      <div className="table-wrap"><table className="data-table min-w-[980px]">
+        <thead><tr><th>کد</th><th>کالا</th><th>واحد</th><th>موجودی</th><th>حداقل</th><th>میانگین موزون</th><th>ارزش موجودی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <tbody>
+          {list.map((product) => {
+            const average = Number(product.averageCost ?? product.buyPrice ?? 0);
+            return <tr key={product.id}>
+              <td>{product.code}</td><td className="font-bold">{product.name}</td><td>{product.unit}</td>
+              <td className="font-black">{money(product.stock)}</td><td>{money(product.minStock)}</td>
+              <td>{money(average)} {settings.currency}</td><td className="font-bold">{money(product.stock * average)}</td>
+              <td>{product.stock <= product.minStock ? <Badge className="bg-rose-50 text-rose-700">نیاز به تامین</Badge> : <Badge className="bg-emerald-50 text-emerald-700">مناسب</Badge>}</td>
+              <td><div className="flex gap-1"><Button variant="ghost" size="sm" onClick={() => setCardexProductId(product.id)}><Archive className="h-4 w-4" /> کاردکس</Button><Button variant="ghost" size="sm" onClick={() => startAdjustment(product.id)}><Edit3 className="h-4 w-4" /> اصلاح</Button></div></td>
+            </tr>;
+          })}
+          {!list.length && <EmptyRow cols={9} text="کالایی برای نمایش نیست." />}
+        </tbody>
+      </table></div>
+    </Card>
+
+    <Dialog open={!!cardexProductId} onOpenChange={(open) => !open && setCardexProductId(null)}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader><DialogTitle className="text-lg font-black">کاردکس {cardexProduct?.name || ''}</DialogTitle><DialogDescription className="text-sm text-slate-500">هر حرکت موجودی با منبع، مقدار ورود/خروج، مانده و میانگین موزون بعد از حرکت ثبت می‌شود.</DialogDescription></DialogHeader>
+        <div className="max-h-[65vh] overflow-auto"><table className="data-table min-w-[900px]">
+          <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>سند</th></tr></thead>
+          <tbody>
+            {cardex.map((movement) => <tr key={movement.id}>
+              <td>{movement.date}</td>
+              <td><div className="font-bold">{stockMovementLabel(movement)}</div>{movement.note && <div className="mt-1 max-w-xs text-[10px] leading-5 text-slate-500">{movement.note}</div>}</td>
+              <td>{movement.sourceReference || '—'}</td>
+              <td className="font-bold text-emerald-700">{movement.quantity > 0 ? money(movement.quantity) : '—'}</td>
+              <td className="font-bold text-rose-700">{movement.quantity < 0 ? money(Math.abs(movement.quantity)) : '—'}</td>
+              <td className="font-black">{money(movement.balanceAfter)} {cardexProduct?.unit}</td>
+              <td>{money(movement.averageCostAfter)} {settings.currency}</td>
+              <td>{movement.sourceType === 'invoice' && movement.sourceKind && onOpenInvoice ? <Button variant="ghost" size="sm" onClick={() => { setCardexProductId(null); onOpenInvoice(movement.sourceId, movement.sourceKind!); }}><FileText className="h-3.5 w-3.5" /> فاکتور {movement.sourceReference}</Button> : <Badge>{movement.sourceType === 'adjustment' ? 'اصلاحیه' : 'سیستم'}</Badge>}</td>
+            </tr>)}
+            {!cardex.length && <EmptyRow cols={8} text="حرکتی برای این کالا ثبت نشده است." />}
+          </tbody>
+        </table></div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+      <DialogContent>
+        <DialogHeader><DialogTitle className="text-lg font-black">شمارش / اصلاح موجودی</DialogTitle><DialogDescription className="text-sm text-slate-500">این عملیات موجودی قبلی را بازنویسی نمی‌کند؛ اختلاف به‌صورت یک StockMovement مستقل در کاردکس ثبت می‌شود.</DialogDescription></DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="کالا"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustProductId} onChange={(e) => changeAdjustmentProduct(e.target.value)}><option value="">انتخاب...</option>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name} · موجودی {money(product.stock)}</option>)}</select></Field>
+          <Field label="نوع عملیات"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustMode} onChange={(e) => changeAdjustmentMode(e.target.value as 'count' | 'delta')}><option value="count">شمارش انبار (موجودی واقعی)</option><option value="delta">اصلاح افزایشی / کاهشی</option></select></Field>
+          <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
+          <Field label="تاریخ"><Input value={adjustDate} onChange={(e) => setAdjustDate(e.target.value)} /></Field>
+          <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
+          {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b>{adjustMode === 'count' ? ' · اختلاف ثبت‌شونده: ' + money(Number(adjustQuantity || 0) - adjustmentProduct.stock) : ''}</div>}
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim()} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>;
+}
+
+function stockMovementLabel(movement: StockMovement) {
+  if (movement.type === 'opening') return movement.action === 'product-opening' ? 'موجودی اولیه کالا' : 'مانده انتقالی';
+  if (movement.type === 'purchase') return movement.action === 'revision' ? 'خرید - Revision' : 'ورود از خرید';
+  if (movement.type === 'sale') return movement.action === 'revision' ? 'فروش - Revision' : 'خروج از فروش';
+  if (movement.type === 'adjustment') return movement.action === 'count' ? 'اختلاف شمارش انبار' : 'اصلاح موجودی';
+  return movement.action === 'void-reversal' ? 'برگشت بابت ابطال' : 'برگشت نسخه قبلی';
 }
 
 export function PaymentsView() {
@@ -539,7 +699,7 @@ export function ReportsView() {
   const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, payment.invoiceId ? invoices.find((invoice) => invoice.id === payment.invoiceId) : undefined);
   const receipts = payments.filter((payment) => directionOf(payment) === 'receipt').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
   const outgoing = payments.filter((payment) => directionOf(payment) === 'payment').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
-  const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * product.buyPrice, 0);
+  const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * Number(product.averageCost ?? product.buyPrice ?? 0), 0);
   const pending = checks.filter((check) => check.status === 'pending').reduce((sum, check) => sum + check.amount, 0);
   const rows = [
     ['فروش قطعی', sales],
@@ -560,7 +720,7 @@ export function ReportsView() {
 
 export function SettingsView() {
   const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
-  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, payments: store.payments, checks: store.checks, adjustments: store.adjustments, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
+  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); replaceAll(parsed); setDraft(parsed.settings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
   return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
     <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><div className="sm:col-span-2 flex justify-end"><Button onClick={() => setSettings(draft)}>ذخیره تنظیمات</Button></div></CardContent></Card>
