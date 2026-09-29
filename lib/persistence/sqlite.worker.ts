@@ -185,7 +185,12 @@ async function inspectExternal(bytesBuffer: ArrayBuffer) {
       if (rowCount > MAX_ROWS_PER_TABLE) {
         warnings.push('جدول ' + name + ' بیش از ' + MAX_ROWS_PER_TABLE + ' ردیف دارد؛ Analyze فقط اولین ردیف‌ها را بررسی می‌کند.');
       }
-      const rawRows = queryOn(db, 'SELECT * FROM ' + quoted + ' LIMIT ' + MAX_ROWS_PER_TABLE);
+      let rawRows: Record<string, unknown>[];
+      try {
+        rawRows = queryOn(db, 'SELECT * FROM ' + quoted + ' ORDER BY rowid LIMIT ' + MAX_ROWS_PER_TABLE);
+      } catch {
+        rawRows = queryOn(db, 'SELECT * FROM ' + quoted + ' LIMIT ' + MAX_ROWS_PER_TABLE);
+      }
       const rows = rawRows.map((row) =>
         Object.fromEntries(Object.entries(row).map(([key, value]) => [key, normalizeExternalValue(value)]))
       );
