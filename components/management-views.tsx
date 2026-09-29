@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
+import { confirmDialog, notify } from '@/lib/feedback';
 
 function PageHead({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
   return <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-black text-slate-950">{title}</h1><p className="mt-1 text-sm text-slate-500">{subtitle}</p></div>{action}</div>;
@@ -47,7 +48,7 @@ export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; on
             <td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span>{returned > 0 && <div className="mt-1 text-[10px] font-normal text-rose-500">مرجوعی: {money(returned)} · خالص: {money(netTotal)}</div>}</td>
             <td>{money(paid)}</td>
             <td className={netTotal - paid > 0 ? 'font-bold text-rose-600' : 'font-bold text-emerald-600'}>{money(Math.max(0, netTotal - paid))}</td>
-            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>{i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('پیش‌نویس حذف شود؟') && deleteInvoice(i.id)} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}</div></td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>{i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('پیش‌نویس حذف شود؟', { title: 'حذف پیش‌نویس', confirmLabel: 'حذف', danger: true })) deleteInvoice(i.id); }} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}</div></td>
           </tr>;
         })}
         {!list.length && <EmptyRow cols={8} text="فاکتوری مطابق فیلتر پیدا نشد." />}
@@ -95,7 +96,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
     if (!edit) return;
     const errors = validateOfficialFields(edit);
     if (errors.length) {
-      window.alert(errors.join('\n'));
+      notify(errors.join('\n'), 'error');
       return;
     }
     upsertCustomer(edit);
@@ -123,7 +124,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td><div className="flex gap-1">
                 {onOpenLedger && <Button variant="ghost" size="icon" onClick={() => onOpenLedger(customer.id)} title="دفتر حساب"><BookOpen className="h-4 w-4" /></Button>}
                 <Button variant="ghost" size="icon" onClick={() => startEdit(customer)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('طرف حساب حذف شود؟') && deleteCustomer(customer.id)} title="حذف"><Trash2 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('طرف حساب حذف شود؟', { title: 'حذف طرف حساب', confirmLabel: 'حذف', danger: true })) deleteCustomer(customer.id); }} title="حذف"><Trash2 className="h-4 w-4" /></Button>
               </div></td>
             </tr>;
           })}
@@ -217,7 +218,7 @@ export function CustomerLedgerView({
       createdAt: new Date().toISOString(),
     });
     if (!result.ok) {
-      window.alert(result.message || 'ثبت اصلاحیه انجام نشد.');
+      notify(result.message || 'ثبت اصلاحیه انجام نشد.', 'error');
       return;
     }
     setAdjustAmount(0);
@@ -323,7 +324,7 @@ export function ProductsView() {
             <td>{product.unit}</td><td>{money(product.buyPrice)}</td>
             <td className="font-bold">{money(product.salePrice)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td>
             <td className={product.kind === 'product' && product.stock <= product.minStock ? 'font-black text-rose-600' : ''}>{product.kind === 'product' ? money(product.stock) + ' ' + product.unit : '—'}</td>
-            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('این مورد حذف شود؟') && deleteProduct(product.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('این مورد حذف شود؟', { title: 'حذف کالا / خدمت', confirmLabel: 'حذف', danger: true })) deleteProduct(product.id); }}><Trash2 className="h-4 w-4" /></Button></div></td>
           </tr>)}
           {!list.length && <EmptyRow cols={8} text="کالا یا خدمتی پیدا نشد." />}
         </tbody>
@@ -398,7 +399,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
     if (!adjustProductId) return;
     const result = addStockAdjustment({ productId: adjustProductId, date: adjustDate, mode: adjustMode, quantity: Number(adjustQuantity), note: adjustNote });
     if (!result.ok) {
-      window.alert(result.message || 'ثبت اصلاح موجودی انجام نشد.');
+      notify(result.message || 'ثبت اصلاح موجودی انجام نشد.', 'error');
       return;
     }
     setAdjustOpen(false);
@@ -573,7 +574,7 @@ export function PaymentsView() {
   const submit = () => {
     const result = addPayment(form);
     if (!result.ok) {
-      window.alert(result.message || 'ثبت تراکنش انجام نشد.');
+      notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
       return;
     }
     setOpen(false);
@@ -605,7 +606,7 @@ export function PaymentsView() {
               <td className={direction === 'receipt' ? 'font-black text-emerald-700' : 'font-black text-rose-700'}>{money(payment.amount)} {settings.currency}</td>
               <td>{payment.method !== 'check' ? <Badge className="bg-emerald-50 text-emerald-700">اعمال‌شده</Badge> : effective ? <Badge className="bg-emerald-50 text-emerald-700">وصول / پاس شده</Badge> : <Badge className={check?.status === 'bounced' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}>{check?.status === 'bounced' ? 'برگشتی؛ بدون اثر' : check ? 'در انتظار؛ بدون اثر' : 'چک نامعتبر'}</Badge>}</td>
               <td>{payment.reference || check?.number || '—'}</td>
-              <td><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('تراکنش حذف شود؟') && deletePayment(payment.id)}><Trash2 className="h-4 w-4" /></Button></td>
+              <td><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('تراکنش حذف شود؟', { title: 'حذف تراکنش', confirmLabel: 'حذف', danger: true })) deletePayment(payment.id); }}><Trash2 className="h-4 w-4" /></Button></td>
             </tr>;
           })}
           {!list.length && <EmptyRow cols={10} text="تراکنشی ثبت نشده است." />}
@@ -675,16 +676,16 @@ export function ChecksView() {
   const save = () => {
     const result = upsertCheck(form);
     if (!result.ok) {
-      window.alert(result.message || 'ذخیره چک انجام نشد.');
+      notify(result.message || 'ذخیره چک انجام نشد.', 'error');
       return;
     }
     setOpen(false);
   };
 
-  const remove = (id: string) => {
-    if (!confirm('چک حذف شود؟')) return;
+  const remove = async (id: string) => {
+    if (!(await confirmDialog('چک حذف شود؟', { title: 'حذف چک', confirmLabel: 'حذف', danger: true }))) return;
     const result = deleteCheck(id);
-    if (!result.ok) window.alert(result.message || 'حذف چک انجام نشد.');
+    if (!result.ok) notify(result.message || 'حذف چک انجام نشد.', 'error');
   };
 
   return <div className="space-y-5">
@@ -810,7 +811,7 @@ export function SettingsView() {
 
   const saveProfile = () => {
     if (!profileDraft.label.trim() || !profileDraft.businessName.trim()) {
-      window.alert('عنوان پروفایل و نام کسب‌وکار الزامی است.');
+      notify('عنوان پروفایل و نام کسب‌وکار الزامی است.', 'warning');
       return;
     }
     const errors = validateOfficialFields(profileDraft);
@@ -820,7 +821,7 @@ export function SettingsView() {
     }
     const result = upsertBusinessProfile(profileDraft);
     if (!result.ok) {
-      window.alert(result.message || 'ذخیره پروفایل انجام نشد.');
+      notify(result.message || 'ذخیره پروفایل انجام نشد.', 'error');
       return;
     }
     setSelectedProfileId(profileDraft.id);
@@ -828,14 +829,14 @@ export function SettingsView() {
 
   const makeDefault = () => {
     const result = setDefaultBusinessProfile(profileDraft.id);
-    if (!result.ok) window.alert(result.message || 'تغییر پروفایل پیش‌فرض انجام نشد.');
+    if (!result.ok) notify(result.message || 'تغییر پروفایل پیش‌فرض انجام نشد.', 'error');
   };
 
-  const removeProfile = () => {
-    if (!confirm('این پروفایل حذف شود؟')) return;
+  const removeProfile = async () => {
+    if (!(await confirmDialog('این پروفایل حذف شود؟', { title: 'حذف پروفایل', confirmLabel: 'حذف', danger: true }))) return;
     const result = deleteBusinessProfile(profileDraft.id);
     if (!result.ok) {
-      window.alert(result.message || 'حذف پروفایل انجام نشد.');
+      notify(result.message || 'حذف پروفایل انجام نشد.', 'error');
       return;
     }
     setSelectedProfileId(settings.defaultBusinessProfileId);
@@ -910,7 +911,7 @@ export function SettingsView() {
 
       <div className="space-y-5">
         <StorageBackupPanel />
-        <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={async () => { if (await confirmDialog('همه داده‌ها بازنشانی شوند؟ این عملیات داده فعلی را با داده نمونه جایگزین می‌کند.', { title: 'بازنشانی کامل', confirmLabel: 'بازنشانی', danger: true })) resetAll(); }}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
       </div>
     </div>
   </div>;
