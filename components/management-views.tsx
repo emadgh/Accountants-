@@ -140,6 +140,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
         {edit && <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
+          <Field label="شماره سند"><Input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
           <Field label="تلفن"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
           <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
@@ -481,11 +482,12 @@ function stockMovementLabel(movement: StockMovement) {
 }
 
 export function PaymentsView() {
-  const { payments, customers, invoices, checks, addPayment, deletePayment, settings } = useAccountingStore();
+  const { payments, customers, invoices, checks, reserveDocumentNumber, addPayment, deletePayment, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const emptyPayment = (direction: Payment['direction'] = 'receipt'): Payment => ({
+  const emptyPayment = (direction: Payment['direction'] = 'receipt', documentNumber = ''): Payment => ({
     id: uid('pay'),
+    documentNumber,
     customerId: '',
     invoiceId: '',
     direction,
@@ -499,7 +501,7 @@ export function PaymentsView() {
   const [form, setForm] = useState<Payment>(() => emptyPayment());
 
   const start = (direction: Payment['direction'] = 'receipt') => {
-    setForm(emptyPayment(direction));
+    setForm(emptyPayment(direction, reserveDocumentNumber(direction)));
     setOpen(true);
   };
 
@@ -508,7 +510,7 @@ export function PaymentsView() {
   const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, invoiceFor(payment));
 
   const list = payments.filter((payment) =>
-    (customerName(payment.customerId) + ' ' + (payment.reference || '') + ' ' + (directionOf(payment) === 'receipt' ? 'دریافت' : 'پرداخت'))
+    (customerName(payment.customerId) + ' ' + payment.documentNumber + ' ' + (payment.reference || '') + ' ' + (directionOf(payment) === 'receipt' ? 'دریافت' : 'پرداخت'))
       .toLowerCase()
       .includes(q.toLowerCase())
   );
@@ -541,6 +543,7 @@ export function PaymentsView() {
       invoiceId: invoice.id,
       customerId: invoice.customerId,
       direction,
+      documentNumber: direction === form.direction ? form.documentNumber : reserveDocumentNumber(direction),
       checkId: undefined,
       amount: remaining || form.amount,
     });
@@ -560,6 +563,7 @@ export function PaymentsView() {
       checkId: check.id,
       customerId: check.customerId,
       direction,
+      documentNumber: direction === form.direction ? form.documentNumber : reserveDocumentNumber(direction),
       amount: check.amount,
       reference: check.number,
       invoiceId: linkedInvoice && linkedInvoice.customerId === check.customerId && (linkedInvoice.kind === 'sale' ? 'receipt' : 'payment') === direction ? linkedInvoice.id : '',
@@ -584,7 +588,7 @@ export function PaymentsView() {
     <Card>
       <CardHeader><SearchBox value={q} onChange={setQ} /></CardHeader>
       <div className="table-wrap"><table className="data-table">
-        <thead><tr><th>تاریخ</th><th>نوع</th><th>طرف حساب</th><th>روش</th><th>فاکتور</th><th>مبلغ</th><th>وضعیت اثر</th><th>مرجع</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>شماره سند</th><th>تاریخ</th><th>نوع</th><th>طرف حساب</th><th>روش</th><th>فاکتور</th><th>مبلغ</th><th>وضعیت اثر</th><th>مرجع</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((payment) => {
             const invoice = invoiceFor(payment);
@@ -592,6 +596,7 @@ export function PaymentsView() {
             const check = payment.checkId ? checks.find((item) => item.id === payment.checkId) : undefined;
             const effective = effectivePaymentAmount(payment, checks) > 0;
             return <tr key={payment.id}>
+              <td className="font-black">{payment.documentNumber}</td>
               <td>{formatPersianDate(payment.date)}</td>
               <td><Badge className={direction === 'receipt' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}>{direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Badge></td>
               <td className="font-bold">{customerName(payment.customerId)}</td>
@@ -603,7 +608,7 @@ export function PaymentsView() {
               <td><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('تراکنش حذف شود؟') && deletePayment(payment.id)}><Trash2 className="h-4 w-4" /></Button></td>
             </tr>;
           })}
-          {!list.length && <EmptyRow cols={9} text="تراکنشی ثبت نشده است." />}
+          {!list.length && <EmptyRow cols={10} text="تراکنشی ثبت نشده است." />}
         </tbody>
       </table></div>
     </Card>
@@ -616,10 +621,11 @@ export function PaymentsView() {
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع تراکنش">
-            <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as Payment['direction'], invoiceId: '', checkId: undefined })}>
+            <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.direction} onChange={(e) => { const direction = e.target.value as Payment['direction']; setForm({ ...form, direction, documentNumber: reserveDocumentNumber(direction), invoiceId: '', checkId: undefined }); }}>
               <option value="receipt">دریافت</option><option value="payment">پرداخت</option>
             </select>
           </Field>
+          <Field label="شماره سند"><Input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} /></Field>
           <Field label="طرف حساب *">
             <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, invoiceId: '', checkId: undefined })}>
               <option value="">انتخاب...</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
@@ -653,13 +659,13 @@ export function PaymentsView() {
 }
 
 export function ChecksView() {
-  const { checks, payments, customers, upsertCheck, deleteCheck, settings } = useAccountingStore();
+  const { checks, payments, customers, reserveDocumentNumber, upsertCheck, deleteCheck, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('all');
-  const [form, setForm] = useState<CheckRecord>({ id: '', direction: 'received', customerId: '', amount: 0, dueDate: '', number: '', bank: '', owner: '', status: 'pending', notes: '' });
+  const [form, setForm] = useState<CheckRecord>({ id: '', documentNumber: '', direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
 
   const start = (check?: CheckRecord) => {
-    setForm(check ? { ...check } : { id: uid('chk'), direction: 'received', customerId: '', amount: 0, dueDate: '', number: '', bank: '', owner: '', status: 'pending', notes: '' });
+    setForm(check ? { ...check } : { id: uid('chk'), documentNumber: reserveDocumentNumber('check'), direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
     setOpen(true);
   };
   const list = checks.filter((check) => filter === 'all' || check.status === filter);
@@ -686,11 +692,12 @@ export function ChecksView() {
     <Card>
       <CardHeader><div className="flex flex-wrap gap-2">{[['all','همه'],['pending','در انتظار'],['cleared','وصول / پاس شده'],['bounced','برگشتی']].map(([key,label]) => <Button key={key} variant={filter === key ? 'default' : 'outline'} size="sm" onClick={() => setFilter(key)}>{label}</Button>)}</div></CardHeader>
       <div className="table-wrap"><table className="data-table">
-        <thead><tr><th>نوع</th><th>طرف حساب</th><th>شماره چک</th><th>بانک</th><th>مبلغ</th><th>سررسید</th><th>وضعیت</th><th>اتصال</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>شماره سند</th><th>نوع</th><th>طرف حساب</th><th>شماره چک</th><th>بانک</th><th>مبلغ</th><th>سررسید</th><th>وضعیت</th><th>اتصال</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((check) => {
             const linked = payments.find((payment) => payment.checkId === check.id);
             return <tr key={check.id}>
+              <td className="font-black">{check.documentNumber}</td>
               <td>{check.direction === 'received' ? <span className="font-bold text-emerald-700">دریافتی</span> : <span className="font-bold text-rose-700">پرداختی</span>}</td>
               <td className="font-bold">{customerName(check.customerId)}</td><td>{check.number}</td><td>{check.bank}</td>
               <td className="font-black">{money(check.amount)} {settings.currency}</td><td>{check.dueDate ? formatPersianDate(check.dueDate) : '—'}</td><td><CheckStatus status={check.status} /></td>
@@ -698,7 +705,7 @@ export function ChecksView() {
               <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => start(check)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={() => remove(check.id)}><Trash2 className="h-4 w-4" /></Button></div></td>
             </tr>;
           })}
-          {!list.length && <EmptyRow cols={9} text="چکی در این وضعیت وجود ندارد." />}
+          {!list.length && <EmptyRow cols={10} text="چکی در این وضعیت وجود ندارد." />}
         </tbody>
       </table></div>
     </Card>
