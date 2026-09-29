@@ -8,20 +8,26 @@ import { SpotlightCard } from '@/components/reactbits/spotlight-card';
 import { Badge } from '@/components/ui/badge';
 
 export function DashboardView() {
-  const { invoices, payments, customers, products, checks, settings } = useAccountingStore();
+  const { invoices, returns, payments, customers, products, checks, settings } = useAccountingStore();
   const saleInvoices = invoices.filter((i) => i.kind === 'sale' && i.status !== 'draft' && i.status !== 'void');
   const purchaseInvoices = invoices.filter((i) => i.kind === 'purchase' && i.status !== 'draft' && i.status !== 'void');
-  const totalSales = saleInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
-  const totalPurchases = purchaseInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
-  const receivable = saleInvoices.reduce((s, i) => s + Math.max(0, invoiceTotal(i) - settledForInvoice(i, payments, checks)), 0);
+  const saleReturns = returns.filter((document) => document.status === 'final' && document.kind === 'sale-return').reduce((sum, document) => sum + document.totalAmount, 0);
+  const purchaseReturns = returns.filter((document) => document.status === 'final' && document.kind === 'purchase-return').reduce((sum, document) => sum + document.totalAmount, 0);
+  const totalSales = Math.max(0, saleInvoices.reduce((s, i) => s + invoiceTotal(i), 0) - saleReturns);
+  const totalPurchases = Math.max(0, purchaseInvoices.reduce((s, i) => s + invoiceTotal(i), 0) - purchaseReturns);
+  const receivable = saleInvoices.reduce((sum, invoice) => {
+    const returned = returns.filter((document) => document.status === 'final' && document.originalInvoiceId === invoice.id).reduce((value, document) => value + document.totalAmount, 0);
+    const netTotal = Math.max(0, invoiceTotal(invoice) - returned);
+    return sum + Math.max(0, netTotal - settledForInvoice(invoice, payments, checks));
+  }, 0);
   const inventoryValue = products.filter((p) => p.kind === 'product').reduce((s, p) => s + p.stock * Number(p.averageCost ?? p.buyPrice ?? 0), 0);
   const pendingChecks = checks.filter((c) => c.status === 'pending');
   const lowStock = products.filter((p) => p.kind === 'product' && p.stock <= p.minStock);
 
   const cards = [
-    { label: 'فروش قطعی', value: totalSales, icon: ArrowUpRight, hint: `${saleInvoices.length} فاکتور`, tone: 'text-emerald-600 bg-emerald-50' },
+    { label: 'فروش خالص', value: totalSales, icon: ArrowUpRight, hint: `${saleInvoices.length} فاکتور`, tone: 'text-emerald-600 bg-emerald-50' },
     { label: 'مانده دریافتنی', value: receivable, icon: CircleDollarSign, hint: 'بر اساس دریافت‌های موثر', tone: 'text-sky-600 bg-sky-50' },
-    { label: 'خرید قطعی', value: totalPurchases, icon: ArrowDownLeft, hint: `${purchaseInvoices.length} فاکتور`, tone: 'text-violet-600 bg-violet-50' },
+    { label: 'خرید خالص', value: totalPurchases, icon: ArrowDownLeft, hint: `${purchaseInvoices.length} فاکتور`, tone: 'text-violet-600 bg-violet-50' },
     { label: 'ارزش موجودی', value: inventoryValue, icon: Boxes, hint: `${products.filter((p) => p.kind === 'product').length} قلم کالا`, tone: 'text-amber-600 bg-amber-50' },
   ];
 
