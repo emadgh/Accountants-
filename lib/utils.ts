@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { Invoice, Payment } from './types';
+import type { CheckRecord, Invoice, Payment, PaymentDirection } from './types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,8 +17,71 @@ export function invoiceTotal(invoice: Pick<Invoice, 'items' | 'discount' | 'tax'
   return Math.max(0, sub - Number(invoice.discount || 0) + Number(invoice.tax || 0) + Number(invoice.shipping || 0));
 }
 
-export function paidForInvoice(invoiceId: string, payments: Payment[]) {
-  return payments.filter((p) => p.invoiceId === invoiceId).reduce((s, p) => s + Number(p.amount || 0), 0);
+export function expectedPaymentDirection(invoice: Pick<Invoice, 'kind'>): PaymentDirection {
+  return invoice.kind === 'sale' ? 'receipt' : 'payment';
+}
+
+export function resolvedPaymentDirection(
+  payment: Payment,
+  invoice?: Pick<Invoice, 'kind'> | null
+): PaymentDirection {
+  // Legacy local backups may not contain direction; infer it from the linked invoice.
+  return payment.direction || (invoice ? expectedPaymentDirection(invoice) : 'receipt');
+}
+
+export function paymentIsEffective(payment: Payment, checks: CheckRecord[]) {
+  if (payment.method !== 'check') return true;
+  if (!payment.checkId) return false;
+  return checks.find((check) => check.id === payment.checkId)?.status === 'cleared';
+}
+
+export function effectivePaymentAmount(payment: Payment, checks: CheckRecord[]) {
+  return paymentIsEffective(payment, checks) ? Number(payment.amount || 0) : 0;
+}
+
+export function settledForInvoice(invoice: Pick<Invoice, 'id' | 'kind'>, payments: Payment[], checks: CheckRecord[]) {
+  const expected = expectedPaymentDirection(invoice);
+  return payments
+    .filter((payment) => payment.invoiceId === invoice.id)
+    .filter((payment) => resolvedPaymentDirection(payment, invoice) === expected)
+    .reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
+}
+
+export function customerNetBalance(
+  customerId: string,
+  invoices: Invoice[],
+  payments: Payment[],
+  checks: CheckRecord[]
+) {
+  const posted = invoices.filter(
+    (invoice) => invoice.customerId === customerId && invoice.status !== 'draft' && invoice.status !== 'void'
+  );
+  const sales = posted
+    .filter((invoice) => invoice.kind === 'sale')
+    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  const purchases = posted
+    .filter((invoice) => invoice.kind === 'purchase')
+    .reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+
+  const effective = payments
+    .filter((payment) => payment.customerId === customerId)
+    .map((payment) => {
+      const invoice = payment.invoiceId ? invoices.find((item) => item.id === payment.invoiceId) : undefined;
+      return {
+        direction: resolvedPaymentDirection(payment, invoice),
+        amount: effectivePaymentAmount(payment, checks),
+      };
+    });
+
+  const receipts = effective
+    .filter((item) => item.direction === 'receipt')
+    .reduce((sum, item) => sum + item.amount, 0);
+  const outgoing = effective
+    .filter((item) => item.direction === 'payment')
+    .reduce((sum, item) => sum + item.amount, 0);
+
+  // Positive = طرف حساب بدهکار است. Negative = طرف حساب بستانکار است.
+  return sales - purchases - receipts + outgoing;
 }
 
 export function todayFa() {
