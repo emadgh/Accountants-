@@ -166,7 +166,7 @@ export function MetricCard({
                   suffix={numericSuffix}
                   rolling={rolling}
                   reserveCharacters={styles.reserve}
-                  ariaLabel={ariaLabel || staticValue}
+                  ariaLabel={ariaLabel || (typeof value === 'string' || formattedValue ? staticValue : undefined)}
                   className="min-w-0"
                 />
               ) : (
