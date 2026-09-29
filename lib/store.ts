@@ -1249,7 +1249,7 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);
