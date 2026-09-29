@@ -3,6 +3,7 @@
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Boxes, CircleDollarSign, Clock3, FileText, Users } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import { invoiceTotal, money, settledForInvoice } from '@/lib/utils';
+import { formatPersianDate } from '@/lib/standards';
 import { FadeContent } from '@/components/reactbits/fade-content';
 import { SpotlightCard } from '@/components/reactbits/spotlight-card';
 import { Badge } from '@/components/ui/badge';
@@ -56,7 +57,7 @@ export function DashboardView() {
 
       <div className="space-y-5">
         <SpotlightCard><div className="p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 font-black"><Clock3 className="h-5 w-5 text-amber-600" /> چک‌های در انتظار</div><Badge>{pendingChecks.length}</Badge></div>
-          <div className="space-y-3">{pendingChecks.slice(0, 4).map((check) => <div key={check.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><span className="font-bold">{check.owner || 'بدون نام'}</span><span className="text-sm font-black text-slate-900">{money(check.amount)}</span></div><div className="mt-1 flex justify-between text-xs text-slate-500"><span>{check.bank} · {check.number}</span><span>سررسید {check.dueDate}</span></div></div>)}{!pendingChecks.length && <div className="py-8 text-center text-sm text-slate-400">چک در انتظار ندارید.</div>}</div>
+          <div className="space-y-3">{pendingChecks.slice(0, 4).map((check) => <div key={check.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><span className="font-bold">{check.owner || 'بدون نام'}</span><span className="text-sm font-black text-slate-900">{money(check.amount)}</span></div><div className="mt-1 flex justify-between text-xs text-slate-500"><span>{check.bank} · {check.number}</span><span>سررسید {formatPersianDate(check.dueDate)}</span></div></div>)}{!pendingChecks.length && <div className="py-8 text-center text-sm text-slate-400">چک در انتظار ندارید.</div>}</div>
         </div></SpotlightCard>
         <SpotlightCard><div className="p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 font-black"><AlertTriangle className="h-5 w-5 text-rose-600" /> هشدار موجودی</div><Badge className={lowStock.length ? 'bg-rose-50 text-rose-700' : ''}>{lowStock.length}</Badge></div>
           <div className="space-y-2">{lowStock.slice(0, 5).map((p) => <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm"><span>{p.name}</span><span className="font-black text-rose-600">{money(p.stock)} {p.unit}</span></div>)}{!lowStock.length && <div className="py-5 text-center text-sm text-slate-400">موجودی‌ها در محدوده مناسب هستند.</div>}</div>
