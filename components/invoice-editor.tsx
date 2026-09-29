@@ -214,7 +214,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   });
 
   return <div className="space-y-4">
-    <div className="screen-only sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+    <div className="invoice-toolbar screen-only sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
       <div className="flex items-center gap-2">
         {onBack && <Button variant="ghost" size="icon" onClick={onBack}><ArrowRight className="h-4 w-4" /></Button>}
         <div><div className="font-black">{invoice.kind === 'sale' ? 'ویرایش فاکتور فروش' : 'ویرایش فاکتور خرید'}</div><div className="mt-0.5 text-xs text-slate-400">همین فرم نسخه قابل چاپ فاکتور است.</div></div>
@@ -289,7 +289,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         </div>
       </div>
 
-      <table className="invoice-grid-table mt-2">
+      <div className="invoice-table-scroll mt-2"><table className="invoice-grid-table">
         <colgroup><col style={{ width: '7%' }} /><col style={{ width: '38%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} /><col style={{ width: '16%' }} /><col style={{ width: '18%' }} /></colgroup>
         <thead><tr><th>ردیف</th><th>شرح کالا / خدمت</th><th>مقدار</th><th>واحد</th><th>قیمت واحد</th><th>مبلغ کل</th><th className="screen-only !w-8"></th></tr></thead>
         <tbody>{invoice.items.map((item, index) => <tr key={item.id}>
@@ -307,7 +307,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
           <td className="text-left font-bold" dir="ltr">{money(item.qty * item.unitPrice)}</td>
           <td className="screen-only"><button aria-label="حذف ردیف" className="rounded-lg p-1 text-rose-500 hover:bg-rose-50" onClick={() => patch('items', invoice.items.filter((x) => x.id !== item.id))}><Trash2 className="h-4 w-4" /></button></td>
         </tr>)}</tbody>
-      </table>
+      </table></div>
       <div className="screen-only mt-2"><Button variant="outline" size="sm" onClick={addRow} title="Ctrl/Cmd + Enter"><Plus className="h-4 w-4" /> افزودن ردیف <kbd className="mr-1 hidden rounded bg-slate-100 px-1 text-[9px] text-slate-500 sm:inline">Ctrl↵</kbd></Button></div>
 
       <div className="invoice-summary-block mt-4 grid grid-cols-1 gap-6 border-t border-blue-200 pt-3 sm:grid-cols-2">
