@@ -163,7 +163,7 @@ export function MetricCard({
             <div className={cn('mt-2 flex max-w-full min-w-0 items-baseline gap-1.5 overflow-hidden font-black tracking-tight leading-tight', styles.value, semantic.value, valueClassName)}>
               {useNumericRenderer ? (
                 <RollingNumber
-                  value={numericValue}
+                  value={numericValue!}
                   prefix={numericPrefix}
                   suffix={numericSuffix}
                   rolling={rolling}
