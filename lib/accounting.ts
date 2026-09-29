@@ -15,7 +15,7 @@ import type {
   StockMovement,
   SystemAccountKey,
 } from './types';
-import { effectivePaymentAmount, invoiceTotal, resolvedPaymentDirection, uid } from './utils';
+import { effectivePaymentAmount, invoiceLineNet, invoiceTotal, resolvedPaymentDirection, uid } from './utils';
 
 export const SYSTEM_ACCOUNTS: Account[] = [
   { id: 'acct_cash', code: '1101', name: 'صندوق', type: 'asset', normalBalance: 'debit', systemKey: 'cash', active: true },
@@ -90,7 +90,7 @@ function entry(
 function productAllocation(invoice: Invoice, products: Product[]) {
   const raw = invoice.items.map((item) => {
     const product = item.productId ? products.find((candidate) => candidate.id === item.productId) : undefined;
-    return { amount: Number(item.qty || 0) * Number(item.unitPrice || 0), product: product?.kind === 'product' };
+    return { amount: invoiceLineNet(item), product: product?.kind === 'product' };
   });
   const subtotal = raw.reduce((sum, item) => sum + item.amount, 0);
   const productRaw = raw.filter((item) => item.product).reduce((sum, item) => sum + item.amount, 0);
@@ -104,7 +104,9 @@ function returnProductAllocation(document: ReturnDocument, original: Invoice, pr
   const raw = document.items.map((item) => {
     const source = original.items.find((candidate) => candidate.id === item.originalItemId);
     const product = source?.productId ? products.find((candidate) => candidate.id === source.productId) : undefined;
-    return { amount: Number(item.qty || 0) * Number(item.unitPrice || 0), product: product?.kind === 'product' };
+    const sourceQty = Number(source?.qty || 0);
+    const amount = source && sourceQty > 0 ? invoiceLineNet(source) / sourceQty * Number(item.qty || 0) : Number(item.qty || 0) * Number(item.unitPrice || 0);
+    return { amount, product: product?.kind === 'product' };
   });
   const subtotal = raw.reduce((sum, item) => sum + item.amount, 0);
   const productRaw = raw.filter((item) => item.product).reduce((sum, item) => sum + item.amount, 0);
