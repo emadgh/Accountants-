@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { seedData } from './data';
 import type {
+  Account,
   AccountAdjustment,
   AccountingData,
   BusinessSettings,
@@ -11,6 +12,7 @@ import type {
   Customer,
   Invoice,
   InvoiceAuditAction,
+  MoneyTransaction,
   OperationResult,
   Payment,
   Product,
@@ -33,6 +35,17 @@ import {
   todayFa,
   uid,
 } from './utils';
+import {
+  buildOpeningJournal,
+  journalForCustomerAdjustment,
+  journalForInvoice,
+  journalForMoneyTransaction,
+  journalForPayment,
+  journalForReturn,
+  journalForStockAdjustment,
+  normalizeAccounts,
+  reverseActiveSourceEntries,
+} from './accounting';
 
 type Store = AccountingData & {
   hydrated: boolean;
@@ -54,6 +67,10 @@ type Store = AccountingData & {
   deletePayment: (id: string) => void;
   addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
   addStockAdjustment: (input: StockAdjustmentInput) => OperationResult;
+  upsertAccount: (account: Account) => OperationResult;
+  deleteAccount: (id: string) => OperationResult;
+  addMoneyTransaction: (transaction: MoneyTransaction) => OperationResult;
+  voidMoneyTransaction: (id: string, reason: string) => OperationResult;
   upsertCheck: (check: CheckRecord) => OperationResult;
   deleteCheck: (id: string) => OperationResult;
   setSettings: (settings: BusinessSettings) => void;
@@ -462,7 +479,10 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
   const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
   const returns = data.returns || [];
   const stockMovements = data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products);
-  return {
+  const accounts = normalizeAccounts(data.accounts || []);
+  const moneyTransactions = data.moneyTransactions || [];
+
+  const base: AccountingData = {
     customers,
     products,
     invoices: withInvoiceStatuses(invoices, payments, checks, returns),
@@ -471,7 +491,15 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     checks,
     adjustments: data.adjustments || [],
     stockMovements,
+    accounts,
+    journalEntries: data.journalEntries || [],
+    moneyTransactions,
     settings: { ...seedData.settings, ...(data.settings || {}) },
+  };
+
+  return {
+    ...base,
+    journalEntries: base.journalEntries.length ? base.journalEntries : buildOpeningJournal(base, accounts),
   };
 }
 
