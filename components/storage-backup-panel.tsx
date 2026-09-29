@@ -18,6 +18,7 @@ import {
   createAccountingSnapshot,
   deleteAccountingSnapshot,
   getAccountingStorageInfo,
+  importAccountingData,
   listAccountingSnapshots,
   restoreAccountingSnapshot,
   type AccountingSnapshotMeta,
@@ -120,7 +121,7 @@ export function StorageBackupPanel() {
     if (!candidate) return;
     setBusy(true);
     try {
-      await createAccountingSnapshot('before-import');
+      await importAccountingData(candidate.data);
       store.replaceAll(candidate.data);
       setCandidate(null);
       notify('پشتیبان بازیابی شد. نسخه قبل از Import در Snapshotهای محلی نگهداری شد.', 'success');
@@ -174,7 +175,7 @@ export function StorageBackupPanel() {
       <CardHeader>
         <div>
           <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-sky-600" /> ذخیره‌سازی و پشتیبان</CardTitle>
-          <div className="mt-1 text-xs text-slate-500">داده اصلی در IndexedDB نگهداری می‌شود و Snapshotهای محلی برای بازگشت امن ساخته می‌شوند.</div>
+          <div className="mt-1 text-xs text-slate-500">داده اصلی در SQLite روی OPFS نگهداری می‌شود و Snapshotها نیز داخل همان دیتابیس مدیریت می‌شوند.</div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
