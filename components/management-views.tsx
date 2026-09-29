@@ -114,7 +114,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td className="font-bold">{customer.code}</td>
               <td className="font-bold">{customer.name}</td>
               <td>{customer.kind === 'customer' ? 'مشتری' : customer.kind === 'supplier' ? 'تامین‌کننده' : 'هر دو'}</td>
-              <td>{customer.phone || '—'}</td>
+              <td><span dir="rtl">{customer.phone || '—'}</span></td>
               <td className="max-w-xs truncate">{customer.address || '—'}</td>
               <td className={currentBalance > 0 ? 'font-black text-rose-600' : currentBalance < 0 ? 'font-black text-emerald-600' : 'font-bold'}>
                 {money(Math.abs(currentBalance))} {settings.currency}{currentBalance > 0 ? ' بدهکار' : currentBalance < 0 ? ' بستانکار' : ''}
