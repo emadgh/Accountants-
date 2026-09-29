@@ -1,6 +1,8 @@
 export type CustomerKind = 'customer' | 'supplier' | 'both';
 export type ProductKind = 'product' | 'service';
 export type InvoiceKind = 'sale' | 'purchase';
+export type ReturnKind = 'sale-return' | 'purchase-return';
+export type ReturnStatus = 'draft' | 'final' | 'void';
 export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
 export type PaymentMethod = 'cash' | 'card' | 'check';
 export type PaymentDirection = 'receipt' | 'payment';
@@ -81,6 +83,46 @@ export interface Invoice {
   auditTrail?: InvoiceAuditEntry[];
 }
 
+export interface ReturnItem {
+  id: string;
+  originalItemId: string;
+  productId?: string;
+  description: string;
+  unit: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export type ReturnAuditAction = 'created' | 'draft_saved' | 'finalized' | 'voided';
+
+export interface ReturnAuditEntry {
+  id: string;
+  action: ReturnAuditAction;
+  at: string;
+  note?: string;
+}
+
+export interface ReturnDocument {
+  id: string;
+  number: string;
+  kind: ReturnKind;
+  status: ReturnStatus;
+  originalInvoiceId: string;
+  originalInvoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  date: string;
+  items: ReturnItem[];
+  totalAmount: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
+  auditTrail?: ReturnAuditEntry[];
+}
+
 export interface Payment {
   id: string;
   invoiceId?: string;
@@ -107,7 +149,7 @@ export interface CheckRecord {
   notes?: string;
 }
 
-export type StockMovementType = 'opening' | 'purchase' | 'sale' | 'reversal' | 'adjustment';
+export type StockMovementType = 'opening' | 'purchase' | 'sale' | 'sale-return' | 'purchase-return' | 'reversal' | 'adjustment';
 export type StockMovementAction =
   | 'migration-opening'
   | 'product-opening'
@@ -115,6 +157,8 @@ export type StockMovementAction =
   | 'revision-reversal'
   | 'revision'
   | 'void-reversal'
+  | 'return-finalize'
+  | 'return-void-reversal'
   | 'count'
   | 'manual-adjustment';
 
@@ -130,10 +174,10 @@ export interface StockMovement {
   unitCost: number;
   type: StockMovementType;
   action: StockMovementAction;
-  sourceType: 'invoice' | 'adjustment' | 'system';
+  sourceType: 'invoice' | 'return' | 'adjustment' | 'system';
   sourceId: string;
   sourceReference?: string;
-  sourceKind?: InvoiceKind;
+  sourceKind?: InvoiceKind | ReturnKind;
   note?: string;
 }
 
@@ -158,6 +202,8 @@ export type LedgerEntryKind =
   | 'opening'
   | 'sale'
   | 'purchase'
+  | 'sale-return'
+  | 'purchase-return'
   | 'receipt'
   | 'payment'
   | 'check'
@@ -181,6 +227,8 @@ export interface CustomerLedgerEntry {
   note?: string;
   invoiceId?: string;
   invoiceKind?: InvoiceKind;
+  returnId?: string;
+  returnKind?: ReturnKind;
 }
 
 export interface BusinessSettings {
@@ -204,6 +252,7 @@ export interface AccountingData {
   customers: Customer[];
   products: Product[];
   invoices: Invoice[];
+  returns: ReturnDocument[];
   payments: Payment[];
   checks: CheckRecord[];
   adjustments: AccountAdjustment[];
@@ -218,4 +267,8 @@ export interface OperationResult {
 
 export interface StoreOperationResult extends OperationResult {
   invoice?: Invoice;
+}
+
+export interface ReturnOperationResult extends OperationResult {
+  returnDocument?: ReturnDocument;
 }
