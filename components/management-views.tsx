@@ -10,7 +10,7 @@ import { useAccountingStore } from '@/lib/store';
 import type { BusinessProfile, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
-import { PersianDateInput } from '@/components/persian-date-input';
+import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -281,7 +281,7 @@ export function CustomerLedgerView({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع اصلاحیه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustDirection} onChange={(e) => setAdjustDirection(e.target.value as 'debit' | 'credit')}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
           <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={adjustAmount} onChange={(e) => setAdjustAmount(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
+          <Field label="تاریخ"><JalaliDatePicker value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="طرف حساب"><Input value={customer?.name || ''} readOnly className="bg-slate-100" /></Field>
           <Field label="دلیل اصلاحیه *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً اصلاح مانده انتقالی طبق سند..." /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!customer || adjustAmount <= 0 || !adjustNote.trim()} onClick={submitAdjustment}>ثبت اصلاحیه</Button></div>
@@ -464,7 +464,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
           <Field label="کالا"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustProductId} onChange={(e) => changeAdjustmentProduct(e.target.value)}><option value="">انتخاب...</option>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name} · موجودی {money(product.stock)}</option>)}</select></Field>
           <Field label="نوع عملیات"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustMode} onChange={(e) => changeAdjustmentMode(e.target.value as 'count' | 'delta')}><option value="count">شمارش انبار (موجودی واقعی)</option><option value="delta">اصلاح افزایشی / کاهشی</option></select></Field>
           <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
-          <Field label="تاریخ"><PersianDateInput value={adjustDate} onChange={setAdjustDate} /></Field>
+          <Field label="تاریخ"><JalaliDatePicker value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
           {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">موجودی فعلی: <b>{money(adjustmentProduct.stock)} {adjustmentProduct.unit}</b>{adjustMode === 'count' ? ' · اختلاف ثبت‌شونده: ' + money(Number(adjustQuantity || 0) - adjustmentProduct.stock) : ''}</div>}
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAdjustOpen(false)}>انصراف</Button><Button disabled={!adjustProductId || !adjustNote.trim()} onClick={submitAdjustment}>ثبت در کاردکس</Button></div>
@@ -650,7 +650,7 @@ export function PaymentsView() {
             </select>
           </Field>}
           <Field label={`مبلغ (${settings.currency}) *`}><Input type="number" min="0" value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="تاریخ"><PersianDateInput value={form.date} onChange={(date) => setForm({ ...form, date })} /></Field>
+          <Field label="تاریخ"><JalaliDatePicker value={form.date} onChange={(date) => setForm({ ...form, date })} /></Field>
           <Field label="شماره پیگیری / مرجع"><Input value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
           <Field label="توضیحات"><Input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           {form.method === 'check' && <div className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">تراکنش چکی هنگام ثبت ایجاد می‌شود، اما تا زمانی که وضعیت چک «وصول/پاس شده» نباشد، مبلغ آن در مانده تسویه فاکتور محاسبه نمی‌شود.</div>}
@@ -723,7 +723,7 @@ export function ChecksView() {
           <Field label="بانک"><Input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
           <Field label="صاحب چک"><Input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} /></Field>
           <Field label={`مبلغ (${settings.currency})`}><Input readOnly={!!linkedPayment} className={linkedPayment ? 'bg-slate-100' : ''} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-          <Field label="سررسید"><PersianDateInput value={form.dueDate || todayIso()} onChange={(dueDate) => setForm({ ...form, dueDate })} /></Field>
+          <Field label="سررسید"><JalaliDatePicker value={form.dueDate || todayIso()} onChange={(dueDate) => setForm({ ...form, dueDate })} /></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CheckRecord['status'] })}><option value="pending">در انتظار</option><option value="cleared">وصول / پاس شده</option><option value="bounced">برگشتی</option></select></Field>
           <Field label="توضیحات" className="sm:col-span-2"><Textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!form.customerId || form.amount <= 0} onClick={save}>ذخیره</Button></div>

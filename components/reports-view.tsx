@@ -17,7 +17,7 @@ import type { Customer, Invoice, Product, ReturnDocument, StockMovement } from '
 import { buildCustomerLedger, invoiceTotal, money } from '@/lib/utils';
 import { formatPersianDate, normalizeStoredDate, todayIso } from '@/lib/standards';
 import { downloadCsv, downloadExcel, type ExportCell } from '@/lib/report-export';
-import { PersianDateInput } from '@/components/persian-date-input';
+import { JalaliDateRangePicker } from '@/components/ui/jalali-date-picker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -368,8 +368,7 @@ export function ReportsView() {
 
     <Card className="screen-only">
       <CardContent className="grid gap-4 lg:grid-cols-[1fr_1fr_1.2fr_1.2fr]">
-        <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">از تاریخ</span><PersianDateInput value={fromDate} onChange={setFromDate} /></label>
-        <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">تا تاریخ</span><PersianDateInput value={toDate} onChange={setToDate} /></label>
+        <label className="space-y-1.5 lg:col-span-2"><span className="block text-xs font-bold text-slate-600">بازه تاریخ</span><JalaliDateRangePicker value={{ from: fromDate, to: toDate }} onChange={(range) => { setFromDate(range.from); setToDate(range.to); }} /></label>
         {(tab === 'sales' || tab === 'balances' || tab === 'checks') && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">طرف حساب</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">همه طرف حساب‌ها</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.code} — {customer.name}</option>)}</select></label>}
         {(tab === 'sales' || tab === 'inventory') && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">کالا / خدمت</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={productId} onChange={(event) => setProductId(event.target.value)}><option value="">همه کالا و خدمات</option>{products.map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name}</option>)}</select></label>}
         {tab === 'sales' && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">نوع سند</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={documentKind} onChange={(event) => setDocumentKind(event.target.value as 'all' | 'sale' | 'purchase')}><option value="all">فروش و خرید</option><option value="sale">فقط فروش</option><option value="purchase">فقط خرید</option></select></label>}

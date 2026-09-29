@@ -6,7 +6,7 @@ import { useAccountingStore } from '@/lib/store';
 import type { Invoice, ReturnDocument, ReturnItem } from '@/lib/types';
 import { money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
-import { PersianDateInput } from '@/components/persian-date-input';
+import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -192,7 +192,7 @@ export function ReturnsView() {
             </select>
           </Field>
           <Field label="شماره سند"><Input value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} /></Field>
-          <Field label="تاریخ"><PersianDateInput value={draft.date} onChange={(date) => setDraft({ ...draft, date })} /></Field>
+          <Field label="تاریخ"><JalaliDatePicker value={draft.date} onChange={(date) => setDraft({ ...draft, date })} /></Field>
           <Field label="طرف حساب"><Input readOnly className="bg-slate-100" value={original?.customerName || draft.customerName} /></Field>
         </div>
 
