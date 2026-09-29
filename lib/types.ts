@@ -110,6 +110,7 @@ export interface CheckRecord {
 export type StockMovementType = 'opening' | 'purchase' | 'sale' | 'reversal' | 'adjustment';
 export type StockMovementAction =
   | 'migration-opening'
+  | 'product-opening'
   | 'finalize'
   | 'revision-reversal'
   | 'revision'
