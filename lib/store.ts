@@ -548,10 +548,11 @@ function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invo
   });
 }
 
-function normalizeAccountingData(data: AccountingData): AccountingData {
+export function normalizeAccountingData(data: AccountingData): AccountingData {
   const settings = normalizeBusinessSettings(data.settings);
-  const customers = (data.customers || []).map((customer) => ({
+  const customers: Customer[] = (data.customers || []).map((customer) => ({
     ...customer,
+    status: customer.status === 'archived' ? 'archived' : 'active',
     openingBalance: Number(customer.openingBalance || 0),
   }));
   const products = normalizeProducts(data.products || []);
@@ -559,6 +560,11 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     ...invoice,
     businessProfileId: invoice.businessProfileId || settings.defaultBusinessProfileId,
     date: normalizeStoredDate(invoice.date),
+    items: (invoice.items || []).map((item) => ({
+      ...item,
+      discount: Math.max(0, Number(item.discount || 0)),
+      ...(item.discountPercent == null ? {} : { discountPercent: Math.max(0, Number(item.discountPercent || 0)) }),
+    })),
   }));
   const returns = (data.returns || []).map((document) => ({ ...document, date: normalizeStoredDate(document.date) }));
   const checks = (data.checks || []).map((check, index) => ({

@@ -1,4 +1,5 @@
 export type CustomerKind = 'customer' | 'supplier' | 'both';
+export type CustomerStatus = 'active' | 'archived';
 export type ProductKind = 'product' | 'service';
 export type InvoiceKind = 'sale' | 'purchase';
 export type ReturnKind = 'sale-return' | 'purchase-return';
@@ -22,6 +23,7 @@ export interface Customer {
   code: string;
   name: string;
   kind: CustomerKind;
+  status: CustomerStatus;
   phone: string;
   address: string;
   nationalId: string;
@@ -53,6 +55,8 @@ export interface InvoiceItem {
   unit: string;
   qty: number;
   unitPrice: number;
+  discount?: number;
+  discountPercent?: number;
 }
 
 export type InvoiceAuditAction = 'created' | 'draft_saved' | 'finalized' | 'revised' | 'voided';
@@ -91,6 +95,7 @@ export interface Invoice {
   voidedAt?: string;
   voidReason?: string;
   auditTrail?: InvoiceAuditEntry[];
+  migrationReview?: { status: 'needs-review'; reason: string };
 }
 
 export interface ReturnItem {
@@ -329,6 +334,8 @@ export interface BusinessProfile {
   bankName: string;
   invoiceTitle: string;
   footer: string;
+  signatureImage?: string;
+  showSignature?: boolean;
 }
 
 export interface BusinessSettings {

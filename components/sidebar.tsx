@@ -186,7 +186,7 @@ export function Sidebar({
             <div className="mb-1 flex items-center gap-2 font-bold text-slate-200">
               <FileText className="h-4 w-4" /> ذخیره‌سازی محلی
             </div>
-            داده‌ها فقط داخل مرورگر شما نگهداری می‌شوند.
+            داده‌ها در SQLite محلی مرورگر و OPFS نگهداری می‌شوند.
           </div>
         </div>
       </aside>

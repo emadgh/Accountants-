@@ -212,3 +212,37 @@ export async function getAccountingStorageInfo() {
     schemaVersion: ACCOUNTING_SCHEMA_VERSION,
   };
 }
+
+
+export interface YasImportHistory {
+  fingerprint: string;
+  importedAt: string;
+  report: unknown;
+}
+
+export async function getLastYasImportHistory(): Promise<YasImportHistory | null> {
+  await writeQueue;
+  const rows = await sqliteQuery<{ value: string }>(
+    "SELECT value FROM app_meta WHERE key = 'yas-import:last' LIMIT 1"
+  );
+  if (!rows[0]?.value) return null;
+  try {
+    return JSON.parse(rows[0].value) as YasImportHistory;
+  } catch {
+    return null;
+  }
+}
+
+export async function recordYasImportHistory(fingerprint: string, report: unknown) {
+  const history: YasImportHistory = {
+    fingerprint,
+    importedAt: new Date().toISOString(),
+    report,
+  };
+  await sqliteTransaction([
+    {
+      sql: "INSERT INTO app_meta(key, value) VALUES ('yas-import:last', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      bind: [JSON.stringify(history)],
+    },
+  ]);
+}

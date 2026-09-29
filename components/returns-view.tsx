@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Ban, CheckCircle2, Edit3, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, ReturnDocument, ReturnItem } from '@/lib/types';
-import { money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
+import { invoiceLineDiscount, invoiceLineNet, money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Badge } from '@/components/ui/badge';
@@ -198,7 +198,7 @@ export function ReturnsView() {
 
         {original ? <div className="max-h-[46vh] overflow-auto rounded-xl border border-slate-200">
           <table className="data-table min-w-[780px]">
-            <thead><tr><th>شرح</th><th>مقدار فاکتور</th><th>قبلاً مرجوع</th><th>قابل مرجوعی</th><th>مقدار این سند</th><th>قیمت واحد</th></tr></thead>
+            <thead><tr><th>شرح</th><th>مقدار فاکتور</th><th>قبلاً مرجوع</th><th>قابل مرجوعی</th><th>مقدار این سند</th><th>قیمت واحد</th><th>تخفیف ردیف</th><th>قیمت خالص</th></tr></thead>
             <tbody>
               {draft.items.map((item) => {
                 const source = original.items.find((sourceItem) => sourceItem.id === item.originalItemId);
@@ -212,6 +212,8 @@ export function ReturnsView() {
                   <td className="font-bold">{money(remaining)}</td>
                   <td><Input className="w-28" type="number" min="0" max={remaining} step="any" value={item.qty} onChange={(e) => patchQty(item.originalItemId, Number(e.target.value))} /></td>
                   <td>{money(source.unitPrice)}</td>
+                  <td>{invoiceLineDiscount(source) > 0 ? money(invoiceLineDiscount(source)) : '—'}</td>
+                  <td>{money(Number(source.qty || 0) > 0 ? invoiceLineNet(source) / Number(source.qty || 0) : 0)}</td>
                 </tr>;
               })}
             </tbody>

@@ -46,11 +46,11 @@ export const seedData: AccountingData = {
   },
   customers: [
     {
-      id: 'cus_mansouri', code: '100006', name: 'پخش منصوری', kind: 'customer',
+      id: 'cus_mansouri', code: '100006', name: 'پخش منصوری', kind: 'customer', status: 'active',
       phone: '۰۹۱۲۳۴۵۶۷۸۹', address: 'کاشمر', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
     },
     {
-      id: 'cus_kashi', code: '100007', name: 'کاشی زهره', kind: 'both',
+      id: 'cus_kashi', code: '100007', name: 'کاشی زهره', kind: 'both', status: 'active',
       phone: '۰۹۳۵۱۲۳۴۵۶۷', address: 'کاشمر - شهرک صنعتی', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
     },
   ],

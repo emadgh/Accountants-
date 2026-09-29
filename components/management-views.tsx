@@ -19,6 +19,7 @@ import { MetricCard } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
+import { YasImporterPanel } from '@/components/yas-importer-panel';
 import { confirmDialog, notify } from '@/lib/feedback';
 
 function PageHead({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
@@ -76,7 +77,11 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<Customer | null>(null);
   const [open, setOpen] = useState(false);
-  const list = customers.filter((customer) => (customer.name + ' ' + customer.phone + ' ' + customer.code).toLowerCase().includes(q.toLowerCase()));
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('active');
+  const list = customers.filter((customer) =>
+    (statusFilter === 'all' || customer.status === statusFilter) &&
+    (customer.name + ' ' + customer.phone + ' ' + customer.code).toLowerCase().includes(q.toLowerCase())
+  );
   const balance = (customer: Customer) => customerNetBalance(customer.id, invoices, payments, checks, adjustments, customer.openingBalance || 0, returns);
   const startEdit = (customer?: Customer) => {
     setEdit(customer ? { ...customer } : {
@@ -84,6 +89,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
       code: String(100000 + customers.length + 1),
       name: '',
       kind: 'customer',
+      status: 'active',
       phone: '',
       address: '',
       nationalId: '',
@@ -108,9 +114,14 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
   return <div className="space-y-5">
     <PageHead title="مشتریان و تامین‌کنندگان" subtitle="مشخصات رسمی، مانده حساب و دسترسی به دفتر گردش طرف حساب" action={<Button onClick={() => startEdit()}><Plus className="h-4 w-4" /> طرف حساب جدید</Button>} />
     <Card>
-      <CardHeader><SearchBox value={q} onChange={setQ} placeholder="نام، تلفن یا کد شخص..." /></CardHeader>
+      <CardHeader className="flex-wrap gap-3">
+        <SearchBox value={q} onChange={setQ} placeholder="نام، تلفن یا کد شخص..." />
+        <div className="flex gap-2">
+          {([['active', 'فعال'], ['archived', 'آرشیو'], ['all', 'همه']] as const).map(([key, label]) => <Button key={key} size="sm" variant={statusFilter === key ? 'default' : 'outline'} onClick={() => setStatusFilter(key)}>{label}</Button>)}
+        </div>
+      </CardHeader>
       <div className="table-wrap"><table className="data-table">
-        <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>تلفن</th><th>آدرس</th><th>مانده حساب</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>کد</th><th>نام</th><th>نوع</th><th>وضعیت</th><th>تلفن</th><th>آدرس</th><th>مانده حساب</th><th>عملیات</th></tr></thead>
         <tbody>
           {list.map((customer) => {
             const currentBalance = balance(customer);
@@ -118,6 +129,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td className="font-bold">{customer.code}</td>
               <td className="font-bold">{customer.name}</td>
               <td>{customer.kind === 'customer' ? 'مشتری' : customer.kind === 'supplier' ? 'تامین‌کننده' : 'هر دو'}</td>
+              <td><Badge className={customer.status === 'archived' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700'}>{customer.status === 'archived' ? 'آرشیو' : 'فعال'}</Badge></td>
               <td><span dir="rtl">{customer.phone || '—'}</span></td>
               <td className="max-w-xs truncate">{customer.address || '—'}</td>
               <td className={currentBalance > 0 ? 'font-black text-rose-600' : currentBalance < 0 ? 'font-black text-emerald-600' : 'font-bold'}>
@@ -126,11 +138,12 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td><div className="flex gap-1">
                 {onOpenLedger && <Button variant="ghost" size="icon" onClick={() => onOpenLedger(customer.id)} title="دفتر حساب"><BookOpen className="h-4 w-4" /></Button>}
                 <Button variant="ghost" size="icon" onClick={() => startEdit(customer)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className={customer.status === 'archived' ? 'text-emerald-600' : 'text-amber-600'} onClick={() => upsertCustomer({ ...customer, status: customer.status === 'archived' ? 'active' : 'archived' })} title={customer.status === 'archived' ? 'بازگردانی' : 'آرشیو کردن'}>{customer.status === 'archived' ? <Check className="h-4 w-4" /> : <Archive className="h-4 w-4" />}</Button>
                 <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('طرف حساب حذف شود؟', { title: 'حذف طرف حساب', confirmLabel: 'حذف', danger: true })) { const result = deleteCustomer(customer.id); if (!result.ok) notify(result.message || 'حذف طرف حساب انجام نشد.', 'error'); } }} title="حذف"><Trash2 className="h-4 w-4" /></Button>
               </div></td>
             </tr>;
           })}
-          {!list.length && <EmptyRow cols={7} text="طرف حسابی پیدا نشد." />}
+          {!list.length && <EmptyRow cols={8} text="طرف حسابی پیدا نشد." />}
         </tbody>
       </table></div>
     </Card>
@@ -145,6 +158,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
+          <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value as Customer['status'] })}><option value="active">فعال</option><option value="archived">آرشیو</option></select></Field>
           <Field label="تلفن"><Input dir="rtl" value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
           <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
           <Field label="کد اقتصادی"><Input value={edit.economicCode} onChange={(e) => setEdit({ ...edit, economicCode: e.target.value })} /></Field>
@@ -631,7 +645,7 @@ export function PaymentsView() {
           <Field label="شماره سند"><Input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })} /></Field>
           <Field label="طرف حساب *">
             <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, invoiceId: '', checkId: undefined })}>
-              <option value="">انتخاب...</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+              <option value="">انتخاب...</option>{customers.filter((customer) => customer.status !== 'archived').map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
             </select>
           </Field>
           <Field label="فاکتور مرتبط">
@@ -718,7 +732,7 @@ export function ChecksView() {
         <DialogHeader><DialogTitle className="text-lg font-black">ثبت / ویرایش چک</DialogTitle><DialogDescription className="text-sm text-slate-500">{linkedPayment ? 'این چک به تراکنش متصل است؛ نوع، طرف حساب و مبلغ قفل هستند. تغییر وضعیت چک، تسویه فاکتور را خودکار باز محاسبه می‌کند.' : 'چک می‌تواند بعداً از بخش دریافت و پرداخت به یک تراکنش متصل شود.'}</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع"><select disabled={!!linkedPayment} className="h-10 w-full rounded-xl border border-slate-200 px-3 disabled:bg-slate-100" value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as CheckRecord['direction'] })}><option value="received">دریافتی</option><option value="issued">پرداختی</option></select></Field>
-          <Field label="طرف حساب"><select disabled={!!linkedPayment} className="h-10 w-full rounded-xl border border-slate-200 px-3 disabled:bg-slate-100" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}><option value="">انتخاب...</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field>
+          <Field label="طرف حساب"><select disabled={!!linkedPayment} className="h-10 w-full rounded-xl border border-slate-200 px-3 disabled:bg-slate-100" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}><option value="">انتخاب...</option>{customers.filter((customer) => customer.status !== 'archived' || customer.id === form.customerId).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field>
           <Field label="شماره چک"><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></Field>
           <Field label="بانک"><Input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
           <Field label="صاحب چک"><Input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} /></Field>
@@ -762,6 +776,26 @@ export function SettingsView() {
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
+
+  const loadSignature = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      notify('فایل امضا باید تصویر باشد.', 'error');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      notify('حجم تصویر امضا حداکثر ۲ مگابایت باشد.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setProfileDraft((current) => ({ ...current, signatureImage: reader.result as string, showSignature: current.showSignature !== false }));
+      }
+    };
+    reader.onerror = () => notify('خواندن تصویر امضا انجام نشد.', 'error');
+    reader.readAsDataURL(file);
+  };
 
   const newProfile = () => {
     const base = selectedProfile || settings.businessProfiles[0];
@@ -857,6 +891,21 @@ export function SettingsView() {
           <Field label="عنوان فاکتور فروش"><Input value={profileDraft.invoiceTitle} onChange={(e) => setProfileDraft({ ...profileDraft, invoiceTitle: e.target.value })} /></Field>
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={profileDraft.address} onChange={(e) => setProfileDraft({ ...profileDraft, address: e.target.value })} /></Field>
           <Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={profileDraft.footer} onChange={(e) => setProfileDraft({ ...profileDraft, footer: e.target.value })} /></Field>
+          <Field label="تصویر امضا" className="sm:col-span-2">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
+              <div className="grid h-24 w-40 place-items-center overflow-hidden rounded-lg bg-slate-50">
+                {profileDraft.signatureImage ? <img src={profileDraft.signatureImage} alt="پیش‌نمایش امضا" className="max-h-20 max-w-36 object-contain" /> : <span className="text-xs text-slate-400">بدون امضا</span>}
+              </div>
+              <div className="space-y-2">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">
+                  <Upload className="h-4 w-4" /> {profileDraft.signatureImage ? 'جایگزینی تصویر' : 'آپلود تصویر'}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { loadSignature(event.target.files?.[0]); event.currentTarget.value = ''; }} />
+                </label>
+                {profileDraft.signatureImage && <Button type="button" size="sm" variant="outline" className="text-rose-600" onClick={() => setProfileDraft({ ...profileDraft, signatureImage: undefined })}><Trash2 className="h-4 w-4" /> حذف امضا</Button>}
+                <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={profileDraft.showSignature !== false} onChange={(e) => setProfileDraft({ ...profileDraft, showSignature: e.target.checked })} /> نمایش امضا روی فاکتور</label>
+              </div>
+            </div>
+          </Field>
           <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
             {profileDraft.id !== settings.defaultBusinessProfileId && <Button variant="outline" onClick={makeDefault}>انتخاب به‌عنوان پیش‌فرض</Button>}
             {settings.businessProfiles.some((profile) => profile.id === profileDraft.id) && <Button variant="danger" onClick={removeProfile}><Trash2 className="h-4 w-4" /> حذف</Button>}
@@ -879,6 +928,7 @@ export function SettingsView() {
 
       <div className="space-y-5">
         <StorageBackupPanel />
+        <YasImporterPanel />
         <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={async () => { if (await confirmDialog('همه داده‌ها بازنشانی شوند؟ این عملیات داده فعلی را با داده نمونه جایگزین می‌کند.', { title: 'بازنشانی کامل', confirmLabel: 'بازنشانی', danger: true })) resetAll(); }}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
       </div>
     </div>
