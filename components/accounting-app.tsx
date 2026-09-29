@@ -5,6 +5,7 @@ import { Menu } from 'lucide-react';
 import { Sidebar, type ViewKey } from '@/components/sidebar';
 import { DashboardView } from '@/components/dashboard-view';
 import { InvoiceEditor } from '@/components/invoice-editor';
+import { AccountingCoreView } from '@/components/accounting-core-view';
 import { ReturnsView } from '@/components/returns-view';
 import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceListView, PaymentsView, ProductsView, ReportsView, SettingsView } from '@/components/management-views';
 import { useAccountingStore } from '@/lib/store';
@@ -57,6 +58,7 @@ export function AccountingApp() {
         {view === 'payments' && <PaymentsView />}
         {view === 'checks' && <ChecksView />}
         {view === 'returns' && <ReturnsView />}
+        {view === 'accounting' && <AccountingCoreView />}
         {view === 'reports' && <ReportsView />}
         {view === 'settings' && <SettingsView />}
       </div>
