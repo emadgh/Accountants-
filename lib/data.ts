@@ -1,4 +1,5 @@
 import type { AccountingData } from './types';
+import { SYSTEM_ACCOUNTS } from './accounting';
 
 export const seedData: AccountingData = {
   settings: {
@@ -56,4 +57,7 @@ export const seedData: AccountingData = {
   ],
   adjustments: [],
   stockMovements: [],
+  accounts: SYSTEM_ACCOUNTS,
+  journalEntries: [],
+  moneyTransactions: [],
 };

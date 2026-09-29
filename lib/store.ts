@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { seedData } from './data';
 import type {
+  Account,
   AccountAdjustment,
   AccountingData,
   BusinessSettings,
@@ -11,6 +12,7 @@ import type {
   Customer,
   Invoice,
   InvoiceAuditAction,
+  MoneyTransaction,
   OperationResult,
   Payment,
   Product,
@@ -33,6 +35,17 @@ import {
   todayFa,
   uid,
 } from './utils';
+import {
+  buildOpeningJournal,
+  journalForCustomerAdjustment,
+  journalForInvoice,
+  journalForMoneyTransaction,
+  journalForPayment,
+  journalForReturn,
+  journalForStockAdjustment,
+  normalizeAccounts,
+  reverseActiveSourceEntries,
+} from './accounting';
 
 type Store = AccountingData & {
   hydrated: boolean;
@@ -54,6 +67,10 @@ type Store = AccountingData & {
   deletePayment: (id: string) => void;
   addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
   addStockAdjustment: (input: StockAdjustmentInput) => OperationResult;
+  upsertAccount: (account: Account) => OperationResult;
+  deleteAccount: (id: string) => OperationResult;
+  addMoneyTransaction: (transaction: MoneyTransaction) => OperationResult;
+  voidMoneyTransaction: (id: string, reason: string) => OperationResult;
   upsertCheck: (check: CheckRecord) => OperationResult;
   deleteCheck: (id: string) => OperationResult;
   setSettings: (settings: BusinessSettings) => void;
@@ -462,7 +479,10 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
   const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
   const returns = data.returns || [];
   const stockMovements = data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products);
-  return {
+  const accounts = normalizeAccounts(data.accounts || []);
+  const moneyTransactions = data.moneyTransactions || [];
+
+  const base: AccountingData = {
     customers,
     products,
     invoices: withInvoiceStatuses(invoices, payments, checks, returns),
@@ -471,7 +491,15 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     checks,
     adjustments: data.adjustments || [],
     stockMovements,
+    accounts,
+    journalEntries: data.journalEntries || [],
+    moneyTransactions,
     settings: { ...seedData.settings, ...(data.settings || {}) },
+  };
+
+  return {
+    ...base,
+    journalEntries: base.journalEntries.length ? base.journalEntries : buildOpeningJournal(base, accounts),
   };
 }
 
@@ -483,11 +511,26 @@ export const useAccountingStore = create<Store>()(
       setHydrated: (v) => set({ hydrated: v }),
 
       upsertCustomer: (customer) =>
-        set((s) => ({
-          customers: s.customers.some((c) => c.id === customer.id)
-            ? s.customers.map((c) => (c.id === customer.id ? customer : c))
-            : [customer, ...s.customers],
-        })),
+        set((state) => {
+          const exists = state.customers.some((item) => item.id === customer.id);
+          const customers = exists
+            ? state.customers.map((item) => (item.id === customer.id ? customer : item))
+            : [customer, ...state.customers];
+          if (exists || Math.abs(Number(customer.openingBalance || 0)) <= 0.0001) return { customers };
+
+          const opening: AccountAdjustment = {
+            id: 'opening-customer-' + customer.id,
+            customerId: customer.id,
+            date: 'ابتدای دوره',
+            amount: Number(customer.openingBalance || 0),
+            note: 'مانده افتتاحیه ' + customer.name,
+            createdAt: new Date().toISOString(),
+          };
+          return {
+            customers,
+            journalEntries: [...state.journalEntries, ...journalForCustomerAdjustment(opening, state.accounts)],
+          };
+        }),
 
       deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((c) => c.id !== id) })),
 
@@ -527,7 +570,15 @@ export const useAccountingStore = create<Store>()(
               sourceReference: 'موجودی اولیه کالا',
             }];
           }
-          return { products: [normalized, ...state.products], stockMovements };
+          const newMovements = stockMovements.slice(state.stockMovements.length);
+          return {
+            products: [normalized, ...state.products],
+            stockMovements,
+            journalEntries: [
+              ...state.journalEntries,
+              ...newMovements.flatMap((movement) => journalForStockAdjustment(movement, state.accounts)),
+            ],
+          };
         }),
 
       deleteProduct: (id) => set((s) => ({ products: s.products.filter((p) => p.id !== id) })),
@@ -578,7 +629,12 @@ export const useAccountingStore = create<Store>()(
           : [next, ...state.invoices];
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
+        const newMovements = inventory.stockMovements.slice(state.stockMovements.length);
+        const journalEntries = [
+          ...state.journalEntries,
+          ...journalForInvoice(next, state.products, newMovements, state.accounts, 'post'),
+        ];
+        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices, journalEntries });
         return { ok: true, invoice: saved };
       },
 
@@ -622,7 +678,22 @@ export const useAccountingStore = create<Store>()(
         const merged = state.invoices.map((item) => (item.id === next.id ? next : item));
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products: appliedInventory.products, stockMovements: appliedInventory.stockMovements, invoices });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'invoice',
+          previous.id,
+          next.date,
+          'برگشت ثبت قبلی فاکتور ' + previous.number,
+          'revision-reversal'
+        );
+        const newMovements = appliedInventory.stockMovements.slice(reversedInventory.stockMovements.length);
+        const posts = journalForInvoice(next, baseProducts, newMovements, state.accounts, 'revision-post');
+        set({
+          products: appliedInventory.products,
+          stockMovements: appliedInventory.stockMovements,
+          invoices,
+          journalEntries: [...state.journalEntries, ...reversals, ...posts],
+        });
         return { ok: true, invoice: saved };
       },
 
@@ -653,7 +724,20 @@ export const useAccountingStore = create<Store>()(
         const inventory = applyInvoiceInventory(state.products, state.stockMovements, previous, -1, 'void-reversal');
         if (!inventory.ok) return { ok: false, message: inventory.message };
         const invoices = state.invoices.map((item) => (item.id === id ? next : item));
-        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'invoice',
+          previous.id,
+          next.date,
+          'ابطال فاکتور ' + previous.number + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          products: inventory.products,
+          stockMovements: inventory.stockMovements,
+          invoices,
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true, invoice: next };
       },
 
@@ -739,7 +823,12 @@ export const useAccountingStore = create<Store>()(
           ? state.returns.map((item) => item.id === next.id ? next : item)
           : [next, ...state.returns];
         const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
-        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
+        const newMovements = inventory.stockMovements.slice(state.stockMovements.length);
+        const journalEntries = [
+          ...state.journalEntries,
+          ...journalForReturn(next, originalInvoice, state.products, newMovements, state.accounts),
+        ];
+        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements, journalEntries });
         return { ok: true, returnDocument: next };
       },
 
@@ -766,7 +855,21 @@ export const useAccountingStore = create<Store>()(
         if (!inventory.ok) return { ok: false, message: inventory.message };
         const returns = state.returns.map((item) => item.id === id ? next : item);
         const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
-        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'return',
+          previous.id,
+          next.date,
+          'ابطال سند مرجوعی ' + previous.number + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          returns,
+          invoices,
+          products: inventory.products,
+          stockMovements: inventory.stockMovements,
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true, returnDocument: next };
       },
 
@@ -823,18 +926,34 @@ export const useAccountingStore = create<Store>()(
 
         const payments = [normalized, ...state.payments];
         const invoices = withInvoiceStatuses(state.invoices, payments, state.checks, state.returns);
-        set({ payments, invoices });
+        const linkedCheck = normalized.checkId ? state.checks.find((item) => item.id === normalized.checkId) : undefined;
+        const shouldPost = normalized.method !== 'check' || linkedCheck?.status === 'cleared';
+        const journalEntries = shouldPost
+          ? [...state.journalEntries, ...journalForPayment(normalized, state.accounts)]
+          : state.journalEntries;
+        set({ payments, invoices, journalEntries });
         return { ok: true };
       },
 
-      deletePayment: (id) =>
-        set((state) => {
-          const payments = state.payments.filter((payment) => payment.id !== id);
-          return {
-            payments,
-            invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
-          };
-        }),
+      deletePayment: (id) => {
+        const state = get();
+        const payment = state.payments.find((item) => item.id === id);
+        if (!payment) return;
+        const payments = state.payments.filter((item) => item.id !== id);
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'payment',
+          id,
+          todayFa(),
+          'برگشت تراکنش حذف‌شده',
+          'status-reversal'
+        );
+        set({
+          payments,
+          invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
+      },
 
       addAdjustment: (adjustment) => {
         const state = get();
@@ -853,7 +972,10 @@ export const useAccountingStore = create<Store>()(
           note: adjustment.note.trim(),
           createdAt: adjustment.createdAt || new Date().toISOString(),
         };
-        set({ adjustments: [normalized, ...(state.adjustments || [])] });
+        set({
+          adjustments: [normalized, ...(state.adjustments || [])],
+          journalEntries: [...state.journalEntries, ...journalForCustomerAdjustment(normalized, state.accounts)],
+        });
         return { ok: true };
       },
 
@@ -896,7 +1018,99 @@ export const useAccountingStore = create<Store>()(
           sourceReference: input.mode === 'count' ? 'شمارش انبار' : 'اصلاح موجودی',
           note: input.note.trim(),
         };
-        set({ products, stockMovements: [...state.stockMovements, movement] });
+        set({
+          products,
+          stockMovements: [...state.stockMovements, movement],
+          journalEntries: [...state.journalEntries, ...journalForStockAdjustment(movement, state.accounts)],
+        });
+        return { ok: true };
+      },
+
+      upsertAccount: (account) => {
+        const state = get();
+        const previous = state.accounts.find((item) => item.id === account.id);
+        if (previous?.systemKey) return { ok: false, message: 'حساب سیستمی قابل تغییر ساختاری نیست.' };
+        if (!account.code.trim() || !account.name.trim()) return { ok: false, message: 'کد و نام حساب الزامی است.' };
+        if (state.accounts.some((item) => item.id !== account.id && item.code.trim() === account.code.trim())) {
+          return { ok: false, message: 'کد حساب تکراری است.' };
+        }
+        const normalized: Account = { ...account, systemKey: undefined };
+        set({
+          accounts: previous
+            ? state.accounts.map((item) => item.id === account.id ? normalized : item)
+            : [...state.accounts, normalized],
+        });
+        return { ok: true };
+      },
+
+      deleteAccount: (id) => {
+        const state = get();
+        const account = state.accounts.find((item) => item.id === id);
+        if (!account) return { ok: false, message: 'حساب پیدا نشد.' };
+        if (account.systemKey) return { ok: false, message: 'حساب سیستمی قابل حذف نیست.' };
+        const usedInJournal = state.journalEntries.some((entry) => entry.lines.some((line) => line.accountId === id));
+        const usedInMoney = state.moneyTransactions.some((transaction) => transaction.settlementAccountId === id || transaction.categoryAccountId === id);
+        if (usedInJournal || usedInMoney) return { ok: false, message: 'حساب دارای گردش است و قابل حذف نیست؛ آن را غیرفعال کنید.' };
+        set({ accounts: state.accounts.filter((item) => item.id !== id) });
+        return { ok: true };
+      },
+
+      addMoneyTransaction: (transaction) => {
+        const state = get();
+        const amount = Number(transaction.amount || 0);
+        if (!Number.isFinite(amount) || amount <= 0) return { ok: false, message: 'مبلغ باید بزرگ‌تر از صفر باشد.' };
+        if (!transaction.description.trim()) return { ok: false, message: 'شرح تراکنش الزامی است.' };
+        const settlement = state.accounts.find((account) => account.id === transaction.settlementAccountId && account.active);
+        const category = state.accounts.find((account) => account.id === transaction.categoryAccountId && account.active);
+        if (!settlement || settlement.type !== 'asset') return { ok: false, message: 'حساب صندوق/بانک معتبر انتخاب کنید.' };
+        if (!category || (transaction.kind === 'income' ? category.type !== 'revenue' : category.type !== 'expense')) {
+          return { ok: false, message: transaction.kind === 'income' ? 'حساب درآمد معتبر انتخاب کنید.' : 'حساب هزینه معتبر انتخاب کنید.' };
+        }
+        const now = new Date().toISOString();
+        const normalized: MoneyTransaction = {
+          ...transaction,
+          status: 'final',
+          amount,
+          description: transaction.description.trim(),
+          createdAt: transaction.createdAt || now,
+          updatedAt: now,
+          voidedAt: undefined,
+          voidReason: undefined,
+        };
+        const journal = journalForMoneyTransaction(normalized, state.accounts);
+        if (!journal.length) return { ok: false, message: 'ثبت حسابداری تراکنش تراز نشد.' };
+        set({
+          moneyTransactions: [normalized, ...state.moneyTransactions],
+          journalEntries: [...state.journalEntries, ...journal],
+        });
+        return { ok: true };
+      },
+
+      voidMoneyTransaction: (id, reason) => {
+        const state = get();
+        const previous = state.moneyTransactions.find((item) => item.id === id);
+        if (!previous || previous.status !== 'final') return { ok: false, message: 'تراکنش قطعی فعال پیدا نشد.' };
+        if (!reason.trim()) return { ok: false, message: 'دلیل ابطال الزامی است.' };
+        const now = new Date().toISOString();
+        const transaction: MoneyTransaction = {
+          ...previous,
+          status: 'void',
+          voidedAt: now,
+          voidReason: reason.trim(),
+          updatedAt: now,
+        };
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'money-transaction',
+          id,
+          todayFa(),
+          'ابطال ' + previous.description + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          moneyTransactions: state.moneyTransactions.map((item) => item.id === id ? transaction : item),
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true };
       },
 
@@ -922,7 +1136,27 @@ export const useAccountingStore = create<Store>()(
           ? state.checks.map((item) => (item.id === check.id ? check : item))
           : [check, ...state.checks];
         const invoices = withInvoiceStatuses(state.invoices, state.payments, checks, state.returns);
-        set({ checks, invoices });
+        let journalEntries = state.journalEntries;
+        if (linkedPayment) {
+          const wasEffective = previous?.status === 'cleared';
+          const isEffective = check.status === 'cleared';
+          if (!wasEffective && isEffective) {
+            journalEntries = [...journalEntries, ...journalForPayment(linkedPayment, state.accounts)];
+          } else if (wasEffective && !isEffective) {
+            journalEntries = [
+              ...journalEntries,
+              ...reverseActiveSourceEntries(
+                journalEntries,
+                'payment',
+                linkedPayment.id,
+                todayFa(),
+                'برگشت اثر چک ' + check.number + ' پس از تغییر وضعیت',
+                'status-reversal'
+              ),
+            ];
+          }
+        }
+        set({ checks, invoices, journalEntries });
         return { ok: true };
       },
 
@@ -948,21 +1182,29 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
-        const products = normalizeProducts(state.products || []);
-        return {
+        const products = normalizeProducts(state.products || seedData.products);
+        return normalizeAccountingData({
+          ...seedData,
           ...state,
-          customers: (state.customers || []).map((customer) => ({
+          customers: (state.customers || seedData.customers).map((customer) => ({
             ...customer,
             openingBalance: Number(customer.openingBalance || 0),
           })),
           products,
+          invoices: state.invoices || seedData.invoices,
           returns: state.returns || [],
+          payments: state.payments || seedData.payments,
+          checks: state.checks || seedData.checks,
           adjustments: state.adjustments || [],
           stockMovements: state.stockMovements?.length ? state.stockMovements : buildOpeningMovements(products),
-        };
+          accounts: state.accounts || [],
+          journalEntries: state.journalEntries || [],
+          moneyTransactions: state.moneyTransactions || [],
+          settings: { ...seedData.settings, ...(state.settings || {}) },
+        });
       },
       partialize: (state) => ({
         customers: state.customers,
@@ -973,6 +1215,9 @@ export const useAccountingStore = create<Store>()(
         checks: state.checks,
         adjustments: state.adjustments,
         stockMovements: state.stockMovements,
+        accounts: state.accounts,
+        journalEntries: state.journalEntries,
+        moneyTransactions: state.moneyTransactions,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),
