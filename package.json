@@ -23,7 +23,8 @@
     "react-dom": "19.3.0",
     "tailwind-merge": "2.6.0",
     "zustand": "5.0.15",
-    "ogl": "^1.0.11"
+    "ogl": "^1.0.11",
+    "@layflags/rolling-number": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
