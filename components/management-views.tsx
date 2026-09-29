@@ -16,6 +16,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
+import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
 import { confirmDialog, notify } from '@/lib/feedback';
@@ -734,40 +735,6 @@ export function ChecksView() {
 
 function CheckStatus({ status }: { status: CheckRecord['status'] }) { return status === 'cleared' ? <Badge className="bg-emerald-50 text-emerald-700">وصول شده</Badge> : status === 'bounced' ? <Badge className="bg-rose-50 text-rose-700">برگشتی</Badge> : <Badge className="bg-amber-50 text-amber-700">در انتظار</Badge>; }
 
-export function ReportsView() {
-  const { invoices, returns, payments, products, checks, settings } = useAccountingStore();
-  const posted = invoices.filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void');
-  const finalizedReturns = returns.filter((document) => document.status === 'final');
-  const grossSales = posted.filter((invoice) => invoice.kind === 'sale').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  const grossPurchases = posted.filter((invoice) => invoice.kind === 'purchase').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  const saleReturns = finalizedReturns.filter((document) => document.kind === 'sale-return').reduce((sum, document) => sum + document.totalAmount, 0);
-  const purchaseReturns = finalizedReturns.filter((document) => document.kind === 'purchase-return').reduce((sum, document) => sum + document.totalAmount, 0);
-  const netSales = Math.max(0, grossSales - saleReturns);
-  const netPurchases = Math.max(0, grossPurchases - purchaseReturns);
-  const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, payment.invoiceId ? invoices.find((invoice) => invoice.id === payment.invoiceId) : undefined);
-  const receipts = payments.filter((payment) => directionOf(payment) === 'receipt').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
-  const outgoing = payments.filter((payment) => directionOf(payment) === 'payment').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
-  const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * Number(product.averageCost ?? product.buyPrice ?? 0), 0);
-  const pending = checks.filter((check) => check.status === 'pending').reduce((sum, check) => sum + check.amount, 0);
-  const rows = [
-    ['فروش خالص', netSales],
-    ['مرجوعی فروش', saleReturns],
-    ['خرید خالص', netPurchases],
-    ['مرجوعی خرید', purchaseReturns],
-    ['دریافت موثر', receipts],
-    ['پرداخت موثر', outgoing],
-    ['ارزش موجودی کالا', stock],
-    ['چک‌های در انتظار', pending],
-  ] as const;
-  const max = Math.max(...rows.map((item) => item[1]), 1);
-
-  return <div className="space-y-5">
-    <PageHead title="گزارش‌ها" subtitle="فروش و خرید خالص پس از کسر مرجوعی‌های قطعی؛ چک‌های در انتظار/برگشتی تا زمان وصول در تسویه موثر نیستند" />
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">{rows.map(([label, value]) => <Card key={label}><CardContent><div className="text-xs font-bold text-slate-500">{label}</div><div className="mt-2 text-xl font-black">{money(value)} <span className="text-[10px] text-slate-400">{settings.currency}</span></div></CardContent></Card>)}</div>
-    <Card><CardHeader><CardTitle>مقایسه شاخص‌ها</CardTitle></CardHeader><CardContent className="space-y-5">{rows.map(([label, value]) => <div key={label}><div className="mb-2 flex justify-between text-sm"><span className="font-bold">{label}</span><span>{money(value)}</span></div><div className="h-2.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-sky-500" style={{ width: `${Math.max(2, (value / max) * 100)}%` }} /></div></div>)}</CardContent></Card>
-  </div>;
-}
-
 export function SettingsView() {
   const store = useAccountingStore();
   const {
@@ -935,7 +902,7 @@ function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings;
       },
     });
   };
-  return <div className="sm:col-span-2 rounded-xl border border-slate-200 p-3">
+  return <Panel variant="subtle" padding="sm" className="sm:col-span-2">
     <div className="mb-3 text-sm font-black">الگوی شماره‌گذاری اسناد</div>
     <div className="grid gap-2">
       {rows.map(([key, label]) => <div key={key} className="grid grid-cols-[1fr_.8fr_.7fr_.6fr] items-end gap-2">
@@ -945,7 +912,7 @@ function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings;
         <Field label="تعداد رقم"><Input type="number" min="1" max="12" value={draft.numbering[key].padding} onChange={(e) => update(key, 'padding', Number(e.target.value))} /></Field>
       </div>)}
     </div>
-  </div>;
+  </Panel>;
 }
 
 function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) { return <label className={`space-y-1.5 ${className}`}><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>; }
