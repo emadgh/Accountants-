@@ -24,7 +24,7 @@ function SearchBox({ value, onChange, placeholder = 'جستجو...' }: { value: 
 }
 
 export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; onEdit: (id: string) => void; onNew: () => void }) {
-  const { invoices, payments, checks, deleteInvoice, settings } = useAccountingStore();
+  const { invoices, returns, payments, checks, deleteInvoice, settings } = useAccountingStore();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
   const list = invoices.filter((i) => i.kind === kind).filter((i) => (i.number + ' ' + i.customerName).toLowerCase().includes(q.toLowerCase())).filter((i) => status === 'all' || i.status === status);
@@ -33,7 +33,20 @@ export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; on
     <PageHead title={label} subtitle="ثبت، جستجو، ویرایش و کنترل وضعیت فاکتورها" action={<Button onClick={onNew}><Plus className="h-4 w-4" /> {kind === 'sale' ? 'فاکتور فروش جدید' : 'فاکتور خرید جدید'}</Button>} />
     <Card><CardHeader className="flex-wrap"><SearchBox value={q} onChange={setQ} /><select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">همه وضعیت‌ها</option><option value="draft">پیش‌نویس</option><option value="final">قطعی</option><option value="partial">بخشی تسویه</option><option value="settled">تسویه‌شده</option><option value="void">باطل</option></select></CardHeader>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>شماره</th><th>تاریخ</th><th>طرف حساب</th><th>وضعیت</th><th>مبلغ کل</th><th>پرداخت</th><th>مانده</th><th>عملیات</th></tr></thead><tbody>
-        {list.map((i) => { const total = invoiceTotal(i); const paid = settledForInvoice(i, payments, checks); return <tr key={i.id}><td className="font-black">{i.number}</td><td>{i.date}</td><td>{i.customerName || '—'}</td><td><InvoiceStatus status={i.status} /></td><td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td><td>{money(paid)}</td><td className={total - paid > 0 ? 'font-bold text-rose-600' : 'font-bold text-emerald-600'}>{money(Math.max(0, total - paid))}</td><td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>{i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('پیش‌نویس حذف شود؟') && deleteInvoice(i.id)} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}</div></td></tr>; })}
+        {list.map((i) => {
+          const total = invoiceTotal(i);
+          const returned = returns.filter((document) => document.originalInvoiceId === i.id && document.status === 'final').reduce((sum, document) => sum + document.totalAmount, 0);
+          const netTotal = Math.max(0, total - returned);
+          const paid = settledForInvoice(i, payments, checks);
+          return <tr key={i.id}>
+            <td className="font-black">{i.number}</td><td>{i.date}</td><td>{i.customerName || '—'}</td>
+            <td><div className="flex flex-wrap gap-1"><InvoiceStatus status={i.status} /><ReturnProgressBadge returned={returned} total={total} /></div></td>
+            <td className="font-bold">{money(total)} <span className="text-[10px] text-slate-400">{settings.currency}</span>{returned > 0 && <div className="mt-1 text-[10px] font-normal text-rose-500">مرجوعی: {money(returned)} · خالص: {money(netTotal)}</div>}</td>
+            <td>{money(paid)}</td>
+            <td className={netTotal - paid > 0 ? 'font-bold text-rose-600' : 'font-bold text-emerald-600'}>{money(Math.max(0, netTotal - paid))}</td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => onEdit(i.id)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>{i.status === 'draft' && <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => confirm('پیش‌نویس حذف شود؟') && deleteInvoice(i.id)} title="حذف پیش‌نویس"><Trash2 className="h-4 w-4" /></Button>}</div></td>
+          </tr>;
+        })}
         {!list.length && <EmptyRow cols={8} text="فاکتوری مطابق فیلتر پیدا نشد." />}
       </tbody></table></div>
     </Card>
@@ -43,6 +56,12 @@ export function InvoiceListView({ kind, onEdit, onNew }: { kind: InvoiceKind; on
 function InvoiceStatus({ status }: { status: string }) {
   const x: Record<string, [string, string]> = { draft: ['پیش‌نویس', 'bg-slate-100 text-slate-600'], final: ['قطعی', 'bg-sky-50 text-sky-700'], partial: ['بخشی تسویه', 'bg-amber-50 text-amber-700'], settled: ['تسویه‌شده', 'bg-emerald-50 text-emerald-700'], void: ['باطل', 'bg-rose-50 text-rose-700'] };
   const [label, cls] = x[status] || [status, '']; return <Badge className={cls}>{label}</Badge>;
+}
+
+function ReturnProgressBadge({ returned, total }: { returned: number; total: number }) {
+  if (returned <= 0) return null;
+  if (returned >= total - 0.0001) return <Badge className="bg-violet-50 text-violet-700">مرجوع کامل</Badge>;
+  return <Badge className="bg-orange-50 text-orange-700">مرجوع جزئی</Badge>;
 }
 
 
@@ -442,6 +461,8 @@ function stockMovementLabel(movement: StockMovement) {
   if (movement.type === 'opening') return movement.action === 'product-opening' ? 'موجودی اولیه کالا' : 'مانده انتقالی';
   if (movement.type === 'purchase') return movement.action === 'revision' ? 'خرید - Revision' : 'ورود از خرید';
   if (movement.type === 'sale') return movement.action === 'revision' ? 'فروش - Revision' : 'خروج از فروش';
+  if (movement.type === 'sale-return') return 'ورود از مرجوعی فروش';
+  if (movement.type === 'purchase-return') return 'خروج از مرجوعی خرید';
   if (movement.type === 'adjustment') return movement.action === 'count' ? 'اختلاف شمارش انبار' : 'اصلاح موجودی';
   return movement.action === 'void-reversal' ? 'برگشت بابت ابطال' : 'برگشت نسخه قبلی';
 }
