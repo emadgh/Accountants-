@@ -16,7 +16,7 @@ export interface Customer {
   nationalId: string;
   economicCode: string;
   postalCode: string;
-  openingBalance?: number;
+  openingBalance: number;
   notes?: string;
 }
 
