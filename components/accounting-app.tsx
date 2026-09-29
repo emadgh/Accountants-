@@ -11,6 +11,7 @@ import { ChecksView, CustomerLedgerView, CustomersView, InventoryView, InvoiceLi
 import { ReportsView } from '@/components/reports-view';
 import { useAccountingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
+import { notify } from '@/lib/feedback';
 
 export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   const [view, setView] = useState<ViewKey>('dashboard');
@@ -21,6 +22,16 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
 
   useEffect(() => {
     void useAccountingStore.persist.rehydrate();
+  }, []);
+
+  useEffect(() => {
+    const onPersistenceError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail || 'خطای نامشخص دیتابیس';
+      notify('ذخیره‌سازی SQLite انجام نشد: ' + message + ' — وضعیت از آخرین Commit بازیابی می‌شود.', 'error');
+      void Promise.resolve(useAccountingStore.persist.rehydrate()).catch(() => undefined);
+    };
+    window.addEventListener('accounting:persistence-error', onPersistenceError);
+    return () => window.removeEventListener('accounting:persistence-error', onPersistenceError);
   }, []);
 
   useEffect(() => {

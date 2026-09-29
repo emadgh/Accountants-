@@ -1,12 +1,15 @@
-export const ACCOUNTING_PERSIST_KEY = 'accountants-web-v1';
-export const ACCOUNTING_SCHEMA_VERSION = 8;
+import type { AccountingData } from './types';
+import { sqliteQuery, sqliteTransaction } from './persistence/database';
+import {
+  clearAccountingData,
+  loadAccountingData,
+  replaceAccountingData,
+  syncAccountingData,
+} from './persistence/repositories/accounting';
 
-const DB_NAME = 'accountants-web';
-const DB_VERSION = 1;
-const STATE_STORE = 'state';
-const SNAPSHOT_STORE = 'snapshots';
-const META_STORE = 'meta';
-const EMERGENCY_KEY = 'accountants-web-emergency-v1';
+export const ACCOUNTING_PERSIST_KEY = 'accountants-web-v1';
+export const ACCOUNTING_SCHEMA_VERSION = 9;
+
 const AUTO_SNAPSHOT_META_KEY = 'last-auto-snapshot-at';
 const AUTO_SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAX_SNAPSHOTS = 15;
@@ -20,209 +23,125 @@ export interface AccountingSnapshotMeta {
   size: number;
 }
 
-interface AccountingSnapshot extends AccountingSnapshotMeta {
-  payload: string;
-}
+type SnapshotRow = {
+  id: string;
+  created_at: string;
+  reason: SnapshotReason;
+  size: number;
+  payload?: string;
+};
 
-let databasePromise: Promise<IDBDatabase> | null = null;
+type MetaRow = { value: string };
+type PragmaRow = Record<string, number>;
+
 let writeQueue: Promise<void> = Promise.resolve();
+let persistedCache: AccountingData | null | undefined;
 
-function canUseIndexedDb() {
-  return typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
+function emitPersistenceError(error: unknown) {
+  if (typeof window === 'undefined') return;
+  const message = error instanceof Error ? error.message : String(error);
+  window.dispatchEvent(new CustomEvent('accounting:persistence-error', { detail: message }));
 }
 
-function localStorageGet(key: string) {
-  try {
-    return typeof window === 'undefined' ? null : window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+function extractAccountingData(value: string): AccountingData {
+  const parsed = JSON.parse(value) as { state?: AccountingData };
+  if (!parsed?.state) throw new Error('Persisted Zustand payload is missing its state.');
+  return parsed.state;
 }
 
-function localStorageSet(key: string, value: string) {
-  try {
-    if (typeof window !== 'undefined') window.localStorage.setItem(key, value);
-  } catch {
-    // LocalStorage is only an emergency mirror. IndexedDB remains authoritative.
-  }
+function stateEnvelope(data: AccountingData) {
+  return JSON.stringify({ state: data, version: ACCOUNTING_SCHEMA_VERSION });
 }
 
-function localStorageRemove(key: string) {
-  try {
-    if (typeof window !== 'undefined') window.localStorage.removeItem(key);
-  } catch {
-    // Ignore environments where LocalStorage is unavailable.
-  }
-}
-
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('IndexedDB request failed.'));
-  });
-}
-
-function openDatabase() {
-  if (!canUseIndexedDb()) return Promise.reject(new Error('IndexedDB is not available.'));
-  if (databasePromise) return databasePromise;
-
-  databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STATE_STORE)) db.createObjectStore(STATE_STORE);
-      if (!db.objectStoreNames.contains(SNAPSHOT_STORE)) db.createObjectStore(SNAPSHOT_STORE, { keyPath: 'id' });
-      if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE);
-    };
-    request.onsuccess = () => {
-      const db = request.result;
-      db.onversionchange = () => db.close();
-      resolve(db);
-    };
-    request.onerror = () => {
-      databasePromise = null;
-      reject(request.error || new Error('Unable to open IndexedDB.'));
-    };
-    request.onblocked = () => {
-      databasePromise = null;
-      reject(new Error('IndexedDB upgrade is blocked by another tab.'));
-    };
-  });
-
-  return databasePromise;
-}
-
-async function idbGet<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
-  const db = await openDatabase();
-  const transaction = db.transaction(storeName, 'readonly');
-  return requestResult(transaction.objectStore(storeName).get(key)) as Promise<T | undefined>;
-}
-
-async function idbPut(storeName: string, value: unknown, key?: IDBValidKey) {
-  const db = await openDatabase();
-  const transaction = db.transaction(storeName, 'readwrite');
-  const store = transaction.objectStore(storeName);
-  await requestResult(key === undefined ? store.put(value) : store.put(value, key));
-}
-
-async function idbDelete(storeName: string, key: IDBValidKey) {
-  const db = await openDatabase();
-  const transaction = db.transaction(storeName, 'readwrite');
-  await requestResult(transaction.objectStore(storeName).delete(key));
-}
-
-async function idbGetAll<T>(storeName: string): Promise<T[]> {
-  const db = await openDatabase();
-  const transaction = db.transaction(storeName, 'readonly');
-  return requestResult(transaction.objectStore(storeName).getAll()) as Promise<T[]>;
+function snapshotId(reason: SnapshotReason, createdAt: string) {
+  const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  return reason + '-' + createdAt + '-' + random;
 }
 
 async function pruneSnapshots() {
-  if (!canUseIndexedDb()) return;
-  const snapshots = await idbGetAll<AccountingSnapshot>(SNAPSHOT_STORE);
-  snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const overflow = snapshots.slice(MAX_SNAPSHOTS);
-  await Promise.all(overflow.map((snapshot) => idbDelete(SNAPSHOT_STORE, snapshot.id)));
+  const overflow = await sqliteQuery<{ id: string }>(
+    'SELECT id FROM snapshots ORDER BY created_at DESC LIMIT -1 OFFSET ?',
+    [MAX_SNAPSHOTS]
+  );
+  if (!overflow.length) return;
+  await sqliteTransaction(
+    overflow.map((snapshot) => ({
+      sql: 'DELETE FROM snapshots WHERE id = ?',
+      bind: [snapshot.id],
+    }))
+  );
 }
 
-async function saveSnapshotPayload(payload: string, reason: SnapshotReason) {
-  if (!payload || !canUseIndexedDb()) return null;
+async function saveSnapshotData(data: AccountingData, reason: SnapshotReason) {
+  const payload = JSON.stringify(data);
   const createdAt = new Date().toISOString();
-  const snapshot: AccountingSnapshot = {
-    id: reason + '-' + createdAt + '-' + Math.random().toString(36).slice(2, 8),
-    createdAt,
-    reason,
-    size: payload.length,
-    payload,
-  };
-  await idbPut(SNAPSHOT_STORE, snapshot);
+  const id = snapshotId(reason, createdAt);
+  await sqliteTransaction([
+    {
+      sql: 'INSERT INTO snapshots(id, created_at, reason, size, payload) VALUES (?, ?, ?, ?, ?)',
+      bind: [id, createdAt, reason, payload.length, payload],
+    },
+  ]);
   await pruneSnapshots();
-  return snapshot.id;
+  return id;
 }
 
-async function maybeCreateAutomaticSnapshot(previousPayload: string) {
-  if (!previousPayload || !canUseIndexedDb()) return;
-  const last = Number((await idbGet<number>(META_STORE, AUTO_SNAPSHOT_META_KEY)) || 0);
+async function maybeCreateAutomaticSnapshot(currentData?: AccountingData | null) {
+  const meta = await sqliteQuery<MetaRow>('SELECT value FROM app_meta WHERE key = ? LIMIT 1', [
+    AUTO_SNAPSHOT_META_KEY,
+  ]);
+  const last = Number(meta[0]?.value || 0);
   const now = Date.now();
   if (now - last < AUTO_SNAPSHOT_INTERVAL_MS) return;
-  await saveSnapshotPayload(previousPayload, 'auto');
-  await idbPut(META_STORE, now, AUTO_SNAPSHOT_META_KEY);
-}
 
-async function readPrimaryPayload(name = ACCOUNTING_PERSIST_KEY) {
-  if (canUseIndexedDb()) {
-    try {
-      const indexed = await idbGet<string>(STATE_STORE, name);
-      if (indexed) return indexed;
-    } catch {
-      // Fall through to emergency/legacy copies.
-    }
-  }
-  return localStorageGet(EMERGENCY_KEY) || localStorageGet(name);
-}
-
-async function writePrimaryPayload(name: string, value: string, withAutomaticSnapshot: boolean) {
-  if (!canUseIndexedDb()) {
-    localStorageSet(name, value);
-    localStorageSet(EMERGENCY_KEY, value);
-    return;
-  }
-
-  try {
-    const previous = await idbGet<string>(STATE_STORE, name);
-    if (withAutomaticSnapshot && previous && previous !== value) {
-      await maybeCreateAutomaticSnapshot(previous);
-    }
-    await idbPut(STATE_STORE, value, name);
-    localStorageSet(EMERGENCY_KEY, value);
-  } catch {
-    localStorageSet(name, value);
-    localStorageSet(EMERGENCY_KEY, value);
-  }
+  const current = currentData === undefined ? await loadAccountingData() : currentData;
+  if (current) await saveSnapshotData(current, 'auto');
+  await sqliteTransaction([
+    {
+      sql: "INSERT INTO app_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      bind: [AUTO_SNAPSHOT_META_KEY, String(now)],
+    },
+  ]);
 }
 
 export const accountingStateStorage = {
-  async getItem(name: string) {
+  async getItem(_name: string) {
     await writeQueue;
-    if (!canUseIndexedDb()) return localStorageGet(name);
-
-    try {
-      const indexed = await idbGet<string>(STATE_STORE, name);
-      if (indexed) return indexed;
-
-      const legacy = localStorageGet(name) || localStorageGet(EMERGENCY_KEY);
-      if (legacy) {
-        await idbPut(STATE_STORE, legacy, name);
-        await saveSnapshotPayload(legacy, 'migration');
-        localStorageSet(EMERGENCY_KEY, legacy);
-        return legacy;
-      }
-      return null;
-    } catch {
-      return localStorageGet(EMERGENCY_KEY) || localStorageGet(name);
-    }
+    const data = await loadAccountingData();
+    persistedCache = data;
+    return data ? stateEnvelope(data) : null;
   },
 
-  async setItem(name: string, value: string) {
-    writeQueue = writeQueue
-      .catch(() => undefined)
-      .then(() => writePrimaryPayload(name, value, true));
-    return writeQueue;
-  },
-
-  async removeItem(name: string) {
+  async setItem(_name: string, value: string) {
     writeQueue = writeQueue
       .catch(() => undefined)
       .then(async () => {
-        if (canUseIndexedDb()) {
-          try {
-            await idbDelete(STATE_STORE, name);
-          } catch {
-            // Fall back to LocalStorage cleanup.
-          }
+        try {
+          const next = extractAccountingData(value);
+          const previous = persistedCache === undefined ? await loadAccountingData() : persistedCache;
+          await maybeCreateAutomaticSnapshot(previous);
+          if (previous) await syncAccountingData(previous, next);
+          else await replaceAccountingData(next);
+          persistedCache = next;
+        } catch (error) {
+          emitPersistenceError(error);
+          throw error;
         }
-        localStorageRemove(name);
-        localStorageRemove(EMERGENCY_KEY);
+      });
+    return writeQueue;
+  },
+
+  async removeItem(_name: string) {
+    writeQueue = writeQueue
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await clearAccountingData();
+          persistedCache = null;
+        } catch (error) {
+          emitPersistenceError(error);
+          throw error;
+        }
       });
     return writeQueue;
   },
@@ -230,48 +149,66 @@ export const accountingStateStorage = {
 
 export async function createAccountingSnapshot(reason: SnapshotReason = 'manual') {
   await writeQueue;
-  const payload = await readPrimaryPayload();
-  if (!payload) return null;
-  if (!canUseIndexedDb()) return null;
-  return saveSnapshotPayload(payload, reason);
+  const data = await loadAccountingData();
+  return data ? saveSnapshotData(data, reason) : null;
 }
 
 export async function listAccountingSnapshots(): Promise<AccountingSnapshotMeta[]> {
   await writeQueue;
-  if (!canUseIndexedDb()) return [];
-  try {
-    const snapshots = await idbGetAll<AccountingSnapshot>(SNAPSHOT_STORE);
-    return snapshots
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map(({ id, createdAt, reason, size }) => ({ id, createdAt, reason, size }));
-  } catch {
-    return [];
-  }
+  const rows = await sqliteQuery<SnapshotRow>(
+    'SELECT id, created_at, reason, size FROM snapshots ORDER BY created_at DESC'
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    reason: row.reason,
+    size: Number(row.size),
+  }));
 }
 
 export async function deleteAccountingSnapshot(id: string) {
-  if (!canUseIndexedDb()) return;
-  await idbDelete(SNAPSHOT_STORE, id);
+  await sqliteTransaction([{ sql: 'DELETE FROM snapshots WHERE id = ?', bind: [id] }]);
 }
 
 export async function restoreAccountingSnapshot(id: string) {
   await writeQueue;
-  if (!canUseIndexedDb()) throw new Error('IndexedDB is not available.');
-  const snapshot = await idbGet<AccountingSnapshot>(SNAPSHOT_STORE, id);
+  const rows = await sqliteQuery<SnapshotRow>(
+    'SELECT id, created_at, reason, size, payload FROM snapshots WHERE id = ? LIMIT 1',
+    [id]
+  );
+  const snapshot = rows[0];
   if (!snapshot?.payload) throw new Error('Snapshot not found.');
 
-  const current = await readPrimaryPayload();
-  if (current) await saveSnapshotPayload(current, 'before-restore');
-  await writePrimaryPayload(ACCOUNTING_PERSIST_KEY, snapshot.payload, false);
+  const current = await loadAccountingData();
+  if (current) await saveSnapshotData(current, 'before-restore');
+
+  const data = JSON.parse(snapshot.payload) as AccountingData;
+  await replaceAccountingData(data);
+  persistedCache = data;
+}
+
+export async function importAccountingData(data: AccountingData) {
+  await writeQueue;
+  const current = await loadAccountingData();
+  if (current) await saveSnapshotData(current, 'before-import');
+  await replaceAccountingData(data);
+  persistedCache = data;
 }
 
 export async function getAccountingStorageInfo() {
-  const payload = await readPrimaryPayload();
-  const snapshots = await listAccountingSnapshots();
+  await writeQueue;
+  const [pageCountRows, pageSizeRows, snapshotRows] = await Promise.all([
+    sqliteQuery<PragmaRow>('PRAGMA page_count'),
+    sqliteQuery<PragmaRow>('PRAGMA page_size'),
+    sqliteQuery<{ count: number }>('SELECT COUNT(*) AS count FROM snapshots'),
+  ]);
+  const pageCount = Number(pageCountRows[0]?.page_count || 0);
+  const pageSize = Number(pageSizeRows[0]?.page_size || 0);
+
   return {
-    backend: canUseIndexedDb() ? 'IndexedDB' : 'LocalStorage fallback',
-    payloadSize: payload?.length || 0,
-    snapshotCount: snapshots.length,
+    backend: 'SQLite WASM / OPFS',
+    payloadSize: pageCount * pageSize,
+    snapshotCount: Number(snapshotRows[0]?.count || 0),
     schemaVersion: ACCOUNTING_SCHEMA_VERSION,
   };
 }

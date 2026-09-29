@@ -126,7 +126,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td><div className="flex gap-1">
                 {onOpenLedger && <Button variant="ghost" size="icon" onClick={() => onOpenLedger(customer.id)} title="دفتر حساب"><BookOpen className="h-4 w-4" /></Button>}
                 <Button variant="ghost" size="icon" onClick={() => startEdit(customer)} title="ویرایش"><Edit3 className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('طرف حساب حذف شود؟', { title: 'حذف طرف حساب', confirmLabel: 'حذف', danger: true })) deleteCustomer(customer.id); }} title="حذف"><Trash2 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('طرف حساب حذف شود؟', { title: 'حذف طرف حساب', confirmLabel: 'حذف', danger: true })) { const result = deleteCustomer(customer.id); if (!result.ok) notify(result.message || 'حذف طرف حساب انجام نشد.', 'error'); } }} title="حذف"><Trash2 className="h-4 w-4" /></Button>
               </div></td>
             </tr>;
           })}
@@ -326,7 +326,7 @@ export function ProductsView() {
             <td>{product.unit}</td><td>{money(product.buyPrice)}</td>
             <td className="font-bold">{money(product.salePrice)} <span className="text-[10px] text-slate-400">{settings.currency}</span></td>
             <td className={product.kind === 'product' && product.stock <= product.minStock ? 'font-black text-rose-600' : ''}>{product.kind === 'product' ? money(product.stock) + ' ' + product.unit : '—'}</td>
-            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('این مورد حذف شود؟', { title: 'حذف کالا / خدمت', confirmLabel: 'حذف', danger: true })) deleteProduct(product.id); }}><Trash2 className="h-4 w-4" /></Button></div></td>
+            <td><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={() => startEdit(product)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-rose-600" onClick={async () => { if (await confirmDialog('این مورد حذف شود؟', { title: 'حذف کالا / خدمت', confirmLabel: 'حذف', danger: true })) { const result = deleteProduct(product.id); if (!result.ok) notify(result.message || 'حذف کالا / خدمت انجام نشد.', 'error'); } }}><Trash2 className="h-4 w-4" /></Button></div></td>
           </tr>)}
           {!list.length && <EmptyRow cols={8} text="کالا یا خدمتی پیدا نشد." />}
         </tbody>
