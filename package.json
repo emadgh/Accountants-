@@ -22,7 +22,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwind-merge": "2.6.0",
-    "zustand": "5.0.15"
+    "zustand": "5.0.15",
+    "ogl": "^1.0.11"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
