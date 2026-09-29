@@ -32,10 +32,7 @@ function errorMessage(error: unknown) {
 async function openDatabase() {
   if (!databasePromise) {
     databasePromise = (async () => {
-      const sqlite3: any = await sqlite3InitModule({
-        print: () => undefined,
-        printErr: () => undefined,
-      });
+      const sqlite3: any = await sqlite3InitModule();
 
       if (typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
         throw new Error('This browser does not provide the OPFS APIs required for persistent SQLite.');
