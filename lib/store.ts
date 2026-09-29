@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { seedData } from './data';
 import type {
+  AccountAdjustment,
   AccountingData,
   BusinessSettings,
   CheckRecord,
@@ -39,6 +40,8 @@ type Store = AccountingData & {
   deletePayment: (id: string) => void;
   upsertCheck: (check: CheckRecord) => OperationResult;
   deleteCheck: (id: string) => OperationResult;
+  addAccountAdjustment: (adjustment: AccountAdjustment) => OperationResult;
+  deleteAccountAdjustment: (id: string) => void;
   setSettings: (settings: BusinessSettings) => void;
   replaceAll: (data: AccountingData) => void;
   resetAll: () => void;
@@ -397,12 +400,28 @@ export const useAccountingStore = create<Store>()(
         return { ok: true };
       },
 
+      addAccountAdjustment: (adjustment) => {
+        if (!adjustment.customerId) return { ok: false, message: 'طرف حساب را انتخاب کنید.' };
+        if (!Number.isFinite(adjustment.amount) || adjustment.amount <= 0) {
+          return { ok: false, message: 'مبلغ اصلاحیه باید بزرگ‌تر از صفر باشد.' };
+        }
+        if (!adjustment.description.trim()) {
+          return { ok: false, message: 'شرح اصلاحیه یا مانده اول دوره الزامی است.' };
+        }
+        set((state) => ({ adjustments: [adjustment, ...state.adjustments] }));
+        return { ok: true };
+      },
+
+      deleteAccountAdjustment: (id) =>
+        set((state) => ({ adjustments: state.adjustments.filter((adjustment) => adjustment.id !== id) })),
+
       setSettings: (settings) => set({ settings }),
 
       replaceAll: (data) => {
         const payments = normalizeImportedPayments(data);
         set({
           ...data,
+          adjustments: data.adjustments || [],
           payments,
           invoices: withInvoiceStatuses(data.invoices, payments, data.checks),
         });
@@ -412,6 +431,7 @@ export const useAccountingStore = create<Store>()(
         const payments = normalizeImportedPayments(seedData);
         set({
           ...seedData,
+          adjustments: seedData.adjustments || [],
           payments,
           invoices: withInvoiceStatuses(seedData.invoices, payments, seedData.checks),
         });
@@ -425,6 +445,7 @@ export const useAccountingStore = create<Store>()(
         invoices: state.invoices,
         payments: state.payments,
         checks: state.checks,
+        adjustments: state.adjustments,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),
