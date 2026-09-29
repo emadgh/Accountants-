@@ -115,7 +115,9 @@ export function formatDocumentNumber(config: DocumentSequenceConfig) {
 export function validateNationalId(value: string) {
   const code = toEnglishDigits(value).replace(/\D/g, '');
   if (!code) return true;
-  if (!/^\d{10}$/.test(code) || /^(\d)\1{9}$/.test(code)) return false;
+  if (/^(\d)\1+$/.test(code)) return false;
+  if (/^\d{11}$/.test(code)) return true; // شناسه ملی اشخاص حقوقی؛ کنترل ساختاری
+  if (!/^\d{10}$/.test(code)) return false;
   const check = Number(code[9]);
   const sum = code.slice(0, 9).split('').reduce((total, digit, index) => total + Number(digit) * (10 - index), 0);
   const remainder = sum % 11;
@@ -165,7 +167,7 @@ export function validateOfficialFields(data: {
   iban?: string;
 }) {
   const errors: string[] = [];
-  if (!validateNationalId(data.nationalId || '')) errors.push('شناسه/کد ملی معتبر نیست.');
+  if (!validateNationalId(data.nationalId || '')) errors.push('کد ملی/شناسه ملی باید معتبر و ۱۰ یا ۱۱ رقمی باشد.');
   if (!validateEconomicCode(data.economicCode || '')) errors.push('کد اقتصادی باید ۱۱ تا ۱۴ رقم باشد.');
   if (!validatePostalCode(data.postalCode || '')) errors.push('کد پستی باید ۱۰ رقم معتبر باشد.');
   if (!validateCardNumber(data.cardNumber || '')) errors.push('شماره کارت معتبر نیست.');
