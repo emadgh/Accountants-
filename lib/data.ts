@@ -28,11 +28,11 @@ export const seedData: AccountingData = {
     },
   ],
   products: [
-    { id: 'prd_1001', code: '1001', name: 'طراحی تکسچر', kind: 'service', unit: 'عدد', salePrice: 4000000, buyPrice: 0, stock: 0, minStock: 0 },
-    { id: 'prd_1002', code: '1002', name: 'طراحی تری‌دی', kind: 'service', unit: 'عدد', salePrice: 1500000, buyPrice: 0, stock: 0, minStock: 0 },
-    { id: 'prd_1003', code: '1003', name: 'طراحی پست و استوری', kind: 'service', unit: 'عدد', salePrice: 400000, buyPrice: 0, stock: 0, minStock: 0 },
-    { id: 'prd_1004', code: '1004', name: 'کاشی پرسلان ۶۰×۱۲۰', kind: 'product', unit: 'مترمربع', salePrice: 850000, buyPrice: 690000, stock: 185, minStock: 40 },
-    { id: 'prd_1005', code: '1005', name: 'ایفکت دیجیتال', kind: 'product', unit: 'کیلو', salePrice: 1200000, buyPrice: 980000, stock: 18, minStock: 8 },
+    { id: 'prd_1001', code: '1001', name: 'طراحی تکسچر', kind: 'service', unit: 'عدد', salePrice: 4000000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 },
+    { id: 'prd_1002', code: '1002', name: 'طراحی تری‌دی', kind: 'service', unit: 'عدد', salePrice: 1500000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 },
+    { id: 'prd_1003', code: '1003', name: 'طراحی پست و استوری', kind: 'service', unit: 'عدد', salePrice: 400000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 },
+    { id: 'prd_1004', code: '1004', name: 'کاشی پرسلان ۶۰×۱۲۰', kind: 'product', unit: 'مترمربع', salePrice: 850000, buyPrice: 690000, averageCost: 690000, stock: 185, minStock: 40 },
+    { id: 'prd_1005', code: '1005', name: 'ایفکت دیجیتال', kind: 'product', unit: 'کیلو', salePrice: 1200000, buyPrice: 980000, averageCost: 980000, stock: 18, minStock: 8 },
   ],
   invoices: [
     {
@@ -54,4 +54,5 @@ export const seedData: AccountingData = {
     { id: 'chk_1', direction: 'received', customerId: 'cus_mansouri', amount: 15000000, dueDate: '1405/03/20', number: '458721', bank: 'ملت', owner: 'پخش منصوری', status: 'pending' },
   ],
   adjustments: [],
+  stockMovements: [],
 };
