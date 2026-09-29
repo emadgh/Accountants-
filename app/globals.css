@@ -70,6 +70,39 @@ button, input, textarea, select { font: inherit; }
   pointer-events: none;
 }
 
+.invoice-table-scroll { overflow-x: auto; overscroll-behavior-inline: contain; }
+
+@media (max-width: 640px) {
+  .invoice-toolbar {
+    top: 4px;
+    border-radius: 12px;
+    padding: 8px;
+  }
+  .invoice-toolbar > div:last-child {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+  .invoice-toolbar > div:last-child > button {
+    flex: 0 0 auto;
+  }
+  .invoice-table-scroll {
+    margin-inline: -5mm;
+    padding-inline: 5mm;
+  }
+  .invoice-grid-table {
+    min-width: 760px;
+  }
+  .invoice-paper {
+    padding-inline: 5mm !important;
+  }
+  .data-table {
+    min-width: 640px;
+  }
+}
+
 @media (max-width: 1024px) {
   .invoice-paper { min-height: auto; padding: 7mm 5mm; box-shadow: none; border: 1px solid #e2e8f0; }
 }
