@@ -7,6 +7,15 @@ export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
 export type PaymentMethod = 'cash' | 'card' | 'check';
 export type PaymentDirection = 'receipt' | 'payment';
 export type CheckStatus = 'pending' | 'cleared' | 'bounced';
+export type DocumentSequenceKey = 'sale' | 'purchase' | 'receipt' | 'payment' | 'check';
+
+export interface DocumentSequenceConfig {
+  prefix: string;
+  next: number;
+  padding: number;
+}
+
+export type DocumentNumberingSettings = Record<DocumentSequenceKey, DocumentSequenceConfig>;
 
 export interface Customer {
   id: string;
@@ -125,6 +134,7 @@ export interface ReturnDocument {
 
 export interface Payment {
   id: string;
+  documentNumber: string;
   invoiceId?: string;
   customerId: string;
   direction: PaymentDirection;
@@ -138,6 +148,7 @@ export interface Payment {
 
 export interface CheckRecord {
   id: string;
+  documentNumber: string;
   direction: 'received' | 'issued';
   customerId: string;
   amount: number;
@@ -317,6 +328,7 @@ export interface BusinessSettings {
   footer: string;
   currency: 'تومان' | 'ریال';
   defaultTax: number;
+  numbering: DocumentNumberingSettings;
 }
 
 export interface AccountingData {
