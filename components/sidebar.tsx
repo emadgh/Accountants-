@@ -2,13 +2,13 @@
 
 import {
   BarChart3, BookOpen, Boxes, Building2, ChevronLeft, CircleDollarSign, ClipboardList,
-  FilePlus2, FileText, Home, Menu, PackageSearch, ReceiptText, Settings,
+  FilePlus2, FileText, Home, Menu, PackageSearch, ReceiptText, RefreshCcw, Settings,
   ShoppingCart, Users, WalletCards, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-export type ViewKey = 'dashboard' | 'sales' | 'sale-new' | 'purchases' | 'purchase-new' | 'customers' | 'ledger' | 'products' | 'inventory' | 'payments' | 'checks' | 'reports' | 'settings';
+export type ViewKey = 'dashboard' | 'sales' | 'sale-new' | 'purchases' | 'purchase-new' | 'customers' | 'ledger' | 'products' | 'inventory' | 'payments' | 'checks' | 'returns' | 'reports' | 'settings';
 
 const sections = [
   { key: 'dashboard', label: 'داشبورد', icon: Home },
@@ -22,6 +22,7 @@ const sections = [
   { key: 'inventory', label: 'انبار', icon: Boxes },
   { key: 'payments', label: 'دریافت و پرداخت', icon: CircleDollarSign },
   { key: 'checks', label: 'چک‌ها و سررسید', icon: WalletCards },
+  { key: 'returns', label: 'مرجوعی فروش و خرید', icon: RefreshCcw },
   { key: 'reports', label: 'گزارش‌ها', icon: BarChart3 },
   { key: 'settings', label: 'تنظیمات', icon: Settings },
 ] as const;
