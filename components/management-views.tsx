@@ -819,12 +819,32 @@ export function SettingsView() {
     try {
       const parsed = JSON.parse(await file.text()) as AccountingData;
       if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid');
+      const importedProfiles: BusinessProfile[] = parsed.settings.businessProfiles?.length
+        ? parsed.settings.businessProfiles
+        : [{
+            id: 'business_default',
+            label: 'پروفایل اصلی',
+            businessName: parsed.settings.businessName || '',
+            ownerName: parsed.settings.ownerName || '',
+            phone: parsed.settings.phone || '',
+            address: parsed.settings.address || '',
+            nationalId: parsed.settings.nationalId || '',
+            economicCode: parsed.settings.economicCode || '',
+            postalCode: parsed.settings.postalCode || '',
+            cardNumber: parsed.settings.cardNumber || '',
+            iban: parsed.settings.iban || '',
+            bankName: parsed.settings.bankName || '',
+            invoiceTitle: parsed.settings.invoiceTitle || 'فاکتور فروش',
+            footer: parsed.settings.footer || '',
+          }];
       const normalizedSettings: BusinessSettings = {
         ...settings,
         ...parsed.settings,
         numbering: { ...settings.numbering, ...(parsed.settings.numbering || {}) },
-        businessProfiles: parsed.settings.businessProfiles?.length ? parsed.settings.businessProfiles : settings.businessProfiles,
-        defaultBusinessProfileId: parsed.settings.defaultBusinessProfileId || settings.defaultBusinessProfileId,
+        businessProfiles: importedProfiles,
+        defaultBusinessProfileId: parsed.settings.defaultBusinessProfileId && importedProfiles.some((profile) => profile.id === parsed.settings.defaultBusinessProfileId)
+          ? parsed.settings.defaultBusinessProfileId
+          : importedProfiles[0].id,
       };
       replaceAll({ ...parsed, settings: normalizedSettings });
       setDraft(normalizedSettings);
