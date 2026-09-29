@@ -47,12 +47,12 @@ function InvoiceStatus({ status }: { status: string }) {
 
 
 export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: string) => void }) {
-  const { customers, invoices, payments, checks, adjustments, upsertCustomer, deleteCustomer, settings } = useAccountingStore();
+  const { customers, invoices, returns, payments, checks, adjustments, upsertCustomer, deleteCustomer, settings } = useAccountingStore();
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<Customer | null>(null);
   const [open, setOpen] = useState(false);
   const list = customers.filter((customer) => (customer.name + ' ' + customer.phone + ' ' + customer.code).toLowerCase().includes(q.toLowerCase()));
-  const balance = (customer: Customer) => customerNetBalance(customer.id, invoices, payments, checks, adjustments, customer.openingBalance || 0);
+  const balance = (customer: Customer) => customerNetBalance(customer.id, invoices, payments, checks, adjustments, customer.openingBalance || 0, returns);
   const startEdit = (customer?: Customer) => {
     setEdit(customer ? { ...customer } : {
       id: uid('cus'),
@@ -135,7 +135,7 @@ export function CustomerLedgerView({
   initialCustomerId?: string | null;
   onOpenInvoice?: (invoiceId: string, kind: InvoiceKind) => void;
 }) {
-  const { customers, invoices, payments, checks, adjustments, addAdjustment, settings } = useAccountingStore();
+  const { customers, invoices, returns, payments, checks, adjustments, addAdjustment, settings } = useAccountingStore();
   const [selectedId, setSelectedId] = useState(initialCustomerId || customers[0]?.id || '');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -152,8 +152,8 @@ export function CustomerLedgerView({
 
   const customer = customers.find((item) => item.id === selectedId);
   const ledger = useMemo(
-    () => customer ? buildCustomerLedger(customer, invoices, payments, checks, adjustments) : [],
-    [customer, invoices, payments, checks, adjustments]
+    () => customer ? buildCustomerLedger(customer, invoices, payments, checks, adjustments, returns) : [],
+    [customer, invoices, returns, payments, checks, adjustments]
   );
   const fromKey = fromDate.trim() ? normalizeDateKey(fromDate) : '';
   const toKey = toDate.trim() ? normalizeDateKey(toDate) : '';
@@ -413,7 +413,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
               <td className="font-bold text-rose-700">{movement.quantity < 0 ? money(Math.abs(movement.quantity)) : '—'}</td>
               <td className="font-black">{money(movement.balanceAfter)} {cardexProduct?.unit}</td>
               <td>{money(movement.averageCostAfter)} {settings.currency}</td>
-              <td>{movement.sourceType === 'invoice' && movement.sourceKind && onOpenInvoice ? <Button variant="ghost" size="sm" onClick={() => { setCardexProductId(null); onOpenInvoice(movement.sourceId, movement.sourceKind!); }}><FileText className="h-3.5 w-3.5" /> فاکتور {movement.sourceReference}</Button> : <Badge>{movement.sourceType === 'adjustment' ? 'اصلاحیه' : 'سیستم'}</Badge>}</td>
+              <td>{movement.sourceType === 'invoice' && (movement.sourceKind === 'sale' || movement.sourceKind === 'purchase') && onOpenInvoice ? <Button variant="ghost" size="sm" onClick={() => { setCardexProductId(null); onOpenInvoice(movement.sourceId, movement.sourceKind as InvoiceKind); }}><FileText className="h-3.5 w-3.5" /> فاکتور {movement.sourceReference}</Button> : <Badge>{movement.sourceType === 'return' ? 'مرجوعی' : movement.sourceType === 'adjustment' ? 'اصلاحیه' : 'سیستم'}</Badge>}</td>
             </tr>)}
             {!cardex.length && <EmptyRow cols={8} text="حرکتی برای این کالا ثبت نشده است." />}
           </tbody>
@@ -692,18 +692,25 @@ export function ChecksView() {
 function CheckStatus({ status }: { status: CheckRecord['status'] }) { return status === 'cleared' ? <Badge className="bg-emerald-50 text-emerald-700">وصول شده</Badge> : status === 'bounced' ? <Badge className="bg-rose-50 text-rose-700">برگشتی</Badge> : <Badge className="bg-amber-50 text-amber-700">در انتظار</Badge>; }
 
 export function ReportsView() {
-  const { invoices, payments, products, checks, settings } = useAccountingStore();
+  const { invoices, returns, payments, products, checks, settings } = useAccountingStore();
   const posted = invoices.filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void');
-  const sales = posted.filter((invoice) => invoice.kind === 'sale').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
-  const purchases = posted.filter((invoice) => invoice.kind === 'purchase').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  const finalizedReturns = returns.filter((document) => document.status === 'final');
+  const grossSales = posted.filter((invoice) => invoice.kind === 'sale').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  const grossPurchases = posted.filter((invoice) => invoice.kind === 'purchase').reduce((sum, invoice) => sum + invoiceTotal(invoice), 0);
+  const saleReturns = finalizedReturns.filter((document) => document.kind === 'sale-return').reduce((sum, document) => sum + document.totalAmount, 0);
+  const purchaseReturns = finalizedReturns.filter((document) => document.kind === 'purchase-return').reduce((sum, document) => sum + document.totalAmount, 0);
+  const netSales = Math.max(0, grossSales - saleReturns);
+  const netPurchases = Math.max(0, grossPurchases - purchaseReturns);
   const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, payment.invoiceId ? invoices.find((invoice) => invoice.id === payment.invoiceId) : undefined);
   const receipts = payments.filter((payment) => directionOf(payment) === 'receipt').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
   const outgoing = payments.filter((payment) => directionOf(payment) === 'payment').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
   const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * Number(product.averageCost ?? product.buyPrice ?? 0), 0);
   const pending = checks.filter((check) => check.status === 'pending').reduce((sum, check) => sum + check.amount, 0);
   const rows = [
-    ['فروش قطعی', sales],
-    ['خرید قطعی', purchases],
+    ['فروش خالص', netSales],
+    ['مرجوعی فروش', saleReturns],
+    ['خرید خالص', netPurchases],
+    ['مرجوعی خرید', purchaseReturns],
     ['دریافت موثر', receipts],
     ['پرداخت موثر', outgoing],
     ['ارزش موجودی کالا', stock],
@@ -712,15 +719,15 @@ export function ReportsView() {
   const max = Math.max(...rows.map((item) => item[1]), 1);
 
   return <div className="space-y-5">
-    <PageHead title="گزارش‌ها" subtitle="خلاصه مالی و عملیاتی؛ چک‌های در انتظار/برگشتی تا زمان وصول در دریافت و پرداخت موثر محاسبه نمی‌شوند" />
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">{rows.map(([label, value]) => <Card key={label}><CardContent><div className="text-xs font-bold text-slate-500">{label}</div><div className="mt-2 text-xl font-black">{money(value)} <span className="text-[10px] text-slate-400">{settings.currency}</span></div></CardContent></Card>)}</div>
+    <PageHead title="گزارش‌ها" subtitle="فروش و خرید خالص پس از کسر مرجوعی‌های قطعی؛ چک‌های در انتظار/برگشتی تا زمان وصول در تسویه موثر نیستند" />
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">{rows.map(([label, value]) => <Card key={label}><CardContent><div className="text-xs font-bold text-slate-500">{label}</div><div className="mt-2 text-xl font-black">{money(value)} <span className="text-[10px] text-slate-400">{settings.currency}</span></div></CardContent></Card>)}</div>
     <Card><CardHeader><CardTitle>مقایسه شاخص‌ها</CardTitle></CardHeader><CardContent className="space-y-5">{rows.map(([label, value]) => <div key={label}><div className="mb-2 flex justify-between text-sm"><span className="font-bold">{label}</span><span>{money(value)}</span></div><div className="h-2.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-sky-500" style={{ width: `${Math.max(2, (value / max) * 100)}%` }} /></div></div>)}</CardContent></Card>
   </div>;
 }
 
 export function SettingsView() {
   const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
-  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
+  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, returns: store.returns, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); replaceAll(parsed); setDraft(parsed.settings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
   return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
     <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><div className="sm:col-span-2 flex justify-end"><Button onClick={() => setSettings(draft)}>ذخیره تنظیمات</Button></div></CardContent></Card>
