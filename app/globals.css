@@ -1674,3 +1674,97 @@ button, input, textarea, select { font: inherit; }
 .invoice-paper[data-paper-size="A5"] .invoice-signatures > div { min-height: 15mm !important; }
 .invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-masthead { min-height: 20mm; }
 .invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-masthead { padding-top: 4mm; }
+
+/* A5 is shorter as well as narrower: keep its vertical rhythm compact without
+   shrinking the text any further. These rules also keep the on-screen preview
+   close to the printed result. */
+.invoice-paper[data-paper-size="A5"] :where(:not(.screen-only, .screen-only *)) {
+  line-height: 1.3 !important;
+}
+.invoice-paper[data-paper-size="A5"] .invoice-grid-table th,
+.invoice-paper[data-paper-size="A5"] .invoice-grid-table td {
+  padding-block: 3px !important;
+}
+.invoice-paper[data-paper-size="A5"] .invoice-parties-layout {
+  gap: 2mm !important;
+  margin-block: 0 !important;
+}
+.invoice-paper[data-paper-size="A5"] .invoice-reference-notes,
+.invoice-paper[data-paper-size="A5"] .invoice-official-notes,
+.invoice-paper[data-paper-size="A5"] .invoice-storefront-notes,
+.invoice-paper[data-paper-size="A5"] .invoice-green-notes {
+  margin-top: 2mm !important;
+}
+.invoice-paper[data-paper-size="A5"] .invoice-signatures {
+  margin-top: 4mm !important;
+}
+.invoice-paper[data-paper-size="A5"] .invoice-signatures > div {
+  min-height: 12mm !important;
+}
+
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-logo,
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-logo img { max-height: 14mm; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-logo { min-height: 14mm; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-parties-layout { gap: 3mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-parties-layout > .invoice-party-block { min-height: 24mm; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-party-content { padding: 1mm; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-signatures { margin-top: 3mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-notes .invoice-inline-textarea,
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-reference-notes .print-only { min-height: 12mm; }
+.invoice-paper[data-paper-size="A5"][data-template="blue-ledger"] .invoice-signatures { gap: 5mm; }
+
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-edge { height: 5mm; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-masthead { min-height: 10mm; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-grid-table td,
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-blank-row td { height: 5mm; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-footer { min-height: 36mm; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-summary { grid-template-rows: repeat(3, 5mm) 1fr 1fr; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-signature { min-height: 10mm; }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-notes { grid-template-rows: 6mm 5mm minmax(22mm, 1fr); }
+.invoice-paper[data-paper-size="A5"][data-template="violet-ledger"] .invoice-violet-notes :is(.invoice-inline-textarea, .print-only, .invoice-violet-notes-value) { min-height: 22mm; }
+
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-masthead { min-height: 14mm; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] { padding: 3mm; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-party-content { padding-block: 1mm; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-customer-name,
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-buyer-meta > div { min-height: 4.5mm; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-notes .invoice-inline-textarea,
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-notes .print-only,
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-official-notes-value { min-height: 6mm; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-payment-block { margin-top: 2mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-signatures { gap: 5mm; margin-top: 4mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="official"] .invoice-signatures > div { min-height: 12mm !important; }
+
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] { padding: 3mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-masthead { padding: 3mm 2mm 1mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-party-layout { padding-block: 1mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-customer-name,
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-document-meta > div { min-height: 4.5mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-grid th,
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-grid td { padding-block: 1mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-totals > div:not(.invoice-storefront-grand-total) { min-height: 4mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-grand-total { min-height: 6mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-notes .invoice-inline-textarea,
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-notes .print-only,
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-notes-value { min-height: 6mm; }
+.invoice-paper[data-paper-size="A5"][data-template="storefront"] .invoice-storefront-footer { margin-top: 3mm !important; }
+
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] { padding: 4mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-masthead { min-height: 32mm; padding: 8mm 2mm 1mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-masthead::before { height: 9mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-logo { width: 15mm; height: 15mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-customer-name,
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-document-meta > div { min-height: 4.5mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-customer-block { padding-block: 1mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-grid th,
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-grid td { padding-block: 1mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-summary-block.invoice-green-summary { margin-top: 2mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-total-row { min-height: 6mm; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-green-footer { margin-top: 3mm !important; }
+.invoice-paper[data-paper-size="A5"][data-template="green-brand"] .invoice-signatures { margin-top: 4mm !important; }
+
+@media print {
+  .invoice-paper[data-paper-size="A5"][data-template="official"] { padding: 3mm !important; }
+  .invoice-paper[data-paper-size="A5"][data-template="storefront"] { padding: 3mm !important; }
+  .invoice-paper[data-paper-size="A5"][data-template="green-brand"] { padding: 4mm !important; }
+}
