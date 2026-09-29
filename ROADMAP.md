@@ -29,7 +29,7 @@ Tracker: #14
 
 ## M1 — MVP پایدار و قابل اتکا
 
-- #1 Build، dependency pinning و CI
+- #1 Build، dependency pinning و CI ✅
 - #2 Draft → Final و ثبت قطعی امن
 - #3 چاپ فاکتور رسمی A4 و چندصفحه‌ای
 - #4 مدل صحیح دریافت/پرداخت و چک
