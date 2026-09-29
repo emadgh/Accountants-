@@ -114,7 +114,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
               <td className="font-bold">{customer.code}</td>
               <td className="font-bold">{customer.name}</td>
               <td>{customer.kind === 'customer' ? 'مشتری' : customer.kind === 'supplier' ? 'تامین‌کننده' : 'هر دو'}</td>
-              <td>{customer.phone || '—'}</td>
+              <td><span dir="rtl">{customer.phone || '—'}</span></td>
               <td className="max-w-xs truncate">{customer.address || '—'}</td>
               <td className={currentBalance > 0 ? 'font-black text-rose-600' : currentBalance < 0 ? 'font-black text-emerald-600' : 'font-bold'}>
                 {money(Math.abs(currentBalance))} {settings.currency}{currentBalance > 0 ? ' بدهکار' : currentBalance < 0 ? ' بستانکار' : ''}
@@ -141,7 +141,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
-          <Field label="تلفن"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
+          <Field label="تلفن"><span dir="rtl"><Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></span></Field>
           <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
           <Field label="کد اقتصادی"><Input value={edit.economicCode} onChange={(e) => setEdit({ ...edit, economicCode: e.target.value })} /></Field>
           <Field label="کد پستی"><Input value={edit.postalCode} onChange={(e) => setEdit({ ...edit, postalCode: e.target.value })} /></Field>
@@ -939,13 +939,13 @@ export function SettingsView() {
           <Field label="عنوان پروفایل *"><Input value={profileDraft.label} onChange={(e) => setProfileDraft({ ...profileDraft, label: e.target.value })} /></Field>
           <Field label="نام کسب‌وکار *"><Input value={profileDraft.businessName} onChange={(e) => setProfileDraft({ ...profileDraft, businessName: e.target.value })} /></Field>
           <Field label="نام صاحب حساب"><Input value={profileDraft.ownerName} onChange={(e) => setProfileDraft({ ...profileDraft, ownerName: e.target.value })} /></Field>
-          <Field label="تلفن"><Input value={profileDraft.phone} onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></Field>
+          <Field label="تلفن"><span dir="rtl"><Input value={profileDraft.phone} onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></span></Field>
           <Field label="شناسه ملی / کد ملی"><Input value={profileDraft.nationalId} onChange={(e) => setProfileDraft({ ...profileDraft, nationalId: e.target.value })} /></Field>
           <Field label="کد اقتصادی"><Input value={profileDraft.economicCode} onChange={(e) => setProfileDraft({ ...profileDraft, economicCode: e.target.value })} /></Field>
           <Field label="کد پستی"><Input value={profileDraft.postalCode} onChange={(e) => setProfileDraft({ ...profileDraft, postalCode: e.target.value })} /></Field>
           <Field label="نام بانک"><Input value={profileDraft.bankName} onChange={(e) => setProfileDraft({ ...profileDraft, bankName: e.target.value })} /></Field>
-          <Field label="شماره کارت"><Input value={profileDraft.cardNumber} onChange={(e) => setProfileDraft({ ...profileDraft, cardNumber: e.target.value })} /></Field>
-          <Field label="شماره شبا"><Input value={profileDraft.iban} onChange={(e) => setProfileDraft({ ...profileDraft, iban: e.target.value })} /></Field>
+          <Field label="شماره کارت"><span dir="rtl"><Input value={profileDraft.cardNumber} onChange={(e) => setProfileDraft({ ...profileDraft, cardNumber: e.target.value })} /></span></Field>
+          <Field label="شماره شبا"><span dir="rtl"><Input value={profileDraft.iban} onChange={(e) => setProfileDraft({ ...profileDraft, iban: e.target.value })} /></span></Field>
           <Field label="عنوان فاکتور فروش"><Input value={profileDraft.invoiceTitle} onChange={(e) => setProfileDraft({ ...profileDraft, invoiceTitle: e.target.value })} /></Field>
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={profileDraft.address} onChange={(e) => setProfileDraft({ ...profileDraft, address: e.target.value })} /></Field>
           <Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={profileDraft.footer} onChange={(e) => setProfileDraft({ ...profileDraft, footer: e.target.value })} /></Field>
