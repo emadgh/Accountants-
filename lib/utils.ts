@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { AccountAdjustment, CheckRecord, Customer, CustomerLedgerEntry, Invoice, Payment, PaymentDirection } from './types';
+import type { AccountAdjustment, CheckRecord, Customer, CustomerLedgerEntry, Invoice, Payment, PaymentDirection, ReturnDocument, ReturnItem } from './types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -15,6 +15,35 @@ export function money(value: number) {
 export function invoiceTotal(invoice: Pick<Invoice, 'items' | 'discount' | 'tax' | 'shipping'>) {
   const sub = invoice.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
   return Math.max(0, sub - Number(invoice.discount || 0) + Number(invoice.tax || 0) + Number(invoice.shipping || 0));
+}
+
+export function returnDocumentAmount(
+  originalInvoice: Pick<Invoice, 'items' | 'discount' | 'tax' | 'shipping'>,
+  items: Pick<ReturnItem, 'qty' | 'unitPrice'>[]
+) {
+  const originalSubtotal = originalInvoice.items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0
+  );
+  if (originalSubtotal <= 0) return 0;
+  const rawReturn = items.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0),
+    0
+  );
+  const factor = invoiceTotal(originalInvoice) / originalSubtotal;
+  return Math.min(invoiceTotal(originalInvoice), Math.max(0, rawReturn * factor));
+}
+
+export function returnedQuantityForItem(
+  originalItemId: string,
+  returns: ReturnDocument[],
+  excludeReturnId?: string
+) {
+  return returns
+    .filter((document) => document.id !== excludeReturnId && document.status === 'final')
+    .flatMap((document) => document.items)
+    .filter((item) => item.originalItemId === originalItemId)
+    .reduce((sum, item) => sum + Number(item.qty || 0), 0);
 }
 
 export function expectedPaymentDirection(invoice: Pick<Invoice, 'kind'>): PaymentDirection {
@@ -61,7 +90,8 @@ export function buildCustomerLedger(
   invoices: Invoice[],
   payments: Payment[],
   checks: CheckRecord[],
-  adjustments: AccountAdjustment[] = []
+  adjustments: AccountAdjustment[] = [],
+  returns: ReturnDocument[] = []
 ): CustomerLedgerEntry[] {
   const entries: Omit<CustomerLedgerEntry, 'balance'>[] = [];
   const opening = Number(customer.openingBalance || 0);
@@ -145,6 +175,51 @@ export function buildCustomerLedger(
       });
     });
 
+  returns
+    .filter((document) => document.customerId === customer.id && document.status !== 'draft')
+    .forEach((document) => {
+      if (document.status === 'void') {
+        entries.push({
+          id: 'void_return_' + document.id,
+          customerId: customer.id,
+          date: document.date,
+          sortKey: normalizeDateKey(document.date) + '|' + (document.voidedAt || document.updatedAt),
+          kind: 'void',
+          title: 'ابطال ' + (document.kind === 'sale-return' ? 'مرجوعی فروش' : 'مرجوعی خرید'),
+          reference: document.number,
+          debit: 0,
+          credit: 0,
+          nominalAmount: Number(document.totalAmount || 0),
+          effective: false,
+          status: 'void',
+          note: document.voidReason,
+          returnId: document.id,
+          returnKind: document.kind,
+        });
+        return;
+      }
+
+      const amount = Number(document.totalAmount || 0);
+      const saleReturn = document.kind === 'sale-return';
+      entries.push({
+        id: 'return_' + document.id,
+        customerId: customer.id,
+        date: document.date,
+        sortKey: normalizeDateKey(document.date) + '|' + (document.finalizedAt || document.updatedAt),
+        kind: document.kind,
+        title: saleReturn ? 'مرجوعی فروش' : 'مرجوعی خرید',
+        reference: document.number,
+        debit: saleReturn ? 0 : amount,
+        credit: saleReturn ? amount : 0,
+        nominalAmount: amount,
+        effective: true,
+        status: 'final',
+        note: document.notes,
+        returnId: document.id,
+        returnKind: document.kind,
+      });
+    });
+
   const linkedCheckIds = new Set<string>();
   payments
     .filter((payment) => payment.customerId === customer.id)
@@ -211,7 +286,8 @@ export function customerNetBalance(
   payments: Payment[],
   checks: CheckRecord[],
   adjustments: AccountAdjustment[] = [],
-  openingBalance = 0
+  openingBalance = 0,
+  returns: ReturnDocument[] = []
 ) {
   const customer: Customer = {
     id: customerId,
@@ -225,7 +301,7 @@ export function customerNetBalance(
     postalCode: '',
     openingBalance,
   };
-  const ledger = buildCustomerLedger(customer, invoices, payments, checks, adjustments);
+  const ledger = buildCustomerLedger(customer, invoices, payments, checks, adjustments, returns);
   return ledger.length ? ledger[ledger.length - 1].balance : Number(openingBalance || 0);
 }
 
