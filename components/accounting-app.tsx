@@ -22,6 +22,18 @@ export function AccountingApp({ onLogout }: { onLogout?: () => void }) {
   useEffect(() => {
     void useAccountingStore.persist.rehydrate();
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.key.toLowerCase() !== 'n') return;
+      if (view === 'sale-new' || view === 'purchase-new') return;
+      event.preventDefault();
+      setSelectedInvoiceId(null);
+      setView('sale-new');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [view]);
   const navigate = (next: ViewKey) => {
     if (next === 'sale-new' || next === 'purchase-new') setSelectedInvoiceId(null);
     setView(next);

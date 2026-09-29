@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmDialog, notify } from '@/lib/feedback';
 
 type ImportCandidate = {
   data: AccountingData;
@@ -108,7 +109,7 @@ export function StorageBackupPanel() {
       const parsed = await parseAccountingBackup(await file.text());
       setCandidate({ ...parsed, filename: file.name });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'فایل پشتیبان معتبر نیست.');
+      notify(error instanceof Error ? error.message : 'فایل پشتیبان معتبر نیست.', 'error');
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -122,10 +123,10 @@ export function StorageBackupPanel() {
       await createAccountingSnapshot('before-import');
       store.replaceAll(candidate.data);
       setCandidate(null);
-      window.alert('پشتیبان بازیابی شد. نسخه قبل از Import در Snapshotهای محلی نگهداری شد.');
+      notify('پشتیبان بازیابی شد. نسخه قبل از Import در Snapshotهای محلی نگهداری شد.', 'success');
       window.setTimeout(() => void refresh(), 200);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'بازیابی پشتیبان انجام نشد.');
+      notify(error instanceof Error ? error.message : 'بازیابی پشتیبان انجام نشد.', 'error');
     } finally {
       setBusy(false);
     }
@@ -136,7 +137,7 @@ export function StorageBackupPanel() {
     try {
       const id = await createAccountingSnapshot('manual');
       if (!id) {
-        window.alert('Snapshot محلی در این مرورگر در دسترس نیست.');
+        notify('Snapshot محلی در این مرورگر در دسترس نیست.', 'warning');
         return;
       }
       await refresh();
@@ -146,19 +147,19 @@ export function StorageBackupPanel() {
   };
 
   const restoreSnapshot = async (snapshot: AccountingSnapshotMeta) => {
-    if (!window.confirm('Snapshot انتخاب‌شده جایگزین داده فعلی شود؟ قبل از Restore یک Snapshot از وضعیت فعلی ساخته می‌شود.')) return;
+    if (!(await confirmDialog('Snapshot انتخاب‌شده جایگزین داده فعلی شود؟ قبل از Restore یک Snapshot از وضعیت فعلی ساخته می‌شود.', { title: 'Restore Snapshot', confirmLabel: 'Restore', danger: true }))) return;
     setBusy(true);
     try {
       await restoreAccountingSnapshot(snapshot.id);
       window.location.reload();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Restore انجام نشد.');
+      notify(error instanceof Error ? error.message : 'Restore انجام نشد.', 'error');
       setBusy(false);
     }
   };
 
   const removeSnapshot = async (snapshot: AccountingSnapshotMeta) => {
-    if (!window.confirm('این Snapshot محلی حذف شود؟')) return;
+    if (!(await confirmDialog('این Snapshot محلی حذف شود؟', { title: 'حذف Snapshot', confirmLabel: 'حذف', danger: true }))) return;
     setBusy(true);
     try {
       await deleteAccountingSnapshot(snapshot.id);

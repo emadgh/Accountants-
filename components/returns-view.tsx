@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
+import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
 
 function blankReturn(invoice?: Invoice): ReturnDocument {
   const now = new Date().toISOString();
@@ -104,7 +105,7 @@ export function ReturnsView() {
   const saveDraft = () => {
     const result = saveReturnDraft(draft);
     if (!result.ok || !result.returnDocument) {
-      window.alert(result.message || 'ذخیره پیش‌نویس مرجوعی انجام نشد.');
+      notify(result.message || 'ذخیره پیش‌نویس مرجوعی انجام نشد.', 'error');
       return;
     }
     setDraft(structuredClone(result.returnDocument));
@@ -114,24 +115,24 @@ export function ReturnsView() {
   const finalize = () => {
     const result = finalizeReturn(draft);
     if (!result.ok || !result.returnDocument) {
-      window.alert(result.message || 'ثبت نهایی مرجوعی انجام نشد.');
+      notify(result.message || 'ثبت نهایی مرجوعی انجام نشد.', 'error');
       return;
     }
     setDraft(structuredClone(result.returnDocument));
     setOpen(false);
   };
 
-  const voidDocument = (document: ReturnDocument) => {
-    const reason = window.prompt('دلیل ابطال سند مرجوعی را وارد کنید:');
+  const voidDocument = async (document: ReturnDocument) => {
+    const reason = await promptDialog('دلیل ابطال سند مرجوعی را وارد کنید:', { title: 'ابطال مرجوعی', confirmLabel: 'ابطال سند', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
     const result = voidReturn(document.id, reason);
-    if (!result.ok) window.alert(result.message || 'ابطال مرجوعی انجام نشد.');
+    if (!result.ok) notify(result.message || 'ابطال مرجوعی انجام نشد.', 'error');
   };
 
-  const removeDraft = (document: ReturnDocument) => {
-    if (!window.confirm('پیش‌نویس مرجوعی حذف شود؟')) return;
+  const removeDraft = async (document: ReturnDocument) => {
+    if (!(await confirmDialog('پیش‌نویس مرجوعی حذف شود؟', { title: 'حذف پیش‌نویس مرجوعی', confirmLabel: 'حذف', danger: true }))) return;
     const result = deleteReturn(document.id);
-    if (!result.ok) window.alert(result.message || 'حذف پیش‌نویس انجام نشد.');
+    if (!result.ok) notify(result.message || 'حذف پیش‌نویس انجام نشد.', 'error');
   };
 
   return <div className="space-y-5">

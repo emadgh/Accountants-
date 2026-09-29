@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
+import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
 
 type Tab = 'accounts' | 'journal' | 'money';
 
@@ -59,7 +60,7 @@ export function AccountingCoreView() {
   const saveAccount = () => {
     const result = upsertAccount(accountDraft);
     if (!result.ok) {
-      window.alert(result.message || 'ثبت حساب انجام نشد.');
+      notify(result.message || 'ثبت حساب انجام نشد.', 'error');
       return;
     }
     setAccountOpen(false);
@@ -82,17 +83,17 @@ export function AccountingCoreView() {
   const saveMoney = () => {
     const result = addMoneyTransaction(moneyDraft);
     if (!result.ok) {
-      window.alert(result.message || 'ثبت تراکنش انجام نشد.');
+      notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
       return;
     }
     setMoneyOpen(false);
   };
 
-  const voidMoney = (transaction: MoneyTransaction) => {
-    const reason = window.prompt('دلیل ابطال تراکنش را وارد کنید:');
+  const voidMoney = async (transaction: MoneyTransaction) => {
+    const reason = await promptDialog('دلیل ابطال تراکنش را وارد کنید:', { title: 'ابطال تراکنش', confirmLabel: 'ابطال', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
     const result = voidMoneyTransaction(transaction.id, reason);
-    if (!result.ok) window.alert(result.message || 'ابطال انجام نشد.');
+    if (!result.ok) notify(result.message || 'ابطال انجام نشد.', 'error');
   };
 
   return <div className="space-y-5">
@@ -132,7 +133,7 @@ export function AccountingCoreView() {
             <td>{account.normalBalance === 'debit' ? 'بدهکار' : 'بستانکار'}</td>
             <td className={balance < 0 ? 'font-black text-rose-700' : 'font-black'}>{money(Math.abs(balance))} {settings.currency}{balance < 0 ? ' خلاف ماهیت' : ''}</td>
             <td>{account.systemKey ? <Badge className="bg-sky-50 text-sky-700">سیستمی</Badge> : <Badge>تعریف کاربر</Badge>}</td>
-            <td>{!account.systemKey ? <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => { if (!confirm('حساب حذف شود؟')) return; const result = deleteAccount(account.id); if (!result.ok) alert(result.message); }}>حذف</Button> : '—'}</td>
+            <td>{!account.systemKey ? <Button variant="ghost" size="sm" className="text-rose-600" onClick={async () => { if (!(await confirmDialog('حساب حذف شود؟', { title: 'حذف حساب', confirmLabel: 'حذف', danger: true }))) return; const result = deleteAccount(account.id); if (!result.ok) notify(result.message || 'حذف حساب انجام نشد.', 'error'); }}>حذف</Button> : '—'}</td>
           </tr>)}
         </tbody>
       </table></div>
