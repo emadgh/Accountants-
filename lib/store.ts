@@ -1381,6 +1381,23 @@ export const useAccountingStore = create<Store>()(
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);
+        const mergedSettings: BusinessSettings = {
+          ...seedData.settings,
+          ...(state.settings || {}),
+          numbering: {
+            ...seedData.settings.numbering,
+            ...(state.settings?.numbering || {}),
+          },
+          businessProfiles: state.settings?.businessProfiles || [],
+          defaultBusinessProfileId: state.settings?.defaultBusinessProfileId || '',
+        };
+        const migratedSettings: BusinessSettings = mergedSettings.businessProfiles.length
+          ? mergedSettings
+          : {
+              ...mergedSettings,
+              businessProfiles: [legacyBusinessProfile(mergedSettings)],
+              defaultBusinessProfileId: 'business_default',
+            };
         return normalizeAccountingData({
           ...seedData,
           ...state,
@@ -1398,7 +1415,7 @@ export const useAccountingStore = create<Store>()(
           accounts: state.accounts || [],
           journalEntries: state.journalEntries || [],
           moneyTransactions: state.moneyTransactions || [],
-          settings: { ...seedData.settings, ...(state.settings || {}) },
+          settings: migratedSettings,
         });
       },
       partialize: (state) => ({
