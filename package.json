@@ -24,7 +24,8 @@
     "tailwind-merge": "2.6.0",
     "zustand": "5.0.15",
     "ogl": "^1.0.11",
-    "@layflags/rolling-number": "1.0.0"
+    "@layflags/rolling-number": "1.0.0",
+    "@sqlite.org/sqlite-wasm": "3.53.4-build1"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
