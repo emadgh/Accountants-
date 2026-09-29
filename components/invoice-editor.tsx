@@ -10,6 +10,7 @@ import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
+import { notify, promptDialog } from '@/lib/feedback';
 
 function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = ''): Invoice {
   const now = new Date().toISOString();
@@ -49,7 +50,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
   const updateBusinessProfile = (values: Partial<BusinessProfile>) => {
     if (!businessProfile) return;
     const result = upsertBusinessProfile({ ...businessProfile, ...values });
-    if (!result.ok) window.alert(result.message || 'ذخیره پروفایل انجام نشد.');
+    if (!result.ok) notify(result.message || 'ذخیره پروفایل انجام نشد.', 'error');
   };
   const isDraft = invoice.status === 'draft';
   const isVoid = invoice.status === 'void';
@@ -99,13 +100,13 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     window.setTimeout(() => setSavedFlash(false), 1200);
   };
 
-  const persist = () => {
+  const persist = async () => {
     if (isVoid) return null;
 
     if (isDraft) {
       const result = saveInvoiceDraft(invoice);
       if (!result.ok || !result.invoice) {
-        window.alert(result.message || 'ذخیره فاکتور انجام نشد.');
+        notify(result.message || 'ذخیره فاکتور انجام نشد.', 'error');
         return null;
       }
       setInvoice(structuredClone(result.invoice));
@@ -114,15 +115,15 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     }
 
     if (!isDirty) {
-      window.alert('تغییری برای ثبت Revision وجود ندارد.');
+      notify('تغییری برای ثبت Revision وجود ندارد.', 'info');
       return existing || invoice;
     }
 
-    const reason = window.prompt('دلیل ویرایش سند قطعی را وارد کنید:');
+    const reason = await promptDialog('دلیل ویرایش سند قطعی را وارد کنید:', { title: 'ثبت Revision', confirmLabel: 'ثبت Revision', placeholder: 'دلیل ویرایش...' });
     if (!reason?.trim()) return null;
     const result = reviseInvoice(invoice, reason);
     if (!result.ok || !result.invoice) {
-      window.alert(result.message || 'ثبت Revision انجام نشد.');
+      notify(result.message || 'ثبت Revision انجام نشد.', 'error');
       return null;
     }
     setInvoice(structuredClone(result.invoice));
@@ -134,7 +135,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     window.setTimeout(() => window.print(), 50);
   };
 
-  const print = () => {
+  const print = async () => {
     if (isVoid) {
       window.print();
       return;
@@ -143,7 +144,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     if (isDraft) {
       const result = finalizeInvoice(invoice);
       if (!result.ok || !result.invoice) {
-        window.alert(result.message || 'ثبت نهایی فاکتور انجام نشد.');
+        notify(result.message || 'ثبت نهایی فاکتور انجام نشد.', 'error');
         return;
       }
       setInvoice(structuredClone(result.invoice));
@@ -151,17 +152,17 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       return;
     }
 
-    if (isDirty && !persist()) return;
+    if (isDirty && !(await persist())) return;
     window.setTimeout(() => window.print(), 80);
   };
 
-  const voidCurrent = () => {
+  const voidCurrent = async () => {
     if (!isPosted) return;
-    const reason = window.prompt('دلیل ابطال فاکتور را وارد کنید:');
+    const reason = await promptDialog('دلیل ابطال فاکتور را وارد کنید:', { title: 'ابطال فاکتور', confirmLabel: 'ابطال سند', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
     const result = voidInvoice(invoice.id, reason);
     if (!result.ok || !result.invoice) {
-      window.alert(result.message || 'ابطال فاکتور انجام نشد.');
+      notify(result.message || 'ابطال فاکتور انجام نشد.', 'error');
       return;
     }
     setInvoice(structuredClone(result.invoice));
@@ -195,12 +196,12 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       const modifier = event.ctrlKey || event.metaKey;
       if (modifier && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        persist();
+        void persist();
         return;
       }
       if (modifier && event.key.toLowerCase() === 'p') {
         event.preventDefault();
-        print();
+        void print();
         return;
       }
       if (modifier && event.key === 'Enter') {
