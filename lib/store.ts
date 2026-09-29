@@ -344,12 +344,24 @@ function validateReturn(
   return { ok: true };
 }
 
-function withInvoiceStatuses(invoices: Invoice[], payments: Payment[], checks: CheckRecord[]) {
+function withInvoiceStatuses(
+  invoices: Invoice[],
+  payments: Payment[],
+  checks: CheckRecord[],
+  returns: ReturnDocument[] = []
+) {
   return invoices.map((invoice) => {
     if (invoice.status === 'draft' || invoice.status === 'void') return invoice;
     const settled = settledForInvoice(invoice, payments, checks);
-    const total = invoiceTotal(invoice);
-    const status: Invoice['status'] = settled <= 0 ? 'final' : settled >= total ? 'settled' : 'partial';
+    const returnedAmount = returns
+      .filter((document) => document.originalInvoiceId === invoice.id && document.status === 'final')
+      .reduce((sum, document) => sum + Number(document.totalAmount || 0), 0);
+    const total = Math.max(0, invoiceTotal(invoice) - returnedAmount);
+    const status: Invoice['status'] = total <= 0.0001 || settled >= total - 0.0001
+      ? 'settled'
+      : settled <= 0
+        ? 'final'
+        : 'partial';
     return { ...invoice, status };
   });
 }
@@ -447,12 +459,13 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
   const checks = data.checks || [];
   const rawPayments = data.payments || [];
   const payments = normalizeImportedPayments({ invoices, payments: rawPayments });
+  const returns = data.returns || [];
   const stockMovements = data.stockMovements?.length ? data.stockMovements : buildOpeningMovements(products);
   return {
     customers,
     products,
-    invoices: withInvoiceStatuses(invoices, payments, checks),
-    returns: data.returns || [],
+    invoices: withInvoiceStatuses(invoices, payments, checks, returns),
+    returns,
     payments,
     checks,
     adjustments: data.adjustments || [],
@@ -562,7 +575,7 @@ export const useAccountingStore = create<Store>()(
         const merged = previous
           ? state.invoices.map((item) => (item.id === next.id ? next : item))
           : [next, ...state.invoices];
-        const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
+        const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
         set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
         return { ok: true, invoice: saved };
@@ -606,7 +619,7 @@ export const useAccountingStore = create<Store>()(
         const appliedInventory = applyInvoiceInventory(baseProducts, reversedInventory.stockMovements, next, 1, 'revision');
         if (!appliedInventory.ok) return { ok: false, message: appliedInventory.message };
         const merged = state.invoices.map((item) => (item.id === next.id ? next : item));
-        const invoices = withInvoiceStatuses(merged, state.payments, state.checks);
+        const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
         set({ products: appliedInventory.products, stockMovements: appliedInventory.stockMovements, invoices });
         return { ok: true, invoice: saved };
@@ -724,7 +737,8 @@ export const useAccountingStore = create<Store>()(
         const returns = previous
           ? state.returns.map((item) => item.id === next.id ? next : item)
           : [next, ...state.returns];
-        set({ returns, products: inventory.products, stockMovements: inventory.stockMovements });
+        const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
+        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
         return { ok: true, returnDocument: next };
       },
 
@@ -750,7 +764,8 @@ export const useAccountingStore = create<Store>()(
         const inventory = applyReturnInventory(state.products, state.stockMovements, previous, originalInvoice, -1, 'return-void-reversal');
         if (!inventory.ok) return { ok: false, message: inventory.message };
         const returns = state.returns.map((item) => item.id === id ? next : item);
-        set({ returns, products: inventory.products, stockMovements: inventory.stockMovements });
+        const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
+        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
         return { ok: true, returnDocument: next };
       },
 
@@ -806,7 +821,7 @@ export const useAccountingStore = create<Store>()(
         }
 
         const payments = [normalized, ...state.payments];
-        const invoices = withInvoiceStatuses(state.invoices, payments, state.checks);
+        const invoices = withInvoiceStatuses(state.invoices, payments, state.checks, state.returns);
         set({ payments, invoices });
         return { ok: true };
       },
@@ -816,7 +831,7 @@ export const useAccountingStore = create<Store>()(
           const payments = state.payments.filter((payment) => payment.id !== id);
           return {
             payments,
-            invoices: withInvoiceStatuses(state.invoices, payments, state.checks),
+            invoices: withInvoiceStatuses(state.invoices, payments, state.checks, state.returns),
           };
         }),
 
@@ -905,7 +920,7 @@ export const useAccountingStore = create<Store>()(
         const checks = previous
           ? state.checks.map((item) => (item.id === check.id ? check : item))
           : [check, ...state.checks];
-        const invoices = withInvoiceStatuses(state.invoices, state.payments, checks);
+        const invoices = withInvoiceStatuses(state.invoices, state.payments, checks, state.returns);
         set({ checks, invoices });
         return { ok: true };
       },
@@ -916,7 +931,7 @@ export const useAccountingStore = create<Store>()(
           return { ok: false, message: 'این چک به تراکنش متصل است و قابل حذف نیست. ابتدا تراکنش مرتبط را حذف کنید.' };
         }
         const checks = state.checks.filter((check) => check.id !== id);
-        set({ checks, invoices: withInvoiceStatuses(state.invoices, state.payments, checks) });
+        set({ checks, invoices: withInvoiceStatuses(state.invoices, state.payments, checks, state.returns) });
         return { ok: true };
       },
 
