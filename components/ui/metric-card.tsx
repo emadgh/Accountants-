@@ -131,6 +131,8 @@ export function MetricCard({
   }
 
   const staticValue = formattedValue ?? String(value);
+  const preserveStaticFormatting = !rolling && (formattedValue !== undefined || typeof value === 'string');
+  const useNumericRenderer = numericValue !== null && !preserveStaticFormatting;
 
   return (
     <Panel
@@ -158,10 +160,10 @@ export function MetricCard({
               <div className="h-3 w-1/3 animate-pulse rounded bg-slate-100 motion-reduce:animate-none" />
             </div>
           ) : (
-            <div className={cn('mt-2 flex max-w-full items-baseline gap-1.5 font-black tracking-tight', styles.value, semantic.value, valueClassName)}>
-              {numericValue !== null ? (
+            <div className={cn('mt-2 flex max-w-full min-w-0 items-baseline gap-1.5 overflow-hidden font-black tracking-tight leading-tight', styles.value, semantic.value, valueClassName)}>
+              {useNumericRenderer ? (
                 <RollingNumber
-                  value={numericValue}
+                  value={numericValue!}
                   prefix={numericPrefix}
                   suffix={numericSuffix}
                   rolling={rolling}
@@ -170,7 +172,7 @@ export function MetricCard({
                   className="min-w-0"
                 />
               ) : (
-                <span aria-label={ariaLabel || staticValue} className="min-w-0 break-words">{staticValue}</span>
+                <span aria-label={ariaLabel || staticValue} className="min-w-0 max-w-full break-words">{staticValue}</span>
               )}
               {direction ? <DirectionIndicator direction={direction} /> : null}
             </div>

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-export type PanelVariant = 'default' | 'subtle' | 'elevated';
+export type PanelVariant = 'default' | 'subtle' | 'elevated' | 'dark';
 export type PanelPadding = 'none' | 'sm' | 'md' | 'lg';
 
 export interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -17,9 +17,10 @@ export interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const variants: Record<PanelVariant, string> = {
-  default: 'border-slate-200/80 bg-white shadow-sm',
-  subtle: 'border-slate-200/70 bg-slate-50/70 shadow-sm',
-  elevated: 'border-slate-200/80 bg-white shadow-lg shadow-slate-950/5',
+  default: 'border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950',
+  subtle: 'border-slate-200/70 bg-slate-50/70 shadow-sm dark:border-slate-800 dark:bg-slate-900/70',
+  elevated: 'border-slate-200/80 bg-white shadow-lg shadow-slate-950/5 dark:border-slate-800 dark:bg-slate-950 dark:shadow-black/20',
+  dark: 'border-slate-800/80 bg-slate-950/90 text-slate-100 shadow-2xl shadow-black/40 backdrop-blur-xl',
 };
 
 const paddings: Record<PanelPadding, string> = {
@@ -35,8 +36,8 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(function Panel
     className,
     variant = 'default',
     padding = 'md',
-    spotlight = false,
-    interactive = false,
+    spotlight = true,
+    interactive = true,
     header,
     footer,
     contentClassName,
@@ -82,7 +83,7 @@ export const Panel = React.forwardRef<HTMLDivElement, PanelProps>(function Panel
       className={cn(
         'group/panel relative overflow-hidden rounded-2xl border',
         variants[variant],
-        interactive && 'transition-[border-color,box-shadow,transform] duration-200 hover:border-sky-200/80 hover:shadow-md motion-reduce:transition-none',
+        interactive && 'transition-[border-color,box-shadow,transform] duration-200 hover:border-sky-200/80 hover:shadow-md dark:hover:border-sky-800/80 motion-reduce:transition-none',
         className
       )}
       {...props}
