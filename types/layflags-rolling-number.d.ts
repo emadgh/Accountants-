@@ -1,7 +1,5 @@
 import type * as React from 'react';
 
-declare module '@layflags/rolling-number';
-
 declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
