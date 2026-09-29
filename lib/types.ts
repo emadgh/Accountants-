@@ -231,6 +231,77 @@ export interface CustomerLedgerEntry {
   returnKind?: ReturnKind;
 }
 
+export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+export type NormalBalance = 'debit' | 'credit';
+
+export type SystemAccountKey =
+  | 'cash'
+  | 'bank'
+  | 'accounts-receivable'
+  | 'inventory'
+  | 'accounts-payable'
+  | 'opening-equity'
+  | 'sales-revenue'
+  | 'sales-returns'
+  | 'other-income'
+  | 'cogs'
+  | 'general-expense'
+  | 'purchase-service-expense';
+
+export interface Account {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  normalBalance: NormalBalance;
+  parentId?: string;
+  systemKey?: SystemAccountKey;
+  active: boolean;
+}
+
+export interface JournalLine {
+  id: string;
+  accountId: string;
+  debit: number;
+  credit: number;
+  memo?: string;
+}
+
+export type JournalSourceType = 'invoice' | 'return' | 'payment' | 'money-transaction' | 'system';
+export type JournalAction = 'post' | 'revision-reversal' | 'revision-post' | 'void-reversal' | 'status-post' | 'status-reversal';
+
+export interface JournalEntry {
+  id: string;
+  date: string;
+  description: string;
+  sourceType: JournalSourceType;
+  sourceId: string;
+  sourceReference?: string;
+  action: JournalAction;
+  reversalOf?: string;
+  createdAt: string;
+  lines: JournalLine[];
+}
+
+export type MoneyTransactionKind = 'income' | 'expense';
+export type MoneyTransactionStatus = 'final' | 'void';
+
+export interface MoneyTransaction {
+  id: string;
+  kind: MoneyTransactionKind;
+  status: MoneyTransactionStatus;
+  date: string;
+  amount: number;
+  settlementAccountId: string;
+  categoryAccountId: string;
+  description: string;
+  reference?: string;
+  createdAt: string;
+  updatedAt: string;
+  voidedAt?: string;
+  voidReason?: string;
+}
+
 export interface BusinessSettings {
   businessName: string;
   ownerName: string;
@@ -257,6 +328,9 @@ export interface AccountingData {
   checks: CheckRecord[];
   adjustments: AccountAdjustment[];
   stockMovements: StockMovement[];
+  accounts: Account[];
+  journalEntries: JournalEntry[];
+  moneyTransactions: MoneyTransaction[];
   settings: BusinessSettings;
 }
 
