@@ -7,7 +7,7 @@ import {
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { AccountingData, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
+import type { AccountingData, BusinessProfile, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
@@ -766,20 +766,213 @@ export function ReportsView() {
 }
 
 export function SettingsView() {
-  const store = useAccountingStore(); const { settings, setSettings, replaceAll, resetAll } = store; const fileRef = useRef<HTMLInputElement>(null); const [draft, setDraft] = useState(settings);
-  const exportData = () => { const data: AccountingData = { customers: store.customers, products: store.products, invoices: store.invoices, returns: store.returns, payments: store.payments, checks: store.checks, adjustments: store.adjustments, stockMovements: store.stockMovements, accounts: store.accounts, journalEntries: store.journalEntries, moneyTransactions: store.moneyTransactions, settings: store.settings }; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `accountants-backup-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href); };
-  const importData = async (file?: File) => { if (!file) return; try { const parsed = JSON.parse(await file.text()) as AccountingData; if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid'); const normalizedSettings: BusinessSettings = { ...settings, ...parsed.settings, numbering: { ...settings.numbering, ...(parsed.settings.numbering || {}) } }; replaceAll({ ...parsed, settings: normalizedSettings }); setDraft(normalizedSettings); alert('نسخه پشتیبان با موفقیت بازیابی شد.'); } catch { alert('فایل پشتیبان معتبر نیست.'); } };
-  const saveSettings = () => {
-    const errors = validateOfficialFields(draft);
+  const store = useAccountingStore();
+  const {
+    settings,
+    setSettings,
+    upsertBusinessProfile,
+    deleteBusinessProfile,
+    setDefaultBusinessProfile,
+    replaceAll,
+    resetAll,
+  } = store;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(settings);
+  const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultBusinessProfileId);
+  const selectedProfile = settings.businessProfiles.find((profile) => profile.id === selectedProfileId)
+    || settings.businessProfiles.find((profile) => profile.id === settings.defaultBusinessProfileId)
+    || settings.businessProfiles[0];
+  const [profileDraft, setProfileDraft] = useState<BusinessProfile>(() => structuredClone(selectedProfile));
+
+  useEffect(() => {
+    const profile = settings.businessProfiles.find((item) => item.id === selectedProfileId)
+      || settings.businessProfiles.find((item) => item.id === settings.defaultBusinessProfileId)
+      || settings.businessProfiles[0];
+    if (profile) setProfileDraft(structuredClone(profile));
+  }, [selectedProfileId, settings.businessProfiles, settings.defaultBusinessProfileId]);
+
+  const exportData = () => {
+    const data: AccountingData = {
+      customers: store.customers,
+      products: store.products,
+      invoices: store.invoices,
+      returns: store.returns,
+      payments: store.payments,
+      checks: store.checks,
+      adjustments: store.adjustments,
+      stockMovements: store.stockMovements,
+      accounts: store.accounts,
+      journalEntries: store.journalEntries,
+      moneyTransactions: store.moneyTransactions,
+      settings: store.settings,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `accountants-backup-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const importData = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as AccountingData;
+      if (!parsed.customers || !parsed.products || !parsed.invoices || !parsed.settings) throw new Error('invalid');
+      const importedProfiles: BusinessProfile[] = parsed.settings.businessProfiles?.length
+        ? parsed.settings.businessProfiles
+        : [{
+            id: 'business_default',
+            label: 'پروفایل اصلی',
+            businessName: parsed.settings.businessName || '',
+            ownerName: parsed.settings.ownerName || '',
+            phone: parsed.settings.phone || '',
+            address: parsed.settings.address || '',
+            nationalId: parsed.settings.nationalId || '',
+            economicCode: parsed.settings.economicCode || '',
+            postalCode: parsed.settings.postalCode || '',
+            cardNumber: parsed.settings.cardNumber || '',
+            iban: parsed.settings.iban || '',
+            bankName: parsed.settings.bankName || '',
+            invoiceTitle: parsed.settings.invoiceTitle || 'فاکتور فروش',
+            footer: parsed.settings.footer || '',
+          }];
+      const normalizedSettings: BusinessSettings = {
+        ...settings,
+        ...parsed.settings,
+        numbering: { ...settings.numbering, ...(parsed.settings.numbering || {}) },
+        businessProfiles: importedProfiles,
+        defaultBusinessProfileId: parsed.settings.defaultBusinessProfileId && importedProfiles.some((profile) => profile.id === parsed.settings.defaultBusinessProfileId)
+          ? parsed.settings.defaultBusinessProfileId
+          : importedProfiles[0].id,
+      };
+      replaceAll({ ...parsed, settings: normalizedSettings });
+      setDraft(normalizedSettings);
+      setSelectedProfileId(normalizedSettings.defaultBusinessProfileId);
+      alert('نسخه پشتیبان با موفقیت بازیابی شد.');
+    } catch {
+      alert('فایل پشتیبان معتبر نیست.');
+    }
+  };
+
+  const newProfile = () => {
+    const base = selectedProfile || settings.businessProfiles[0];
+    const profile: BusinessProfile = {
+      ...(base || {
+        businessName: '', ownerName: '', phone: '', address: '', nationalId: '', economicCode: '', postalCode: '',
+        cardNumber: '', iban: '', bankName: '', invoiceTitle: 'فاکتور فروش', footer: '',
+      }),
+      id: uid('business'),
+      label: 'پروفایل جدید',
+    };
+    setSelectedProfileId(profile.id);
+    setProfileDraft(profile);
+  };
+
+  const saveProfile = () => {
+    if (!profileDraft.label.trim() || !profileDraft.businessName.trim()) {
+      window.alert('عنوان پروفایل و نام کسب‌وکار الزامی است.');
+      return;
+    }
+    const errors = validateOfficialFields(profileDraft);
     if (errors.length) {
       window.alert(errors.join('\n'));
       return;
     }
-    setSettings(draft);
+    const result = upsertBusinessProfile(profileDraft);
+    if (!result.ok) {
+      window.alert(result.message || 'ذخیره پروفایل انجام نشد.');
+      return;
+    }
+    setSelectedProfileId(profileDraft.id);
   };
-  return <div className="space-y-5"><PageHead title="تنظیمات" subtitle="اطلاعات کسب‌وکار، فاکتور رسمی و نسخه پشتیبان" />
-    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> اطلاعات کسب‌وکار و فاکتور</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><Field label="نام کسب‌وکار"><Input value={draft.businessName} onChange={(e) => setDraft({ ...draft, businessName: e.target.value })} /></Field><Field label="نام صاحب حساب"><Input value={draft.ownerName} onChange={(e) => setDraft({ ...draft, ownerName: e.target.value })} /></Field><Field label="تلفن"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field><Field label="عنوان فاکتور فروش"><Input value={draft.invoiceTitle} onChange={(e) => setDraft({ ...draft, invoiceTitle: e.target.value })} /></Field><Field label="شناسه ملی"><Input value={draft.nationalId} onChange={(e) => setDraft({ ...draft, nationalId: e.target.value })} /></Field><Field label="کد اقتصادی"><Input value={draft.economicCode} onChange={(e) => setDraft({ ...draft, economicCode: e.target.value })} /></Field><Field label="کد پستی"><Input value={draft.postalCode} onChange={(e) => setDraft({ ...draft, postalCode: e.target.value })} /></Field><Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field><Field label="شماره کارت"><Input value={draft.cardNumber} onChange={(e) => setDraft({ ...draft, cardNumber: e.target.value })} /></Field><Field label="شماره شبا"><Input value={draft.iban} onChange={(e) => setDraft({ ...draft, iban: e.target.value })} /></Field><Field label="آدرس" className="sm:col-span-2"><Textarea value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></Field><Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={draft.footer} onChange={(e) => setDraft({ ...draft, footer: e.target.value })} /></Field><NumberingSettingsEditor draft={draft} onChange={setDraft} /><div className="sm:col-span-2 flex justify-end"><Button onClick={saveSettings}>ذخیره تنظیمات</Button></div></CardContent></Card>
-      <div className="space-y-5"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-sky-600" /> پشتیبان‌گیری</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-600"><p>تمام داده‌ها در LocalStorage مرورگر نگهداری می‌شوند. برای انتقال به سیستم دیگر خروجی JSON بگیرید.</p><div className="grid gap-2"><Button variant="outline" onClick={exportData}><ArrowDownToLine className="h-4 w-4" /> دانلود نسخه پشتیبان</Button><Button variant="outline" onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> بازیابی نسخه پشتیبان</Button><input ref={fileRef} type="file" className="hidden" accept="application/json" onChange={(e) => importData(e.target.files?.[0])} /></div></CardContent></Card><Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card></div>
+
+  const makeDefault = () => {
+    const result = setDefaultBusinessProfile(profileDraft.id);
+    if (!result.ok) window.alert(result.message || 'تغییر پروفایل پیش‌فرض انجام نشد.');
+  };
+
+  const removeProfile = () => {
+    if (!confirm('این پروفایل حذف شود؟')) return;
+    const result = deleteBusinessProfile(profileDraft.id);
+    if (!result.ok) {
+      window.alert(result.message || 'حذف پروفایل انجام نشد.');
+      return;
+    }
+    setSelectedProfileId(settings.defaultBusinessProfileId);
+  };
+
+  const saveGlobalSettings = () => {
+    setSettings({
+      ...settings,
+      currency: draft.currency,
+      defaultTax: Number(draft.defaultTax || 0),
+      numbering: draft.numbering,
+    });
+  };
+
+  return <div className="space-y-5">
+    <PageHead title="تنظیمات" subtitle="پروفایل‌های صادرکننده، شماره‌گذاری اسناد و نسخه پشتیبان" />
+
+    <Card>
+      <CardHeader className="flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-600" /> پروفایل‌های اطلاعات کسب‌وکار</CardTitle>
+          <div className="mt-1 text-xs text-slate-500">این پروفایل‌ها فقط هویت، تماس و اطلاعات بانکی چاپ فاکتور را تغییر می‌دهند؛ مشتری، کالا، انبار و شماره‌گذاری مشترک می‌مانند.</div>
+        </div>
+        <Button onClick={newProfile}><Plus className="h-4 w-4" /> پروفایل جدید</Button>
+      </CardHeader>
+      <CardContent className="grid gap-5 xl:grid-cols-[280px_1fr]">
+        <div className="space-y-2">
+          {settings.businessProfiles.map((profile) => <button
+            key={profile.id}
+            type="button"
+            onClick={() => setSelectedProfileId(profile.id)}
+            className={`w-full rounded-xl border p-3 text-right transition ${selectedProfileId === profile.id ? 'border-sky-300 bg-sky-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+          >
+            <div className="flex items-center justify-between gap-2"><span className="font-black">{profile.label}</span>{profile.id === settings.defaultBusinessProfileId && <Badge className="bg-emerald-50 text-emerald-700">پیش‌فرض</Badge>}</div>
+            <div className="mt-1 truncate text-xs text-slate-500">{profile.businessName || 'بدون نام کسب‌وکار'}</div>
+          </button>)}
+        </div>
+
+        {profileDraft && <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="عنوان پروفایل *"><Input value={profileDraft.label} onChange={(e) => setProfileDraft({ ...profileDraft, label: e.target.value })} /></Field>
+          <Field label="نام کسب‌وکار *"><Input value={profileDraft.businessName} onChange={(e) => setProfileDraft({ ...profileDraft, businessName: e.target.value })} /></Field>
+          <Field label="نام صاحب حساب"><Input value={profileDraft.ownerName} onChange={(e) => setProfileDraft({ ...profileDraft, ownerName: e.target.value })} /></Field>
+          <Field label="تلفن"><Input value={profileDraft.phone} onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></Field>
+          <Field label="شناسه ملی / کد ملی"><Input value={profileDraft.nationalId} onChange={(e) => setProfileDraft({ ...profileDraft, nationalId: e.target.value })} /></Field>
+          <Field label="کد اقتصادی"><Input value={profileDraft.economicCode} onChange={(e) => setProfileDraft({ ...profileDraft, economicCode: e.target.value })} /></Field>
+          <Field label="کد پستی"><Input value={profileDraft.postalCode} onChange={(e) => setProfileDraft({ ...profileDraft, postalCode: e.target.value })} /></Field>
+          <Field label="نام بانک"><Input value={profileDraft.bankName} onChange={(e) => setProfileDraft({ ...profileDraft, bankName: e.target.value })} /></Field>
+          <Field label="شماره کارت"><Input value={profileDraft.cardNumber} onChange={(e) => setProfileDraft({ ...profileDraft, cardNumber: e.target.value })} /></Field>
+          <Field label="شماره شبا"><Input value={profileDraft.iban} onChange={(e) => setProfileDraft({ ...profileDraft, iban: e.target.value })} /></Field>
+          <Field label="عنوان فاکتور فروش"><Input value={profileDraft.invoiceTitle} onChange={(e) => setProfileDraft({ ...profileDraft, invoiceTitle: e.target.value })} /></Field>
+          <Field label="آدرس" className="sm:col-span-2"><Textarea value={profileDraft.address} onChange={(e) => setProfileDraft({ ...profileDraft, address: e.target.value })} /></Field>
+          <Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={profileDraft.footer} onChange={(e) => setProfileDraft({ ...profileDraft, footer: e.target.value })} /></Field>
+          <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
+            {profileDraft.id !== settings.defaultBusinessProfileId && <Button variant="outline" onClick={makeDefault}>انتخاب به‌عنوان پیش‌فرض</Button>}
+            {settings.businessProfiles.some((profile) => profile.id === profileDraft.id) && <Button variant="danger" onClick={removeProfile}><Trash2 className="h-4 w-4" /> حذف</Button>}
+            <Button onClick={saveProfile}><Check className="h-4 w-4" /> ذخیره پروفایل</Button>
+          </div>
+        </div>}
+      </CardContent>
+    </Card>
+
+    <div className="grid gap-5 xl:grid-cols-[1fr_.72fr]">
+      <Card>
+        <CardHeader><CardTitle>تنظیمات عمومی اسناد</CardTitle></CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field>
+          <Field label="مالیات پیش‌فرض"><Input type="number" min="0" value={draft.defaultTax} onChange={(e) => setDraft({ ...draft, defaultTax: Number(e.target.value) })} /></Field>
+          <NumberingSettingsEditor draft={draft} onChange={setDraft} />
+          <div className="sm:col-span-2 flex justify-end"><Button onClick={saveGlobalSettings}>ذخیره تنظیمات عمومی</Button></div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-5">
+        <Card><CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5 text-sky-600" /> پشتیبان‌گیری</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-600"><p>تمام پروفایل‌ها و انتخاب هر فاکتور در نسخه پشتیبان ذخیره می‌شوند.</p><div className="grid gap-2"><Button variant="outline" onClick={exportData}><ArrowDownToLine className="h-4 w-4" /> دانلود نسخه پشتیبان</Button><Button variant="outline" onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> بازیابی نسخه پشتیبان</Button><input ref={fileRef} type="file" className="hidden" accept="application/json" onChange={(e) => importData(e.target.files?.[0])} /></div></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={() => confirm('همه داده‌ها بازنشانی شوند؟') && resetAll()}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
+      </div>
     </div>
   </div>;
 }

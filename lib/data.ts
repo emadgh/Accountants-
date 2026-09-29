@@ -24,6 +24,25 @@ export const seedData: AccountingData = {
       payment: { prefix: 'PY-', next: 1, padding: 6 },
       check: { prefix: 'C-', next: 1, padding: 6 },
     },
+    businessProfiles: [
+      {
+        id: 'business_default',
+        label: 'پروفایل اصلی',
+        businessName: 'حسابداری من',
+        ownerName: 'عماد قاسمی',
+        phone: '۰۹۳۶۶۸۲۸۹۷۸',
+        address: 'کاشمر - امام ۱۸ پلاک ۴۴ - عماد قاسمی',
+        nationalId: '',
+        economicCode: '',
+        postalCode: '',
+        cardNumber: '6037 9917 8212 9476',
+        iban: 'IR600170000000113816948004',
+        bankName: '',
+        invoiceTitle: 'فاکتور فروش',
+        footer: 'با تشکر از خرید شما',
+      },
+    ],
+    defaultBusinessProfileId: 'business_default',
   },
   customers: [
     {
@@ -44,7 +63,7 @@ export const seedData: AccountingData = {
   ],
   invoices: [
     {
-      id: 'inv_demo', number: '300159', kind: 'sale', status: 'partial', date: '۱۴۰۵/۰۳/۰۵ ۱۳:۱۳',
+      id: 'inv_demo', number: '300159', businessProfileId: 'business_default', kind: 'sale', status: 'partial', date: '۱۴۰۵/۰۳/۰۵ ۱۳:۱۳',
       customerId: 'cus_mansouri', customerName: 'پخش منصوری', customerPhone: '', customerAddress: '',
       items: [
         { id: 'ii1', productId: 'prd_1001', description: 'طراحی تکسچر', details: '60120 ژینو، کارینا، ادوین', unit: 'عدد', qty: 3, unitPrice: 4000000 },
