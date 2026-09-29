@@ -14,6 +14,10 @@ import type {
   OperationResult,
   Payment,
   Product,
+  ReturnAuditAction,
+  ReturnDocument,
+  ReturnItem,
+  ReturnOperationResult,
   StockAdjustmentInput,
   StockMovement,
   StockMovementAction,
@@ -22,6 +26,8 @@ import type {
 import {
   expectedPaymentDirection,
   invoiceTotal,
+  returnDocumentAmount,
+  returnedQuantityForItem,
   resolvedPaymentDirection,
   settledForInvoice,
   todayFa,
@@ -40,6 +46,10 @@ type Store = AccountingData & {
   reviseInvoice: (invoice: Invoice, reason: string) => StoreOperationResult;
   voidInvoice: (id: string, reason: string) => StoreOperationResult;
   deleteInvoice: (id: string) => StoreOperationResult;
+  saveReturnDraft: (document: ReturnDocument) => ReturnOperationResult;
+  finalizeReturn: (document: ReturnDocument) => ReturnOperationResult;
+  voidReturn: (id: string, reason: string) => ReturnOperationResult;
+  deleteReturn: (id: string) => OperationResult;
   addPayment: (payment: Payment) => OperationResult;
   deletePayment: (id: string) => void;
   addAdjustment: (adjustment: AccountAdjustment) => OperationResult;
@@ -181,6 +191,159 @@ function applyInvoiceInventory(
   return { ok: true, products: nextProducts, stockMovements: nextMovements };
 }
 
+
+function applyReturnInventory(
+  products: Product[],
+  stockMovements: StockMovement[],
+  document: ReturnDocument,
+  originalInvoice: Invoice,
+  direction: 1 | -1,
+  action: StockMovementAction
+): InventoryApplyResult {
+  const nextProducts = normalizeProducts(products);
+  const nextMovements = [...stockMovements];
+
+  for (const item of document.items) {
+    if (!item.productId) continue;
+    const index = nextProducts.findIndex((product) => product.id === item.productId);
+    if (index < 0) continue;
+    const product = { ...nextProducts[index] };
+    if (product.kind !== 'product') continue;
+
+    const baseQuantity = document.kind === 'sale-return' ? Number(item.qty || 0) : -Number(item.qty || 0);
+    const quantity = baseQuantity * direction;
+    const currentStock = Number(product.stock || 0);
+    const currentAverage = Number(product.averageCost ?? product.buyPrice ?? 0);
+    const newStock = currentStock + quantity;
+
+    if (newStock < -0.0001) {
+      return {
+        ok: false,
+        message: 'مرجوعی باعث موجودی منفی برای «' + product.name + '» می‌شود. موجودی فعلی: ' + currentStock + ' ' + product.unit + '.',
+        products,
+        stockMovements,
+      };
+    }
+
+    let unitCost = currentAverage;
+    if (direction === -1) {
+      const originalReturnMovement = [...nextMovements].reverse().find(
+        (movement) =>
+          movement.sourceType === 'return' &&
+          movement.sourceId === document.id &&
+          movement.productId === product.id &&
+          (movement.type === 'sale-return' || movement.type === 'purchase-return')
+      );
+      unitCost = Number(originalReturnMovement?.unitCost ?? currentAverage);
+    } else if (document.kind === 'sale-return') {
+      const originalSaleMovement = [...nextMovements].reverse().find(
+        (movement) =>
+          movement.sourceType === 'invoice' &&
+          movement.sourceId === originalInvoice.id &&
+          movement.productId === product.id &&
+          movement.type === 'sale'
+      );
+      unitCost = Number(originalSaleMovement?.unitCost ?? currentAverage);
+    } else {
+      const originalItem = originalInvoice.items.find((source) => source.id === item.originalItemId);
+      unitCost = Number(originalItem?.unitPrice ?? item.unitPrice ?? currentAverage);
+    }
+
+    const newValue = currentStock * currentAverage + quantity * unitCost;
+    const newAverage = newStock > 0.0001 ? Math.max(0, newValue / newStock) : 0;
+    product.stock = Math.abs(newStock) < 0.0001 ? 0 : newStock;
+    product.averageCost = newAverage;
+    nextProducts[index] = product;
+
+    nextMovements.push({
+      id: uid('stock'),
+      productId: product.id,
+      warehouseId: MAIN_WAREHOUSE_ID,
+      date: document.date,
+      createdAt: new Date().toISOString(),
+      quantity,
+      balanceAfter: product.stock,
+      averageCostAfter: newAverage,
+      unitCost,
+      type: direction === -1 ? 'reversal' : document.kind,
+      action,
+      sourceType: 'return',
+      sourceId: document.id,
+      sourceReference: document.number,
+      sourceKind: document.kind,
+      note: direction === -1 ? 'برگشت اثر سند مرجوعی باطل‌شده' : 'مرجوعی مرتبط با فاکتور ' + originalInvoice.number,
+    });
+  }
+
+  return { ok: true, products: nextProducts, stockMovements: nextMovements };
+}
+
+function appendReturnAudit(document: ReturnDocument, action: ReturnAuditAction, note?: string) {
+  return [
+    ...(document.auditTrail || []),
+    {
+      id: uid('audit'),
+      action,
+      at: new Date().toISOString(),
+      ...(note?.trim() ? { note: note.trim() } : {}),
+    },
+  ];
+}
+
+function normalizeReturnItems(document: ReturnDocument, originalInvoice: Invoice): ReturnItem[] {
+  return document.items
+    .map((item) => {
+      const source = originalInvoice.items.find((original) => original.id === item.originalItemId);
+      if (!source) return null;
+      return {
+        id: item.id || uid('retrow'),
+        originalItemId: source.id,
+        productId: source.productId,
+        description: source.description,
+        unit: source.unit,
+        qty: Number(item.qty || 0),
+        unitPrice: Number(source.unitPrice || 0),
+      } satisfies ReturnItem;
+    })
+    .filter((item): item is ReturnItem => !!item && item.qty > 0);
+}
+
+function validateReturn(
+  document: ReturnDocument,
+  originalInvoice: Invoice | undefined,
+  allReturns: ReturnDocument[]
+): ReturnOperationResult {
+  if (!originalInvoice || !isPosted(originalInvoice.status)) {
+    return { ok: false, message: 'فاکتور اصلی باید قطعی و فعال باشد.' };
+  }
+  const expectedKind = originalInvoice.kind === 'sale' ? 'sale-return' : 'purchase-return';
+  if (document.kind !== expectedKind) {
+    return { ok: false, message: 'نوع مرجوعی با فاکتور اصلی سازگار نیست.' };
+  }
+  if (!document.number.trim()) return { ok: false, message: 'شماره سند مرجوعی الزامی است.' };
+  const duplicate = allReturns.some(
+    (item) => item.id !== document.id && item.kind === document.kind && item.number.trim() === document.number.trim()
+  );
+  if (duplicate) return { ok: false, message: 'شماره سند مرجوعی تکراری است.' };
+
+  const items = normalizeReturnItems(document, originalInvoice);
+  if (!items.length) return { ok: false, message: 'حداقل یک ردیف با مقدار مرجوعی بزرگ‌تر از صفر لازم است.' };
+
+  for (const item of items) {
+    const source = originalInvoice.items.find((original) => original.id === item.originalItemId);
+    if (!source) return { ok: false, message: 'یکی از ردیف‌های مرجوعی در فاکتور اصلی پیدا نشد.' };
+    const alreadyReturned = returnedQuantityForItem(source.id, allReturns, document.id);
+    const remaining = Number(source.qty || 0) - alreadyReturned;
+    if (item.qty > remaining + 0.0001) {
+      return {
+        ok: false,
+        message: 'مقدار مرجوعی «' + source.description + '» بیشتر از مانده قابل مرجوعی است. مانده: ' + remaining + ' ' + source.unit + '.',
+      };
+    }
+  }
+  return { ok: true };
+}
+
 function withInvoiceStatuses(invoices: Invoice[], payments: Payment[], checks: CheckRecord[]) {
   return invoices.map((invoice) => {
     if (invoice.status === 'draft' || invoice.status === 'void') return invoice;
@@ -289,6 +452,7 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     customers,
     products,
     invoices: withInvoiceStatuses(invoices, payments, checks),
+    returns: data.returns || [],
     payments,
     checks,
     adjustments: data.adjustments || [],
@@ -411,6 +575,9 @@ export const useAccountingStore = create<Store>()(
           return { ok: false, message: 'فقط فاکتور قطعی قابل Revision است.' };
         }
         if (!reason.trim()) return { ok: false, message: 'دلیل ویرایش سند قطعی را وارد کنید.' };
+        if (state.returns.some((document) => document.originalInvoiceId === invoice.id && document.status === 'final')) {
+          return { ok: false, message: 'این فاکتور مرجوعی قطعی دارد. ابتدا اسناد مرجوعی مرتبط را ابطال کنید.' };
+        }
         if (invoice.number.trim() !== previous.number.trim()) {
           return { ok: false, message: 'شماره فاکتور قطعی قابل تغییر نیست.' };
         }
@@ -455,6 +622,9 @@ export const useAccountingStore = create<Store>()(
         if (state.payments.some((payment) => payment.invoiceId === id)) {
           return { ok: false, message: 'این فاکتور دریافت/پرداخت متصل دارد. ابتدا تراکنش‌های مرتبط را اصلاح یا حذف کنید.' };
         }
+        if (state.returns.some((document) => document.originalInvoiceId === id && document.status === 'final')) {
+          return { ok: false, message: 'این فاکتور مرجوعی قطعی دارد. ابتدا اسناد مرجوعی مرتبط را ابطال کنید.' };
+        }
 
         const now = new Date().toISOString();
         const revision = Math.max(1, previous.revision || 1);
@@ -481,6 +651,115 @@ export const useAccountingStore = create<Store>()(
           return { ok: false, message: 'فاکتور قطعی یا ابطال‌شده حذف نمی‌شود. برای اسناد قطعی از ابطال استفاده کنید.' };
         }
         set({ invoices: state.invoices.filter((item) => item.id !== id) });
+        return { ok: true };
+      },
+
+      saveReturnDraft: (document) => {
+        const state = get();
+        const previous = state.returns.find((item) => item.id === document.id);
+        if (previous && previous.status !== 'draft') {
+          return { ok: false, message: 'سند مرجوعی قطعی قابل بازگشت به پیش‌نویس نیست.' };
+        }
+        const originalInvoice = state.invoices.find((invoice) => invoice.id === document.originalInvoiceId);
+        if (!originalInvoice || !isPosted(originalInvoice.status)) {
+          return { ok: false, message: 'فاکتور اصلی معتبر و قطعی پیدا نشد.' };
+        }
+        const now = new Date().toISOString();
+        const base: ReturnDocument = {
+          ...document,
+          kind: originalInvoice.kind === 'sale' ? 'sale-return' : 'purchase-return',
+          status: 'draft',
+          originalInvoiceNumber: originalInvoice.number,
+          customerId: originalInvoice.customerId,
+          customerName: originalInvoice.customerName,
+          items: normalizeReturnItems(document, originalInvoice),
+          totalAmount: 0,
+          createdAt: previous?.createdAt || document.createdAt || now,
+          updatedAt: now,
+          finalizedAt: undefined,
+          voidedAt: undefined,
+          voidReason: undefined,
+          auditTrail: previous?.auditTrail || document.auditTrail || [],
+        };
+        const next = { ...base, auditTrail: appendReturnAudit(base, previous ? 'draft_saved' : 'created') };
+        const returns = previous
+          ? state.returns.map((item) => item.id === next.id ? next : item)
+          : [next, ...state.returns];
+        set({ returns });
+        return { ok: true, returnDocument: next };
+      },
+
+      finalizeReturn: (document) => {
+        const state = get();
+        const previous = state.returns.find((item) => item.id === document.id);
+        if (previous && previous.status !== 'draft') {
+          return { ok: false, message: 'این سند مرجوعی قبلاً قطعی شده است.' };
+        }
+        const originalInvoice = state.invoices.find((invoice) => invoice.id === document.originalInvoiceId);
+        const valid = validateReturn(document, originalInvoice, state.returns);
+        if (!valid.ok || !originalInvoice) return valid;
+
+        const now = new Date().toISOString();
+        const items = normalizeReturnItems(document, originalInvoice);
+        const base: ReturnDocument = {
+          ...document,
+          kind: originalInvoice.kind === 'sale' ? 'sale-return' : 'purchase-return',
+          status: 'final',
+          originalInvoiceNumber: originalInvoice.number,
+          customerId: originalInvoice.customerId,
+          customerName: originalInvoice.customerName,
+          items,
+          totalAmount: returnDocumentAmount(originalInvoice, items),
+          createdAt: previous?.createdAt || document.createdAt || now,
+          updatedAt: now,
+          finalizedAt: now,
+          voidedAt: undefined,
+          voidReason: undefined,
+          auditTrail: previous?.auditTrail || document.auditTrail || [],
+        };
+        const next: ReturnDocument = { ...base, auditTrail: appendReturnAudit(base, 'finalized') };
+        const inventory = applyReturnInventory(state.products, state.stockMovements, next, originalInvoice, 1, 'return-finalize');
+        if (!inventory.ok) return { ok: false, message: inventory.message };
+
+        const returns = previous
+          ? state.returns.map((item) => item.id === next.id ? next : item)
+          : [next, ...state.returns];
+        set({ returns, products: inventory.products, stockMovements: inventory.stockMovements });
+        return { ok: true, returnDocument: next };
+      },
+
+      voidReturn: (id, reason) => {
+        const state = get();
+        const previous = state.returns.find((item) => item.id === id);
+        if (!previous || previous.status !== 'final') {
+          return { ok: false, message: 'فقط سند مرجوعی قطعی قابل ابطال است.' };
+        }
+        if (!reason.trim()) return { ok: false, message: 'دلیل ابطال مرجوعی الزامی است.' };
+        const originalInvoice = state.invoices.find((invoice) => invoice.id === previous.originalInvoiceId);
+        if (!originalInvoice) return { ok: false, message: 'فاکتور اصلی پیدا نشد.' };
+
+        const now = new Date().toISOString();
+        const base: ReturnDocument = {
+          ...previous,
+          status: 'void',
+          voidedAt: now,
+          voidReason: reason.trim(),
+          updatedAt: now,
+        };
+        const next: ReturnDocument = { ...base, auditTrail: appendReturnAudit(base, 'voided', reason) };
+        const inventory = applyReturnInventory(state.products, state.stockMovements, previous, originalInvoice, -1, 'return-void-reversal');
+        if (!inventory.ok) return { ok: false, message: inventory.message };
+        const returns = state.returns.map((item) => item.id === id ? next : item);
+        set({ returns, products: inventory.products, stockMovements: inventory.stockMovements });
+        return { ok: true, returnDocument: next };
+      },
+
+      deleteReturn: (id) => {
+        const state = get();
+        const previous = state.returns.find((item) => item.id === id);
+        if (!previous) return { ok: false, message: 'سند مرجوعی پیدا نشد.' };
+        if (previous.status !== 'draft') return { ok: false, message: 'فقط پیش‌نویس مرجوعی قابل حذف است.' };
+        set({ returns: state.returns.filter((item) => item.id !== id) });
         return { ok: true };
       },
 
@@ -653,7 +932,7 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || []);
@@ -664,6 +943,7 @@ export const useAccountingStore = create<Store>()(
             openingBalance: Number(customer.openingBalance || 0),
           })),
           products,
+          returns: state.returns || [],
           adjustments: state.adjustments || [],
           stockMovements: state.stockMovements?.length ? state.stockMovements : buildOpeningMovements(products),
         };
@@ -672,6 +952,7 @@ export const useAccountingStore = create<Store>()(
         customers: state.customers,
         products: state.products,
         invoices: state.invoices,
+        returns: state.returns,
         payments: state.payments,
         checks: state.checks,
         adjustments: state.adjustments,
