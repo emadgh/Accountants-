@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Ban, CheckCircle2, Copy, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
+import { ArrowRight, Ban, CheckCircle2, Copy, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
 import { invoiceTotal, money, nowFa, uid } from '@/lib/utils';
@@ -93,6 +93,10 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
     return result.invoice;
   };
 
+  const previewPrint = () => {
+    window.setTimeout(() => window.print(), 50);
+  };
+
   const print = () => {
     if (isVoid) {
       window.print();
@@ -155,29 +159,40 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <Button variant="outline" size="sm" onClick={duplicate}><Copy className="h-4 w-4" /> کپی فاکتور</Button>
         {!isVoid && <Button variant="outline" size="sm" onClick={persist}><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
         {isPosted && <Button variant="danger" size="sm" onClick={voidCurrent}><Ban className="h-4 w-4" /> ابطال</Button>}
+        <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
         <Button size="sm" onClick={print}><Printer className="h-4 w-4" /> {isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
     </div>
 
     <div className="print-surface invoice-paper relative">
-      {isVoid && <div className="pointer-events-none absolute inset-x-0 top-[42%] z-10 -rotate-12 text-center text-7xl font-black text-rose-500/15">باطل</div>}
+      {isDraft && <div className="print-only print-watermark text-slate-500">پیش‌نویس</div>}
+      {isVoid && <div className="print-only print-watermark text-rose-500">باطل</div>}
       {isVoid && <div className="screen-only mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">این فاکتور باطل شده است.{invoice.voidReason ? ` دلیل: ${invoice.voidReason}` : ''}</div>}
       <fieldset disabled={isVoid} className="contents">
-      <header className="mb-3">
+      <header className="invoice-party-block mb-3">
         <EditableText value={invoice.kind === 'sale' ? settings.invoiceTitle : 'فاکتور خرید'} onChange={(v) => invoice.kind === 'sale' && setSettings({ ...settings, invoiceTitle: v })} className="mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />
-        <div className="mt-4 grid grid-cols-[1fr_1.4fr] gap-5 text-[12px] leading-7">
-          <div className="text-left" dir="rtl">
-            <InfoLine label="تلفن" value={settings.phone} onChange={(v) => setSettings({ ...settings, phone: v })} />
-            {(settings.nationalId || settings.economicCode) && <div className="text-[10px] text-slate-500">شناسه ملی: {settings.nationalId || '—'} · کد اقتصادی: {settings.economicCode || '—'}</div>}
+        <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-[12px] leading-7 sm:grid-cols-[.85fr_1.55fr]">
+          <div className="order-2 sm:order-1">
+            <div className="print-only print-block text-[10px] leading-6 text-slate-600">
+              <div><b>شناسه ملی:</b> {settings.nationalId || '—'}</div>
+              <div><b>کد اقتصادی:</b> {settings.economicCode || '—'}</div>
+              <div><b>کدپستی:</b> {settings.postalCode || '—'}</div>
+            </div>
+            <div className="screen-only grid gap-1">
+              <MiniEdit placeholder="شناسه ملی فروشنده" value={settings.nationalId} onChange={(v) => setSettings({ ...settings, nationalId: v })} />
+              <MiniEdit placeholder="کد اقتصادی فروشنده" value={settings.economicCode} onChange={(v) => setSettings({ ...settings, economicCode: v })} />
+              <MiniEdit placeholder="کدپستی فروشنده" value={settings.postalCode} onChange={(v) => setSettings({ ...settings, postalCode: v })} />
+            </div>
           </div>
-          <div>
+          <div className="order-1 sm:order-2">
+            <InfoLine label="فروشنده" value={settings.businessName} onChange={(v) => setSettings({ ...settings, businessName: v })} />
+            <InfoLine label="تلفن" value={settings.phone} onChange={(v) => setSettings({ ...settings, phone: v })} />
             <InfoLine label="آدرس" value={settings.address} onChange={(v) => setSettings({ ...settings, address: v })} />
-            <div className="text-[10px] text-slate-500">{settings.businessName}{settings.postalCode ? ` · کدپستی: ${settings.postalCode}` : ''}</div>
           </div>
         </div>
       </header>
 
-      <div className="mb-2 border-t-2 border-slate-700 pt-2">
+      <div className="invoice-party-block mb-2 border-t-2 border-slate-700 pt-2">
         <div className="grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-[1.35fr_.65fr]">
           <div className="space-y-1">
             <div className="flex items-center gap-2"><span className="shrink-0 font-bold">طرف حساب:</span>
@@ -224,7 +239,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       </table>
       <div className="screen-only mt-2"><Button variant="outline" size="sm" onClick={() => patch('items', [...invoice.items, { id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0 }])}><Plus className="h-4 w-4" /> افزودن ردیف</Button></div>
 
-      <div className="mt-4 grid grid-cols-1 gap-6 border-t border-blue-200 pt-3 sm:grid-cols-2">
+      <div className="invoice-summary-block mt-4 grid grid-cols-1 gap-6 border-t border-blue-200 pt-3 sm:grid-cols-2">
         <div className="order-2 text-[12px] sm:order-1">
           <EditableArea value={invoice.notes} onChange={(v) => patch('notes', v)} placeholder="توضیحات فاکتور..." />
         </div>
@@ -237,7 +252,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         </div>
       </div>
 
-      <div className="mt-8 grid grid-cols-2 gap-8 text-[12px]">
+      <div className="invoice-payment-block mt-8 grid grid-cols-2 gap-8 text-[12px]">
         <div className="leading-7">
           <div className="font-bold">اطلاعات پرداخت:</div>
           <InfoLine label="شماره کارت" value={settings.cardNumber} onChange={(v) => setSettings({ ...settings, cardNumber: v })} />
@@ -247,7 +262,7 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
         <div className="text-slate-500"><EditableArea value={settings.footer} onChange={(v) => setSettings({ ...settings, footer: v })} placeholder="پاورقی فاکتور..." /></div>
       </div>
 
-      <div className="mt-20 grid grid-cols-2 text-center text-[12px]"><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده</div><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div></div>
+      <div className="invoice-signatures mt-20 grid grid-cols-2 text-center text-[12px]"><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده</div><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div></div>
       </fieldset>
     </div>
 
