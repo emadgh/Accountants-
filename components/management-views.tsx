@@ -699,7 +699,7 @@ export function ReportsView() {
   const directionOf = (payment: Payment) => resolvedPaymentDirection(payment, payment.invoiceId ? invoices.find((invoice) => invoice.id === payment.invoiceId) : undefined);
   const receipts = payments.filter((payment) => directionOf(payment) === 'receipt').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
   const outgoing = payments.filter((payment) => directionOf(payment) === 'payment').reduce((sum, payment) => sum + effectivePaymentAmount(payment, checks), 0);
-  const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * product.buyPrice, 0);
+  const stock = products.filter((product) => product.kind === 'product').reduce((sum, product) => sum + product.stock * Number(product.averageCost ?? product.buyPrice ?? 0), 0);
   const pending = checks.filter((check) => check.status === 'pending').reduce((sum, check) => sum + check.amount, 0);
   const rows = [
     ['فروش قطعی', sales],
