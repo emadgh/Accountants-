@@ -490,19 +490,20 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   const customerSource = (customerTable?.rows || []).map((row, index) => ({ row, index, source: sourceKey(row, index) }));
   const sourceOpeningKnown = new Set<string>();
   const customers: Customer[] = customerSource.map(({ row, index, source }) => {
-    id: 'yas_customer_' + keyPart(source, String(index + 1)),
-    code: text(value(row, aliases.code)) || source,
-    name: text(value(row, aliases.name)) || 'طرف حساب ' + (index + 1),
-    kind: 'both',
-    status: activeState(value(row, aliases.active)),
-    phone: text(value(row, aliases.phone)),
-    address: text(value(row, aliases.address)),
-    nationalId: text(value(row, aliases.nationalId)),
-    economicCode: text(value(row, aliases.economicCode)),
-    postalCode: text(value(row, aliases.postalCode)),
-    openingBalance: number(value(row, aliases.opening)),
-    notes: 'مهاجرت‌شده از Yas',
-  };
+    const customer: Customer = {
+      id: 'yas_customer_' + keyPart(source, String(index + 1)),
+      code: text(value(row, aliases.code)) || source,
+      name: text(value(row, aliases.name)) || 'طرف حساب ' + (index + 1),
+      kind: 'both',
+      status: activeState(value(row, aliases.active)),
+      phone: text(value(row, aliases.phone)),
+      address: text(value(row, aliases.address)),
+      nationalId: text(value(row, aliases.nationalId)),
+      economicCode: text(value(row, aliases.economicCode)),
+      postalCode: text(value(row, aliases.postalCode)),
+      openingBalance: number(value(row, aliases.opening)),
+      notes: 'مهاجرت‌شده از Yas',
+    };
     if (value(row, aliases.opening) != null && text(value(row, aliases.opening)) !== '') sourceOpeningKnown.add(customer.id);
     return customer;
   });
@@ -657,7 +658,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
       const customerRef = rowRef(row, aliases.customerRef);
       const customer = customerByRef.get(normalizeName(customerRef));
       if (!customer) {
-        messages.push({ severity: 'warning', code: 'payment-customer-unmapped', entity: source, message: 'طرف‌حساب دریافت/پرداخت نگاشت نشد: ' + customerRef });
+        messages.push({ severity: 'conflict', code: 'payment-customer-unmapped', entity: source, message: 'طرف‌حساب دریافت/پرداخت نگاشت نشد: ' + (customerRef || 'مرجع خالی') + '. Import تا رفع نگاشت متوقف می‌شود.' });
         continue;
       }
       const invoiceRef = rowRef(row, aliases.invoiceRef);
