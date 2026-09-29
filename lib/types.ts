@@ -16,6 +16,7 @@ export interface Customer {
   nationalId: string;
   economicCode: string;
   postalCode: string;
+  openingBalance?: number;
   notes?: string;
 }
 
@@ -105,6 +106,44 @@ export interface CheckRecord {
   notes?: string;
 }
 
+export interface AccountAdjustment {
+  id: string;
+  customerId: string;
+  date: string;
+  amount: number;
+  note: string;
+  createdAt: string;
+}
+
+export type LedgerEntryKind =
+  | 'opening'
+  | 'sale'
+  | 'purchase'
+  | 'receipt'
+  | 'payment'
+  | 'check'
+  | 'adjustment'
+  | 'void';
+
+export interface CustomerLedgerEntry {
+  id: string;
+  customerId: string;
+  date: string;
+  sortKey: string;
+  kind: LedgerEntryKind;
+  title: string;
+  reference?: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  nominalAmount?: number;
+  effective: boolean;
+  status?: string;
+  note?: string;
+  invoiceId?: string;
+  invoiceKind?: InvoiceKind;
+}
+
 export interface BusinessSettings {
   businessName: string;
   ownerName: string;
@@ -128,6 +167,7 @@ export interface AccountingData {
   invoices: Invoice[];
   payments: Payment[];
   checks: CheckRecord[];
+  adjustments: AccountAdjustment[];
   settings: BusinessSettings;
 }
 
