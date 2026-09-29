@@ -355,7 +355,7 @@ function findDerivedBalance(snapshot: ExternalSqliteSnapshot, prefix: 't' | 'k',
   return number(candidate);
 }
 
-function buildStockMovements(products: Product[], invoices: Invoice[]): StockMovement[] {
+function buildStockMovements(products: Product[], invoices: Invoice[], knownFinalStockIds: Set<string>): StockMovement[] {
   const movements: StockMovement[] = [];
   const finalInvoices = invoices
     .filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'void')
@@ -375,7 +375,9 @@ function buildStockMovements(products: Product[], invoices: Invoice[]): StockMov
   const average = new Map<string, number>();
   for (const product of products) {
     if (product.kind !== 'product') continue;
-    const opening = Number(product.stock || 0) - (netByProduct.get(product.id) || 0);
+    const opening = knownFinalStockIds.has(product.id)
+      ? Number(product.stock || 0) - (netByProduct.get(product.id) || 0)
+      : 0;
     const avg = Number(product.averageCost || product.buyPrice || 0);
     balance.set(product.id, opening);
     average.set(product.id, avg);
@@ -486,7 +488,8 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   if (!itemTables.length) messages.push({ severity: 'conflict', code: 'invoice-items-table-missing', message: 'جدول ردیف‌های فاکتور شناسایی نشد.' });
 
   const customerSource = (customerTable?.rows || []).map((row, index) => ({ row, index, source: sourceKey(row, index) }));
-  const customers: Customer[] = customerSource.map(({ row, index, source }) => ({
+  const sourceOpeningKnown = new Set<string>();
+  const customers: Customer[] = customerSource.map(({ row, index, source }) => {
     id: 'yas_customer_' + keyPart(source, String(index + 1)),
     code: text(value(row, aliases.code)) || source,
     name: text(value(row, aliases.name)) || 'طرف حساب ' + (index + 1),
@@ -499,7 +502,10 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     postalCode: text(value(row, aliases.postalCode)),
     openingBalance: number(value(row, aliases.opening)),
     notes: 'مهاجرت‌شده از Yas',
-  }));
+  };
+    if (value(row, aliases.opening) != null && text(value(row, aliases.opening)) !== '') sourceOpeningKnown.add(customer.id);
+    return customer;
+  });
 
   const customerByRef = new Map<string, Customer>();
   customerSource.forEach(({ row, source }, index) => {
@@ -534,6 +540,21 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
   productSource.forEach(({ row, source }, index) => {
     const product = products[index];
     [source, product.code, product.name, text(value(row, aliases.id))].filter(Boolean).forEach((key) => productByRef.set(normalizeName(String(key)), product));
+  });
+
+  productSource.forEach(({ source }, index) => {
+    const product = products[index];
+    if (!product || product.kind !== 'product' || sourceStockKnown.has(product.id)) return;
+    const derivedStock = findDerivedBalance(snapshot, 'k', [source, product.code]);
+    if (derivedStock == null) return;
+    product.stock = derivedStock;
+    sourceStockKnown.add(product.id);
+    messages.push({
+      severity: 'info',
+      code: 'stock-inferred-from-cardex',
+      entity: product.code,
+      message: 'موجودی نهایی «' + product.name + '» از کاردکس مشتق‌شده Yas استنتاج شد؛ خود جدول k به‌عنوان Entity وارد نمی‌شود.',
+    });
   });
 
   const itemRows = itemTables.flatMap((table) => table.rows.map((row, index) => ({ table, row, index })));
@@ -659,6 +680,30 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     }
   }
 
+  customerSource.forEach(({ source }, index) => {
+    const customer = customers[index];
+    if (!customer || sourceOpeningKnown.has(customer.id)) return;
+    const sourceFinalBalance = findDerivedBalance(snapshot, 't', [source, customer.code]);
+    if (sourceFinalBalance == null) return;
+    const operationalBalance = customerNetBalance(
+      customer.id,
+      invoices,
+      payments,
+      [],
+      [],
+      0,
+      []
+    );
+    customer.openingBalance = sourceFinalBalance - operationalBalance;
+    sourceOpeningKnown.add(customer.id);
+    messages.push({
+      severity: 'info',
+      code: 'opening-balance-inferred',
+      entity: customer.code,
+      message: 'مانده افتتاحیه «' + customer.name + '» از مانده نهایی t-cardex منهای اثر اسناد پایه استنتاج شد.',
+    });
+  });
+
   const settings = JSON.parse(JSON.stringify(seedData.settings)) as AccountingData['settings'];
   const defaultProfile = settings.businessProfiles[0] as BusinessProfile;
   if (signatureTable?.rows.length) {
@@ -704,7 +749,7 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     }
   }
 
-  const stockMovements = buildStockMovements(products, invoices);
+  const stockMovements = buildStockMovements(products, invoices, sourceStockKnown);
   const draftData: AccountingData = {
     customers,
     products,
