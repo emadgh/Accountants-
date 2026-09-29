@@ -19,6 +19,7 @@ import { MetricCard } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
+import { YasImporterPanel } from '@/components/yas-importer-panel';
 import { confirmDialog, notify } from '@/lib/feedback';
 
 function PageHead({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
@@ -927,6 +928,7 @@ export function SettingsView() {
 
       <div className="space-y-5">
         <StorageBackupPanel />
+        <YasImporterPanel />
         <Card><CardHeader><CardTitle className="text-rose-700">بازنشانی داده‌ها</CardTitle></CardHeader><CardContent><p className="mb-3 text-sm text-slate-600">داده‌های فعلی با نمونه اولیه جایگزین می‌شوند.</p><Button variant="danger" onClick={async () => { if (await confirmDialog('همه داده‌ها بازنشانی شوند؟ این عملیات داده فعلی را با داده نمونه جایگزین می‌کند.', { title: 'بازنشانی کامل', confirmLabel: 'بازنشانی', danger: true })) resetAll(); }}><Trash2 className="h-4 w-4" /> بازنشانی کامل</Button></CardContent></Card>
       </div>
     </div>
