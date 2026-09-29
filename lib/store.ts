@@ -511,11 +511,26 @@ export const useAccountingStore = create<Store>()(
       setHydrated: (v) => set({ hydrated: v }),
 
       upsertCustomer: (customer) =>
-        set((s) => ({
-          customers: s.customers.some((c) => c.id === customer.id)
-            ? s.customers.map((c) => (c.id === customer.id ? customer : c))
-            : [customer, ...s.customers],
-        })),
+        set((state) => {
+          const exists = state.customers.some((item) => item.id === customer.id);
+          const customers = exists
+            ? state.customers.map((item) => (item.id === customer.id ? customer : item))
+            : [customer, ...state.customers];
+          if (exists || Math.abs(Number(customer.openingBalance || 0)) <= 0.0001) return { customers };
+
+          const opening: AccountAdjustment = {
+            id: 'opening-customer-' + customer.id,
+            customerId: customer.id,
+            date: 'ابتدای دوره',
+            amount: Number(customer.openingBalance || 0),
+            note: 'مانده افتتاحیه ' + customer.name,
+            createdAt: new Date().toISOString(),
+          };
+          return {
+            customers,
+            journalEntries: [...state.journalEntries, ...journalForCustomerAdjustment(opening, state.accounts)],
+          };
+        }),
 
       deleteCustomer: (id) => set((s) => ({ customers: s.customers.filter((c) => c.id !== id) })),
 
@@ -555,7 +570,15 @@ export const useAccountingStore = create<Store>()(
               sourceReference: 'موجودی اولیه کالا',
             }];
           }
-          return { products: [normalized, ...state.products], stockMovements };
+          const newMovements = stockMovements.slice(state.stockMovements.length);
+          return {
+            products: [normalized, ...state.products],
+            stockMovements,
+            journalEntries: [
+              ...state.journalEntries,
+              ...newMovements.flatMap((movement) => journalForStockAdjustment(movement, state.accounts)),
+            ],
+          };
         }),
 
       deleteProduct: (id) => set((s) => ({ products: s.products.filter((p) => p.id !== id) })),
