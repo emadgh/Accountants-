@@ -36,7 +36,7 @@ export const seedData: AccountingData = {
   ],
   invoices: [
     {
-      id: 'inv_demo', number: '300159', kind: 'sale', status: 'final', date: '۱۴۰۵/۰۳/۰۵ ۱۳:۱۳',
+      id: 'inv_demo', number: '300159', kind: 'sale', status: 'partial', date: '۱۴۰۵/۰۳/۰۵ ۱۳:۱۳',
       customerId: 'cus_mansouri', customerName: 'پخش منصوری', customerPhone: '', customerAddress: '',
       items: [
         { id: 'ii1', productId: 'prd_1001', description: 'طراحی تکسچر', details: '60120 ژینو، کارینا، ادوین', unit: 'عدد', qty: 3, unitPrice: 4000000 },
