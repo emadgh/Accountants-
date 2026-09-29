@@ -21,6 +21,7 @@ import { PersianDateInput } from '@/components/persian-date-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricCard } from '@/components/ui/metric-card';
 
 type ReportTab = 'sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
 
@@ -107,14 +108,6 @@ function asOfInventory(product: Product, movements: StockMovement[], toDate: str
     stock: last ? Number(last.balanceAfter || 0) : 0,
     averageCost: last ? Number(last.averageCostAfter || 0) : Number(product.averageCost || product.buyPrice || 0),
   };
-}
-
-function Metric({ title, value, hint }: { title: string; value: string; hint?: string }) {
-  return <Card><CardContent>
-    <div className="text-xs font-bold text-slate-500">{title}</div>
-    <div className="mt-2 text-xl font-black text-slate-950">{value}</div>
-    {hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}
-  </CardContent></Card>;
 }
 
 function EmptyRow({ cols, text }: { cols: number; text: string }) {
@@ -395,11 +388,11 @@ export function ReportsView() {
 
       {tab === 'sales' && <>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <Metric title="فروش خالص" value={money(netSales) + ' ' + settings.currency} hint={'فروش ' + money(grossSales) + ' - مرجوعی ' + money(saleReturnTotal)} />
-          <Metric title="خرید خالص" value={money(netPurchases) + ' ' + settings.currency} hint={'خرید ' + money(grossPurchases) + ' - مرجوعی ' + money(purchaseReturnTotal)} />
-          <Metric title="بهای تمام‌شده فروش" value={money(netCostOfSales) + ' ' + settings.currency} />
-          <Metric title="سود ناخالص تقریبی" value={money(grossProfit) + ' ' + settings.currency} hint="بر مبنای Stock Movement و بهای ثبت‌شده" />
-          <Metric title="تعداد سند" value={String(salesRows.length)} />
+          <MetricCard title="فروش خالص" value={money(netSales) + ' ' + settings.currency} subtitle={'فروش ' + money(grossSales) + ' - مرجوعی ' + money(saleReturnTotal)} />
+          <MetricCard title="خرید خالص" value={money(netPurchases) + ' ' + settings.currency} subtitle={'خرید ' + money(grossPurchases) + ' - مرجوعی ' + money(purchaseReturnTotal)} />
+          <MetricCard title="بهای تمام‌شده فروش" value={money(netCostOfSales) + ' ' + settings.currency} />
+          <MetricCard title="سود ناخالص تقریبی" value={money(grossProfit) + ' ' + settings.currency} subtitle="بر مبنای Stock Movement و بهای ثبت‌شده" />
+          <MetricCard title="تعداد سند" value={String(salesRows.length)} />
         </div>
         <Card>
           <CardHeader><CardTitle>جزئیات فروش، خرید و مرجوعی</CardTitle></CardHeader>
@@ -412,9 +405,9 @@ export function ReportsView() {
 
       {tab === 'balances' && <>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Metric title="جمع بدهکاران پایان بازه" value={money(debtors) + ' ' + settings.currency} />
-          <Metric title="جمع بستانکاران پایان بازه" value={money(creditors) + ' ' + settings.currency} />
-          <Metric title="تعداد طرف حساب دارای گردش/مانده" value={String(balanceRows.length)} />
+          <MetricCard title="جمع بدهکاران پایان بازه" value={money(debtors) + ' ' + settings.currency} />
+          <MetricCard title="جمع بستانکاران پایان بازه" value={money(creditors) + ' ' + settings.currency} />
+          <MetricCard title="تعداد طرف حساب دارای گردش/مانده" value={String(balanceRows.length)} />
         </div>
         <Card><CardHeader><CardTitle>بدهکاران و بستانکاران</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[900px]">
           <thead><tr><th>کد</th><th>طرف حساب</th><th>مانده ابتدای بازه</th><th>بدهکار بازه</th><th>بستانکار بازه</th><th>مانده پایان بازه</th><th>وضعیت</th></tr></thead>
@@ -424,9 +417,9 @@ export function ReportsView() {
 
       {tab === 'checks' && <>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Metric title="چک‌های سررسید گذشته" value={money(overdueChecks) + ' ' + settings.currency} />
-          <Metric title="چک‌های آینده" value={money(futureChecks) + ' ' + settings.currency} />
-          <Metric title="تعداد چک در بازه" value={String(checkRows.length)} />
+          <MetricCard title="چک‌های سررسید گذشته" value={money(overdueChecks) + ' ' + settings.currency} />
+          <MetricCard title="چک‌های آینده" value={money(futureChecks) + ' ' + settings.currency} />
+          <MetricCard title="تعداد چک در بازه" value={String(checkRows.length)} />
         </div>
         <Card><CardHeader><CardTitle>چک‌ها بر اساس سررسید</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[960px]">
           <thead><tr><th>سند</th><th>شماره چک</th><th>طرف حساب</th><th>نوع</th><th>بانک</th><th>سررسید</th><th>مبلغ</th><th>وضعیت</th></tr></thead>
@@ -436,9 +429,9 @@ export function ReportsView() {
 
       {tab === 'inventory' && <>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Metric title="ارزش موجودی پایان بازه" value={money(inventoryValue) + ' ' + settings.currency} />
-          <Metric title="کالاهای زیر حداقل" value={String(belowMinimumCount)} />
-          <Metric title="تعداد کالا" value={String(inventoryRows.length)} />
+          <MetricCard title="ارزش موجودی پایان بازه" value={money(inventoryValue) + ' ' + settings.currency} />
+          <MetricCard title="کالاهای زیر حداقل" value={String(belowMinimumCount)} />
+          <MetricCard title="تعداد کالا" value={String(inventoryRows.length)} />
         </div>
         <Card><CardHeader><CardTitle>موجودی و گردش کالا</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[980px]">
           <thead><tr><th>کد</th><th>کالا</th><th>ورود</th><th>خروج</th><th>موجودی پایان بازه</th><th>میانگین هزینه</th><th>ارزش</th><th>حداقل</th><th>وضعیت</th></tr></thead>
@@ -449,10 +442,10 @@ export function ReportsView() {
       {tab === 'ledger' && <>
         <Card className="screen-only"><CardContent><label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">طرف حساب دفتر</span><select className="h-10 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 text-sm" value={selectedLedgerCustomerId} onChange={(event) => setSelectedLedgerCustomerId(event.target.value)}>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.code} — {customer.name}</option>)}</select></label></CardContent></Card>
         <div className="grid gap-4 sm:grid-cols-4">
-          <Metric title="مانده ابتدای بازه" value={money(Math.abs(ledgerOpening)) + (ledgerOpening > 0 ? ' بدهکار' : ledgerOpening < 0 ? ' بستانکار' : '')} />
-          <Metric title="بدهکار بازه" value={money(ledgerDebit) + ' ' + settings.currency} />
-          <Metric title="بستانکار بازه" value={money(ledgerCredit) + ' ' + settings.currency} />
-          <Metric title="مانده پایان بازه" value={money(Math.abs(ledgerClosing)) + (ledgerClosing > 0 ? ' بدهکار' : ledgerClosing < 0 ? ' بستانکار' : '')} />
+          <MetricCard title="مانده ابتدای بازه" value={money(Math.abs(ledgerOpening)) + (ledgerOpening > 0 ? ' بدهکار' : ledgerOpening < 0 ? ' بستانکار' : '')} />
+          <MetricCard title="بدهکار بازه" value={money(ledgerDebit) + ' ' + settings.currency} />
+          <MetricCard title="بستانکار بازه" value={money(ledgerCredit) + ' ' + settings.currency} />
+          <MetricCard title="مانده پایان بازه" value={money(Math.abs(ledgerClosing)) + (ledgerClosing > 0 ? ' بدهکار' : ledgerClosing < 0 ? ' بستانکار' : '')} />
         </div>
         <Card><CardHeader><CardTitle>دفتر {selectedLedgerCustomer?.name || 'طرف حساب'}</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[840px]">
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
@@ -463,10 +456,10 @@ export function ReportsView() {
       {tab === 'cardex' && <>
         <Card className="screen-only"><CardContent><label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">کالای کاردکس</span><select className="h-10 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 text-sm" value={selectedCardexProductId} onChange={(event) => setSelectedCardexProductId(event.target.value)}>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name}</option>)}</select></label></CardContent></Card>
         <div className="grid gap-4 sm:grid-cols-4">
-          <Metric title="ورود بازه" value={money(cardexIncoming) + ' ' + (selectedCardexProduct?.unit || '')} />
-          <Metric title="خروج بازه" value={money(cardexOutgoing) + ' ' + (selectedCardexProduct?.unit || '')} />
-          <Metric title="موجودی پایان بازه" value={money(cardexAsOf.stock) + ' ' + (selectedCardexProduct?.unit || '')} />
-          <Metric title="میانگین هزینه پایان بازه" value={money(cardexAsOf.averageCost) + ' ' + settings.currency} />
+          <MetricCard title="ورود بازه" value={money(cardexIncoming) + ' ' + (selectedCardexProduct?.unit || '')} />
+          <MetricCard title="خروج بازه" value={money(cardexOutgoing) + ' ' + (selectedCardexProduct?.unit || '')} />
+          <MetricCard title="موجودی پایان بازه" value={money(cardexAsOf.stock) + ' ' + (selectedCardexProduct?.unit || '')} />
+          <MetricCard title="میانگین هزینه پایان بازه" value={money(cardexAsOf.averageCost) + ' ' + settings.currency} />
         </div>
         <Card><CardHeader><CardTitle>کاردکس {selectedCardexProduct?.name || 'کالا'}</CardTitle></CardHeader><div className="table-wrap"><table className="data-table min-w-[940px]">
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>بهای واحد</th></tr></thead>
