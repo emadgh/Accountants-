@@ -629,7 +629,12 @@ export const useAccountingStore = create<Store>()(
           : [next, ...state.invoices];
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
+        const newMovements = inventory.stockMovements.slice(state.stockMovements.length);
+        const journalEntries = [
+          ...state.journalEntries,
+          ...journalForInvoice(next, state.products, newMovements, state.accounts, 'post'),
+        ];
+        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices, journalEntries });
         return { ok: true, invoice: saved };
       },
 
@@ -673,7 +678,22 @@ export const useAccountingStore = create<Store>()(
         const merged = state.invoices.map((item) => (item.id === next.id ? next : item));
         const invoices = withInvoiceStatuses(merged, state.payments, state.checks, state.returns);
         const saved = invoices.find((item) => item.id === next.id) || next;
-        set({ products: appliedInventory.products, stockMovements: appliedInventory.stockMovements, invoices });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'invoice',
+          previous.id,
+          next.date,
+          'برگشت ثبت قبلی فاکتور ' + previous.number,
+          'revision-reversal'
+        );
+        const newMovements = appliedInventory.stockMovements.slice(reversedInventory.stockMovements.length);
+        const posts = journalForInvoice(next, baseProducts, newMovements, state.accounts, 'revision-post');
+        set({
+          products: appliedInventory.products,
+          stockMovements: appliedInventory.stockMovements,
+          invoices,
+          journalEntries: [...state.journalEntries, ...reversals, ...posts],
+        });
         return { ok: true, invoice: saved };
       },
 
@@ -704,7 +724,20 @@ export const useAccountingStore = create<Store>()(
         const inventory = applyInvoiceInventory(state.products, state.stockMovements, previous, -1, 'void-reversal');
         if (!inventory.ok) return { ok: false, message: inventory.message };
         const invoices = state.invoices.map((item) => (item.id === id ? next : item));
-        set({ products: inventory.products, stockMovements: inventory.stockMovements, invoices });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'invoice',
+          previous.id,
+          next.date,
+          'ابطال فاکتور ' + previous.number + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          products: inventory.products,
+          stockMovements: inventory.stockMovements,
+          invoices,
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true, invoice: next };
       },
 
@@ -790,7 +823,12 @@ export const useAccountingStore = create<Store>()(
           ? state.returns.map((item) => item.id === next.id ? next : item)
           : [next, ...state.returns];
         const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
-        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
+        const newMovements = inventory.stockMovements.slice(state.stockMovements.length);
+        const journalEntries = [
+          ...state.journalEntries,
+          ...journalForReturn(next, originalInvoice, state.products, newMovements, state.accounts),
+        ];
+        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements, journalEntries });
         return { ok: true, returnDocument: next };
       },
 
@@ -817,7 +855,21 @@ export const useAccountingStore = create<Store>()(
         if (!inventory.ok) return { ok: false, message: inventory.message };
         const returns = state.returns.map((item) => item.id === id ? next : item);
         const invoices = withInvoiceStatuses(state.invoices, state.payments, state.checks, returns);
-        set({ returns, invoices, products: inventory.products, stockMovements: inventory.stockMovements });
+        const reversals = reverseActiveSourceEntries(
+          state.journalEntries,
+          'return',
+          previous.id,
+          next.date,
+          'ابطال سند مرجوعی ' + previous.number + ' — ' + reason.trim(),
+          'void-reversal'
+        );
+        set({
+          returns,
+          invoices,
+          products: inventory.products,
+          stockMovements: inventory.stockMovements,
+          journalEntries: [...state.journalEntries, ...reversals],
+        });
         return { ok: true, returnDocument: next };
       },
 
