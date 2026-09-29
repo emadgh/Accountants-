@@ -1,7 +1,7 @@
 export type CustomerKind = 'customer' | 'supplier' | 'both';
 export type ProductKind = 'product' | 'service';
 export type InvoiceKind = 'sale' | 'purchase';
-export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled';
+export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
 export type PaymentMethod = 'cash' | 'card' | 'check';
 export type CheckStatus = 'pending' | 'cleared' | 'bounced';
 
@@ -41,6 +41,16 @@ export interface InvoiceItem {
   unitPrice: number;
 }
 
+export type InvoiceAuditAction = 'created' | 'draft_saved' | 'finalized' | 'revised' | 'voided';
+
+export interface InvoiceAuditEntry {
+  id: string;
+  action: InvoiceAuditAction;
+  at: string;
+  revision: number;
+  note?: string;
+}
+
 export interface Invoice {
   id: string;
   number: string;
@@ -61,6 +71,11 @@ export interface Invoice {
   notes: string;
   createdAt: string;
   updatedAt: string;
+  revision?: number;
+  finalizedAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
+  auditTrail?: InvoiceAuditEntry[];
 }
 
 export interface Payment {
@@ -111,4 +126,10 @@ export interface AccountingData {
   payments: Payment[];
   checks: CheckRecord[];
   settings: BusinessSettings;
+}
+
+export interface StoreOperationResult {
+  ok: boolean;
+  message?: string;
+  invoice?: Invoice;
 }
