@@ -7,8 +7,10 @@ import {
   Trash2, Upload, UserRound, WalletCards
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { AccountingData, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
-import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, todayFa, uid } from '@/lib/utils';
+import type { AccountingData, BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
+import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
+import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
+import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +90,17 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
     setOpen(true);
   };
 
+  const saveCustomer = () => {
+    if (!edit) return;
+    const errors = validateOfficialFields(edit);
+    if (errors.length) {
+      window.alert(errors.join('\n'));
+      return;
+    }
+    upsertCustomer(edit);
+    setOpen(false);
+  };
+
   return <div className="space-y-5">
     <PageHead title="مشتریان و تامین‌کنندگان" subtitle="مشخصات رسمی، مانده حساب و دسترسی به دفتر گردش طرف حساب" action={<Button onClick={() => startEdit()}><Plus className="h-4 w-4" /> طرف حساب جدید</Button>} />
     <Card>
@@ -139,7 +152,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button>
-            <Button disabled={!edit.name.trim()} onClick={() => { upsertCustomer(edit); setOpen(false); }}><Check className="h-4 w-4" /> ذخیره</Button>
+            <Button disabled={!edit.name.trim()} onClick={saveCustomer}><Check className="h-4 w-4" /> ذخیره</Button>
           </div>
         </div>}
       </DialogContent>
@@ -162,7 +175,7 @@ export function CustomerLedgerView({
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustDirection, setAdjustDirection] = useState<'debit' | 'credit'>('debit');
   const [adjustAmount, setAdjustAmount] = useState(0);
-  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustDate, setAdjustDate] = useState(todayIso());
   const [adjustNote, setAdjustNote] = useState('');
 
   useEffect(() => {
@@ -208,7 +221,7 @@ export function CustomerLedgerView({
     }
     setAdjustAmount(0);
     setAdjustNote('');
-    setAdjustDate(todayFa());
+    setAdjustDate(todayIso());
     setAdjustOpen(false);
   };
 
@@ -348,7 +361,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
   const [adjustProductId, setAdjustProductId] = useState('');
   const [adjustMode, setAdjustMode] = useState<'count' | 'delta'>('count');
   const [adjustQuantity, setAdjustQuantity] = useState(0);
-  const [adjustDate, setAdjustDate] = useState(todayFa());
+  const [adjustDate, setAdjustDate] = useState(todayIso());
   const [adjustNote, setAdjustNote] = useState('');
 
   const list = products.filter((product) => product.kind === 'product').filter((product) => (product.name + product.code).toLowerCase().includes(q.toLowerCase()));
@@ -364,7 +377,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
     const product = products.find((item) => item.id === selected);
     setAdjustMode('count');
     setAdjustQuantity(product?.stock || 0);
-    setAdjustDate(todayFa());
+    setAdjustDate(todayIso());
     setAdjustNote('');
     setAdjustOpen(true);
   };
@@ -479,7 +492,7 @@ export function PaymentsView() {
     method: 'cash',
     checkId: undefined,
     amount: 0,
-    date: todayFa(),
+    date: todayIso(),
     reference: '',
     notes: '',
   });
