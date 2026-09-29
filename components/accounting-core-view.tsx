@@ -147,7 +147,7 @@ export function AccountingCoreView() {
             return entry.lines.map((line, index) => {
               const account = accounts.find((item) => item.id === line.accountId);
               return <tr key={entry.id + '-' + line.id}>
-                <td>{index === 0 ? entry.date : ''}</td>
+                <td>{index === 0 ? (entry.date === 'ابتدای دوره' ? entry.date : formatPersianDate(entry.date)) : ''}</td>
                 <td>{index === 0 ? <div><div className="font-bold">{entry.description}</div><div className="mt-1 text-[10px] text-slate-500">{entry.sourceType} · {entry.sourceReference || entry.sourceId} · {entry.action}</div></div> : ''}</td>
                 <td className="font-bold">{account ? account.code + ' — ' + account.name : line.accountId}</td>
                 <td className="font-bold text-rose-700">{line.debit ? money(line.debit) : '—'}</td>
