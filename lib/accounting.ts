@@ -435,6 +435,14 @@ export function buildOpeningJournal(data: AccountingData, accounts: Account[]) {
     entries.push(...journalForPayment(normalized, accounts));
   }
 
+  for (const movement of (data.stockMovements || []).filter((item) => item.sourceType === 'adjustment')) {
+    entries.push(...journalForStockAdjustment(movement, accounts));
+  }
+
+  for (const transaction of (data.moneyTransactions || []).filter((item) => item.status === 'final')) {
+    entries.push(...journalForMoneyTransaction(transaction, accounts));
+  }
+
   return entries;
 }
 
