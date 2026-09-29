@@ -7,6 +7,7 @@ import type {
   Account,
   AccountAdjustment,
   AccountingData,
+  BusinessProfile,
   BusinessSettings,
   CheckRecord,
   Customer,
@@ -53,6 +54,9 @@ type Store = AccountingData & {
   hydrated: boolean;
   setHydrated: (v: boolean) => void;
   reserveDocumentNumber: (key: DocumentSequenceKey) => string;
+  upsertBusinessProfile: (profile: BusinessProfile) => OperationResult;
+  deleteBusinessProfile: (id: string) => OperationResult;
+  setDefaultBusinessProfile: (id: string) => OperationResult;
   upsertCustomer: (customer: Customer) => void;
   deleteCustomer: (id: string) => void;
   upsertProduct: (product: Product) => void;
@@ -460,6 +464,79 @@ function normalizeForDraft(invoice: Invoice, previous?: Invoice): Invoice {
   return { ...base, auditTrail: appendAudit(base, action, revision) };
 }
 
+function legacyBusinessProfile(settings: BusinessSettings): BusinessProfile {
+  return {
+    id: 'business_default',
+    label: 'پروفایل اصلی',
+    businessName: settings.businessName || '',
+    ownerName: settings.ownerName || '',
+    phone: settings.phone || '',
+    address: settings.address || '',
+    nationalId: settings.nationalId || '',
+    economicCode: settings.economicCode || '',
+    postalCode: settings.postalCode || '',
+    cardNumber: settings.cardNumber || '',
+    iban: settings.iban || '',
+    bankName: settings.bankName || '',
+    invoiceTitle: settings.invoiceTitle || 'فاکتور فروش',
+    footer: settings.footer || '',
+  };
+}
+
+function mirrorDefaultProfile(settings: BusinessSettings, profile: BusinessProfile): BusinessSettings {
+  return {
+    ...settings,
+    businessName: profile.businessName,
+    ownerName: profile.ownerName,
+    phone: profile.phone,
+    address: profile.address,
+    nationalId: profile.nationalId,
+    economicCode: profile.economicCode,
+    postalCode: profile.postalCode,
+    cardNumber: profile.cardNumber,
+    iban: profile.iban,
+    bankName: profile.bankName,
+    invoiceTitle: profile.invoiceTitle,
+    footer: profile.footer,
+  };
+}
+
+function normalizeBusinessSettings(input?: Partial<BusinessSettings>): BusinessSettings {
+  const base: BusinessSettings = {
+    ...seedData.settings,
+    ...(input || {}),
+    numbering: {
+      ...seedData.settings.numbering,
+      ...(input?.numbering || {}),
+    },
+    businessProfiles: [],
+    defaultBusinessProfileId: '',
+  };
+
+  const sourceProfiles = input?.businessProfiles?.length
+    ? input.businessProfiles
+    : [legacyBusinessProfile(base)];
+  const profiles = sourceProfiles.map((profile, index) => ({
+    ...legacyBusinessProfile(base),
+    ...profile,
+    id: profile.id || 'business_' + (index + 1),
+    label: profile.label?.trim() || profile.businessName?.trim() || 'پروفایل ' + (index + 1),
+  }));
+  const requestedDefault = input?.defaultBusinessProfileId;
+  const defaultBusinessProfileId = profiles.some((profile) => profile.id === requestedDefault)
+    ? requestedDefault!
+    : profiles[0].id;
+  const normalized: BusinessSettings = {
+    ...base,
+    businessProfiles: profiles,
+    defaultBusinessProfileId,
+  };
+  return mirrorDefaultProfile(
+    normalized,
+    profiles.find((profile) => profile.id === defaultBusinessProfileId) || profiles[0]
+  );
+}
+
 function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invoices'>) {
   return data.payments.map((payment) => {
     const invoice = payment.invoiceId ? data.invoices.find((item) => item.id === payment.invoiceId) : undefined;
@@ -471,12 +548,17 @@ function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invo
 }
 
 function normalizeAccountingData(data: AccountingData): AccountingData {
+  const settings = normalizeBusinessSettings(data.settings);
   const customers = (data.customers || []).map((customer) => ({
     ...customer,
     openingBalance: Number(customer.openingBalance || 0),
   }));
   const products = normalizeProducts(data.products || []);
-  const invoices = (data.invoices || []).map((invoice) => ({ ...invoice, date: normalizeStoredDate(invoice.date) }));
+  const invoices = (data.invoices || []).map((invoice) => ({
+    ...invoice,
+    businessProfileId: invoice.businessProfileId || settings.defaultBusinessProfileId,
+    date: normalizeStoredDate(invoice.date),
+  }));
   const returns = (data.returns || []).map((document) => ({ ...document, date: normalizeStoredDate(document.date) }));
   const checks = (data.checks || []).map((check, index) => ({
     ...check,
@@ -503,10 +585,6 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     ...transaction,
     date: normalizeStoredDate(transaction.date),
   }));
-  const numbering = {
-    ...seedData.settings.numbering,
-    ...(data.settings?.numbering || {}),
-  };
 
   const base: AccountingData = {
     customers,
@@ -520,7 +598,7 @@ function normalizeAccountingData(data: AccountingData): AccountingData {
     accounts,
     journalEntries,
     moneyTransactions,
-    settings: { ...seedData.settings, ...(data.settings || {}), numbering },
+    settings,
   };
 
   return {
@@ -567,6 +645,56 @@ export const useAccountingStore = create<Store>()(
           },
         });
         return candidate;
+      },
+
+      upsertBusinessProfile: (profile) => {
+        const state = get();
+        if (!profile.id.trim() || !profile.label.trim() || !profile.businessName.trim()) {
+          return { ok: false, message: 'عنوان پروفایل و نام کسب‌وکار الزامی است.' };
+        }
+        const exists = state.settings.businessProfiles.some((item) => item.id === profile.id);
+        const businessProfiles = exists
+          ? state.settings.businessProfiles.map((item) => item.id === profile.id ? profile : item)
+          : [...state.settings.businessProfiles, profile];
+        let settings: BusinessSettings = { ...state.settings, businessProfiles };
+        if (state.settings.defaultBusinessProfileId === profile.id) {
+          settings = mirrorDefaultProfile(settings, profile);
+        }
+        set({ settings });
+        return { ok: true };
+      },
+
+      deleteBusinessProfile: (id) => {
+        const state = get();
+        if (state.settings.businessProfiles.length <= 1) {
+          return { ok: false, message: 'حداقل یک پروفایل کسب‌وکار باید باقی بماند.' };
+        }
+        if (state.settings.defaultBusinessProfileId === id) {
+          return { ok: false, message: 'ابتدا یک پروفایل دیگر را پیش‌فرض کنید.' };
+        }
+        if (state.invoices.some((invoice) => invoice.businessProfileId === id)) {
+          return { ok: false, message: 'این پروفایل در فاکتورهای موجود استفاده شده و برای حفظ تاریخچه چاپ قابل حذف نیست.' };
+        }
+        set({
+          settings: {
+            ...state.settings,
+            businessProfiles: state.settings.businessProfiles.filter((profile) => profile.id !== id),
+          },
+        });
+        return { ok: true };
+      },
+
+      setDefaultBusinessProfile: (id) => {
+        const state = get();
+        const profile = state.settings.businessProfiles.find((item) => item.id === id);
+        if (!profile) return { ok: false, message: 'پروفایل پیدا نشد.' };
+        set({
+          settings: mirrorDefaultProfile({
+            ...state.settings,
+            defaultBusinessProfileId: id,
+          }, profile),
+        });
+        return { ok: true };
       },
 
       upsertCustomer: (customer) =>
@@ -1237,7 +1365,7 @@ export const useAccountingStore = create<Store>()(
         return { ok: true };
       },
 
-      setSettings: (settings) => set({ settings }),
+      setSettings: (settings) => set({ settings: normalizeBusinessSettings(settings) }),
 
       replaceAll: (data) => {
         set(normalizeAccountingData(data));
@@ -1249,7 +1377,7 @@ export const useAccountingStore = create<Store>()(
     }),
     {
       name: 'accountants-web-v1',
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown) => {
         const state = (persistedState || {}) as Partial<AccountingData>;
         const products = normalizeProducts(state.products || seedData.products);
