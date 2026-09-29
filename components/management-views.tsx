@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricCard } from '@/components/ui/metric-card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { StorageBackupPanel } from '@/components/storage-backup-panel';
 import { confirmDialog, notify } from '@/lib/feedback';
@@ -245,9 +246,9 @@ export function CustomerLedgerView({
 
     {customer ? <>
       <div className="grid gap-4 sm:grid-cols-3">
-        <Metric icon={CircleDollarSign} title="مانده جاری" value={currentBalance === 0 ? '0 ' + settings.currency : money(Math.abs(currentBalance)) + ' ' + settings.currency + ' ' + (currentBalance > 0 ? 'بدهکار' : 'بستانکار')} danger={currentBalance > 0} />
-        <Metric icon={ArrowDownToLine} title="جمع بدهکار بازه" value={money(visibleDebit) + ' ' + settings.currency} />
-        <Metric icon={ArrowUpFromLine} title="جمع بستانکار بازه" value={money(visibleCredit) + ' ' + settings.currency} />
+        <MetricCard icon={CircleDollarSign} title="مانده جاری" value={currentBalance === 0 ? '0 ' + settings.currency : money(Math.abs(currentBalance)) + ' ' + settings.currency + ' ' + (currentBalance > 0 ? 'بدهکار' : 'بستانکار')} tone={currentBalance > 0 ? 'danger' : currentBalance < 0 ? 'success' : 'neutral'} />
+        <MetricCard icon={ArrowDownToLine} title="جمع بدهکار بازه" value={money(visibleDebit) + ' ' + settings.currency} />
+        <MetricCard icon={ArrowUpFromLine} title="جمع بستانکار بازه" value={money(visibleCredit) + ' ' + settings.currency} />
       </div>
 
       <Card>
@@ -408,9 +409,9 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
   return <div className="space-y-5">
     <PageHead title="انبار" subtitle="انبار اصلی؛ موجودی و میانگین موزون از روی کاردکس قابل ردیابی است" action={<Button disabled={!list.length} onClick={() => startAdjustment()}><Plus className="h-4 w-4" /> شمارش / اصلاح موجودی</Button>} />
     <div className="grid gap-4 sm:grid-cols-3">
-      <Metric icon={Boxes} title="تعداد اقلام" value={String(list.length)} />
-      <Metric icon={Archive} title="ارزش موجودی (میانگین موزون)" value={money(total) + ' ' + settings.currency} />
-      <Metric icon={AlertTriangle} title="زیر حداقل موجودی" value={String(low)} danger={low > 0} />
+      <MetricCard icon={Boxes} title="تعداد اقلام" value={String(list.length)} />
+      <MetricCard icon={Archive} title="ارزش موجودی (میانگین موزون)" value={money(total) + ' ' + settings.currency} />
+      <MetricCard icon={AlertTriangle} title="زیر حداقل موجودی" value={String(low)} tone={low > 0 ? 'danger' : 'neutral'} />
     </div>
 
     <Card>
@@ -949,4 +950,4 @@ function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings;
 
 function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) { return <label className={`space-y-1.5 ${className}`}><span className="block text-xs font-bold text-slate-600">{label}</span>{children}</label>; }
 function EmptyRow({ cols, text }: { cols: number; text: string }) { return <tr><td colSpan={cols} className="!py-14 text-center text-slate-400">{text}</td></tr>; }
-function Metric({ icon: Icon, title, value, danger = false }: { icon: typeof Boxes; title: string; value: string; danger?: boolean }) { return <Card><CardContent className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-xl ${danger ? 'bg-rose-50 text-rose-600' : 'bg-sky-50 text-sky-600'}`}><Icon className="h-5 w-5" /></div><div><div className="text-xs font-bold text-slate-500">{title}</div><div className={`mt-1 text-xl font-black ${danger ? 'text-rose-700' : ''}`}>{value}</div></div></CardContent></Card>; }
+
