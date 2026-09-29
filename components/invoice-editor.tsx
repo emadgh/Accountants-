@@ -3,18 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Ban, CheckCircle2, Copy, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
+import type { BusinessProfile, Invoice, InvoiceItem, InvoiceKind } from '@/lib/types';
 import { invoiceTotal, money, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
 import { PersianDateInput } from '@/components/persian-date-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-function blankInvoice(kind: InvoiceKind, customerName = '', number = ''): Invoice {
+function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = ''): Invoice {
   const now = new Date().toISOString();
   return {
     id: uid('inv'),
     number,
+    businessProfileId,
     kind,
     status: 'draft',
     date: todayIso(),
@@ -25,7 +26,7 @@ function blankInvoice(kind: InvoiceKind, customerName = '', number = ''): Invoic
 }
 
 export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; invoiceId?: string | null; onBack?: () => void }) {
-  const { invoices, customers, products, settings, setSettings, reserveDocumentNumber, saveInvoiceDraft, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+  const { invoices, customers, products, settings, upsertBusinessProfile, reserveDocumentNumber, saveInvoiceDraft, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
   const existing = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const [invoice, setInvoice] = useState<Invoice>(() => existing ? structuredClone(existing) : blankInvoice(kind));
   const [savedFlash, setSavedFlash] = useState(false);
@@ -35,12 +36,20 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       setInvoice(structuredClone(existing));
       return;
     }
-    setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind)));
+    setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind), settings.defaultBusinessProfileId));
   }, [existing?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const subtotal = invoice.items.reduce((s, i) => s + Number(i.qty || 0) * Number(i.unitPrice || 0), 0);
   const total = invoiceTotal(invoice);
   const customer = customers.find((c) => c.id === invoice.customerId);
+  const businessProfile = settings.businessProfiles.find((profile) => profile.id === invoice.businessProfileId)
+    || settings.businessProfiles.find((profile) => profile.id === settings.defaultBusinessProfileId)
+    || settings.businessProfiles[0];
+  const updateBusinessProfile = (values: Partial<BusinessProfile>) => {
+    if (!businessProfile) return;
+    const result = upsertBusinessProfile({ ...businessProfile, ...values });
+    if (!result.ok) window.alert(result.message || 'ذخیره پروفایل انجام نشد.');
+  };
   const isDraft = invoice.status === 'draft';
   const isVoid = invoice.status === 'void';
   const isPosted = !isDraft && !isVoid;
@@ -177,24 +186,30 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       {isVoid && <div className="screen-only mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">این فاکتور باطل شده است.{invoice.voidReason ? ` دلیل: ${invoice.voidReason}` : ''}</div>}
       <fieldset disabled={isVoid} className="contents">
       <header className="invoice-party-block mb-3">
-        <EditableText value={invoice.kind === 'sale' ? settings.invoiceTitle : 'فاکتور خرید'} onChange={(v) => invoice.kind === 'sale' && setSettings({ ...settings, invoiceTitle: v })} className="mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />
+        <div className="screen-only mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
+          <div><div className="text-xs font-black text-sky-800">پروفایل صادرکننده</div><div className="text-[10px] text-slate-500">این انتخاب روی خود فاکتور ذخیره می‌شود.</div></div>
+          <select className="h-9 min-w-[220px] rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold" value={invoice.businessProfileId} onChange={(e) => patch('businessProfileId', e.target.value)}>
+            {settings.businessProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}{profile.id === settings.defaultBusinessProfileId ? ' — پیش‌فرض' : ''}</option>)}
+          </select>
+        </div>
+        <EditableText value={invoice.kind === 'sale' ? (businessProfile?.invoiceTitle || 'فاکتور فروش') : 'فاکتور خرید'} onChange={(v) => invoice.kind === 'sale' && updateBusinessProfile({ invoiceTitle: v })} className="mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />
         <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-[12px] leading-7 sm:grid-cols-[.85fr_1.55fr]">
           <div className="order-2 sm:order-1">
             <div className="print-only print-block text-[10px] leading-6 text-slate-600">
-              <div><b>شناسه ملی:</b> {settings.nationalId || '—'}</div>
-              <div><b>کد اقتصادی:</b> {settings.economicCode || '—'}</div>
-              <div><b>کدپستی:</b> {settings.postalCode || '—'}</div>
+              <div><b>شناسه ملی:</b> {businessProfile?.nationalId || '—'}</div>
+              <div><b>کد اقتصادی:</b> {businessProfile?.economicCode || '—'}</div>
+              <div><b>کدپستی:</b> {businessProfile?.postalCode || '—'}</div>
             </div>
             <div className="screen-only grid gap-1">
-              <MiniEdit placeholder="شناسه ملی فروشنده" value={settings.nationalId} onChange={(v) => setSettings({ ...settings, nationalId: v })} />
-              <MiniEdit placeholder="کد اقتصادی فروشنده" value={settings.economicCode} onChange={(v) => setSettings({ ...settings, economicCode: v })} />
-              <MiniEdit placeholder="کدپستی فروشنده" value={settings.postalCode} onChange={(v) => setSettings({ ...settings, postalCode: v })} />
+              <MiniEdit placeholder="شناسه ملی فروشنده" value={businessProfile?.nationalId || ''} onChange={(v) => updateBusinessProfile({ nationalId: v })} />
+              <MiniEdit placeholder="کد اقتصادی فروشنده" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} />
+              <MiniEdit placeholder="کدپستی فروشنده" value={businessProfile?.postalCode || ''} onChange={(v) => updateBusinessProfile({ postalCode: v })} />
             </div>
           </div>
           <div className="order-1 sm:order-2">
-            <InfoLine label="فروشنده" value={settings.businessName} onChange={(v) => setSettings({ ...settings, businessName: v })} />
-            <InfoLine label="تلفن" value={settings.phone} onChange={(v) => setSettings({ ...settings, phone: v })} />
-            <InfoLine label="آدرس" value={settings.address} onChange={(v) => setSettings({ ...settings, address: v })} />
+            <InfoLine label="فروشنده" value={businessProfile?.businessName || ''} onChange={(v) => updateBusinessProfile({ businessName: v })} />
+            <InfoLine label="تلفن" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} />
+            <InfoLine label="آدرس" value={businessProfile?.address || ''} onChange={(v) => updateBusinessProfile({ address: v })} />
           </div>
         </div>
       </header>
@@ -263,11 +278,11 @@ export function InvoiceEditor({ kind, invoiceId, onBack }: { kind: InvoiceKind; 
       <div className="invoice-payment-block mt-8 grid grid-cols-2 gap-8 text-[12px]">
         <div className="leading-7">
           <div className="font-bold">اطلاعات پرداخت:</div>
-          <InfoLine label="شماره کارت" value={settings.cardNumber} onChange={(v) => setSettings({ ...settings, cardNumber: v })} />
-          <InfoLine label="شبا" value={settings.iban} onChange={(v) => setSettings({ ...settings, iban: v })} />
-          <InfoLine label="به نام" value={settings.ownerName} onChange={(v) => setSettings({ ...settings, ownerName: v })} />
+          <InfoLine label="شماره کارت" value={businessProfile?.cardNumber || ''} onChange={(v) => updateBusinessProfile({ cardNumber: v })} />
+          <InfoLine label="شبا" value={businessProfile?.iban || ''} onChange={(v) => updateBusinessProfile({ iban: v })} />
+          <InfoLine label="به نام" value={businessProfile?.ownerName || ''} onChange={(v) => updateBusinessProfile({ ownerName: v })} />
         </div>
-        <div className="text-slate-500"><EditableArea value={settings.footer} onChange={(v) => setSettings({ ...settings, footer: v })} placeholder="پاورقی فاکتور..." /></div>
+        <div className="text-slate-500"><EditableArea value={businessProfile?.footer || ''} onChange={(v) => updateBusinessProfile({ footer: v })} placeholder="پاورقی فاکتور..." /></div>
       </div>
 
       <div className="invoice-signatures mt-20 grid grid-cols-2 text-center text-[12px]"><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء فروشنده</div><div><div className="mx-auto mb-12 h-px w-24 border-t border-dashed border-slate-300"></div>امضاء خریدار</div></div>
@@ -303,6 +318,7 @@ function AmountLine({ label, value, onChange, fixed }: { label: string; value: n
 function invoiceEditableSignature(invoice: Invoice) {
   return JSON.stringify({
     number: invoice.number,
+    businessProfileId: invoice.businessProfileId,
     date: invoice.date,
     customerId: invoice.customerId,
     customerName: invoice.customerName,
