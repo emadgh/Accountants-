@@ -28,6 +28,7 @@ export interface Product {
   unit: string;
   salePrice: number;
   buyPrice: number;
+  averageCost?: number;
   stock: number;
   minStock: number;
   notes?: string;
@@ -106,6 +107,43 @@ export interface CheckRecord {
   notes?: string;
 }
 
+export type StockMovementType = 'opening' | 'purchase' | 'sale' | 'reversal' | 'adjustment';
+export type StockMovementAction =
+  | 'migration-opening'
+  | 'finalize'
+  | 'revision-reversal'
+  | 'revision'
+  | 'void-reversal'
+  | 'count'
+  | 'manual-adjustment';
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  warehouseId: string;
+  date: string;
+  createdAt: string;
+  quantity: number;
+  balanceAfter: number;
+  averageCostAfter: number;
+  unitCost: number;
+  type: StockMovementType;
+  action: StockMovementAction;
+  sourceType: 'invoice' | 'adjustment' | 'system';
+  sourceId: string;
+  sourceReference?: string;
+  sourceKind?: InvoiceKind;
+  note?: string;
+}
+
+export interface StockAdjustmentInput {
+  productId: string;
+  date: string;
+  mode: 'count' | 'delta';
+  quantity: number;
+  note: string;
+}
+
 export interface AccountAdjustment {
   id: string;
   customerId: string;
@@ -168,6 +206,7 @@ export interface AccountingData {
   payments: Payment[];
   checks: CheckRecord[];
   adjustments: AccountAdjustment[];
+  stockMovements: StockMovement[];
   settings: BusinessSettings;
 }
 
