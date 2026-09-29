@@ -81,6 +81,7 @@ async function query(sql: string, bind?: SqlBind) {
 async function transaction(statements: SqlStatement[]) {
   const db = await openDatabase();
   db.exec('BEGIN IMMEDIATE;');
+  db.exec('PRAGMA defer_foreign_keys = ON;');
   try {
     for (const statement of statements) {
       if (statement.bind?.length) db.exec({ sql: statement.sql, bind: statement.bind });
