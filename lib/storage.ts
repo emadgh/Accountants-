@@ -4,6 +4,7 @@ import {
   clearAccountingData,
   loadAccountingData,
   replaceAccountingData,
+  syncAccountingData,
 } from './persistence/repositories/accounting';
 
 export const ACCOUNTING_PERSIST_KEY = 'accountants-web-v1';
@@ -34,6 +35,7 @@ type MetaRow = { value: string };
 type PragmaRow = Record<string, number>;
 
 let writeQueue: Promise<void> = Promise.resolve();
+let persistedCache: AccountingData | null | undefined;
 
 function emitPersistenceError(error: unknown) {
   if (typeof window === 'undefined') return;
@@ -84,7 +86,7 @@ async function saveSnapshotData(data: AccountingData, reason: SnapshotReason) {
   return id;
 }
 
-async function maybeCreateAutomaticSnapshot() {
+async function maybeCreateAutomaticSnapshot(currentData?: AccountingData | null) {
   const meta = await sqliteQuery<MetaRow>('SELECT value FROM app_meta WHERE key = ? LIMIT 1', [
     AUTO_SNAPSHOT_META_KEY,
   ]);
@@ -92,7 +94,7 @@ async function maybeCreateAutomaticSnapshot() {
   const now = Date.now();
   if (now - last < AUTO_SNAPSHOT_INTERVAL_MS) return;
 
-  const current = await loadAccountingData();
+  const current = currentData === undefined ? await loadAccountingData() : currentData;
   if (current) await saveSnapshotData(current, 'auto');
   await sqliteTransaction([
     {
@@ -106,6 +108,7 @@ export const accountingStateStorage = {
   async getItem(_name: string) {
     await writeQueue;
     const data = await loadAccountingData();
+    persistedCache = data;
     return data ? stateEnvelope(data) : null;
   },
 
@@ -114,8 +117,12 @@ export const accountingStateStorage = {
       .catch(() => undefined)
       .then(async () => {
         try {
-          await maybeCreateAutomaticSnapshot();
-          await replaceAccountingData(extractAccountingData(value));
+          const next = extractAccountingData(value);
+          const previous = persistedCache === undefined ? await loadAccountingData() : persistedCache;
+          await maybeCreateAutomaticSnapshot(previous);
+          if (previous) await syncAccountingData(previous, next);
+          else await replaceAccountingData(next);
+          persistedCache = next;
         } catch (error) {
           emitPersistenceError(error);
           throw error;
@@ -130,6 +137,7 @@ export const accountingStateStorage = {
       .then(async () => {
         try {
           await clearAccountingData();
+          persistedCache = null;
         } catch (error) {
           emitPersistenceError(error);
           throw error;
@@ -176,6 +184,7 @@ export async function restoreAccountingSnapshot(id: string) {
 
   const data = JSON.parse(snapshot.payload) as AccountingData;
   await replaceAccountingData(data);
+  persistedCache = data;
 }
 
 export async function importAccountingData(data: AccountingData) {
@@ -183,6 +192,7 @@ export async function importAccountingData(data: AccountingData) {
   const current = await loadAccountingData();
   if (current) await saveSnapshotData(current, 'before-import');
   await replaceAccountingData(data);
+  persistedCache = data;
 }
 
 export async function getAccountingStorageInfo() {
