@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { PwaRegister } from '@/components/pwa-register';
+import { FeedbackHost } from '@/components/feedback-host';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -21,7 +22,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="fa" dir="rtl">
-      <body>{children}<PwaRegister /></body>
+      <body>{children}<FeedbackHost /><PwaRegister /></body>
     </html>
   );
 }
