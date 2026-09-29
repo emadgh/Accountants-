@@ -550,7 +550,7 @@ function normalizeImportedPayments(data: Pick<AccountingData, 'payments' | 'invo
 
 export function normalizeAccountingData(data: AccountingData): AccountingData {
   const settings = normalizeBusinessSettings(data.settings);
-  const customers = (data.customers || []).map((customer) => ({
+  const customers: Customer[] = (data.customers || []).map((customer) => ({
     ...customer,
     status: customer.status === 'archived' ? 'archived' : 'active',
     openingBalance: Number(customer.openingBalance || 0),
