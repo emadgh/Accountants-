@@ -4,13 +4,12 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { NextRequest, NextResponse } from 'next/server';
 import { DATABASE_DIRECTORY, DATABASE_PATH, LEGACY_MIGRATION_MARKER, databaseFileExists } from '@/lib/persistence/server-database';
+import { isLocalRequest } from '@/lib/persistence/local-request';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
-  const host = request.headers.get('host') || '';
-  const origin = request.headers.get('origin');
-  if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host) || !origin || origin !== request.nextUrl.origin) {
+  if (!isLocalRequest(request, true)) {
     return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
   }
   if (databaseFileExists()) return NextResponse.json({ error: 'Destination database already exists.' }, { status: 409 });

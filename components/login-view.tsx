@@ -318,7 +318,7 @@ export function LoginView({
           </motion.div>
 
           <p className="mt-4 text-center text-[10px] leading-5 text-slate-600">
-            اطلاعات ورود فقط در همین مرورگر نگهداری می‌شود و رمز عبور به‌صورت خام ذخیره نمی‌شود.
+            اطلاعات برنامه در فایل SQLite همین رایانه ذخیره می‌شود و رمز عبور به‌صورت خام ذخیره نمی‌شود.
           </p>
         </div>
       </div>

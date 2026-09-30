@@ -33,9 +33,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           ? { status: 'authenticated', hasUsers: true, user: snapshot.user }
           : { status: 'anonymous', hasUsers: snapshot.hasUsers, user: null });
       })
-      .catch(() => {
+      .catch((reason) => {
         if (!active) return;
-        setError('بررسی وضعیت ورود ممکن نشد. مرورگر باید Web Crypto و Local Storage را پشتیبانی کند.');
+        const message = reason instanceof Error ? reason.message : '';
+        setError(message.includes('Web Crypto') || message.includes('sessionStorage')
+          ? 'مرورگر باید Web Crypto و Session Storage را پشتیبانی کند.'
+          : `بررسی دیتابیس SQLite ناموفق بود: ${message || 'خطای ناشناخته'}`);
         setState({ status: 'anonymous', hasUsers: true, user: null });
       });
     return () => { active = false; };

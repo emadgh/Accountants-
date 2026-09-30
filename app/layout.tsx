@@ -8,7 +8,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'حسابداری | مدیریت فاکتور و انبار',
-  description: 'سامانه حسابداری تک‌صفحه‌ای با ذخیره‌سازی محلی مرورگر',
+  description: 'سامانه حسابداری فارسی با ذخیره‌سازی محلی SQLite',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

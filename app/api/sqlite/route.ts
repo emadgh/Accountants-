@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { databaseFileExists, getServerDatabase, legacyMigrationHash } from '@/lib/persistence/server-database';
+import { isLocalRequest } from '@/lib/persistence/local-request';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,19 +8,13 @@ export const dynamic = 'force-dynamic';
 type Statement = { sql: string; bind?: Array<string | number | null> };
 type Command = Statement & { type: 'exec' | 'query' | 'transaction'; statements?: Statement[] };
 
-function localRequest(request: NextRequest, requireOrigin = false) {
-  const host = request.headers.get('host') || '';
-  const origin = request.headers.get('origin');
-  return /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host) && (!requireOrigin || !!origin) && (!origin || origin === request.nextUrl.origin);
-}
-
 export async function GET(request: NextRequest) {
-  if (!localRequest(request)) return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
+  if (!isLocalRequest(request)) return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
   return NextResponse.json({ hasDatabase: databaseFileExists(), backend: 'SQLite file', legacySha256: legacyMigrationHash() });
 }
 
 export async function POST(request: NextRequest) {
-  if (!localRequest(request, true)) return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
+  if (!isLocalRequest(request, true)) return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
   try {
     const command = await request.json() as Command;
     const db = getServerDatabase();
