@@ -8,6 +8,7 @@ import { todayIso } from '@/lib/standards';
 import { notify } from '@/lib/feedback';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormattedInput } from '@/components/ui/formatted-input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 
@@ -126,7 +127,7 @@ export function InvoicePaymentDialog({
           </select>
         </label>}
         <label className="grid gap-1 text-xs font-bold text-slate-600">مبلغ ({settings.currency}) *
-          <Input type="number" min="0" max={remaining} value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onChange={(event) => setForm({ ...form, amount: Number(event.target.value) })} />
+          <FormattedInput min={0} max={remaining} value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onValueChange={(amount) => setForm({ ...form, amount })} />
         </label>
         <label className="grid gap-1 text-xs font-bold text-slate-600">تاریخ
           <JalaliDatePicker value={form.date} onChange={(date) => setForm({ ...form, date })} />

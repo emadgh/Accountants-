@@ -17,6 +17,7 @@ import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/stand
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
+import { FormattedInput } from '@/components/ui/formatted-input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
@@ -194,11 +195,11 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value as Customer['status'] })}><option value="active">فعال</option><option value="archived">آرشیو</option></select></Field>
           <Field label="تلفن"><Input dir="rtl" value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></Field>
-          <Field label="شناسه ملی"><Input value={edit.nationalId} onChange={(e) => setEdit({ ...edit, nationalId: e.target.value })} /></Field>
-          <Field label="کد اقتصادی"><Input value={edit.economicCode} onChange={(e) => setEdit({ ...edit, economicCode: e.target.value })} /></Field>
-          <Field label="کد پستی"><Input value={edit.postalCode} onChange={(e) => setEdit({ ...edit, postalCode: e.target.value })} /></Field>
+          <Field label="شناسه ملی"><FormattedInput format="nationalId" value={edit.nationalId} onValueChange={(nationalId) => setEdit({ ...edit, nationalId })} /></Field>
+          <Field label="کد اقتصادی"><FormattedInput format="economicCode" value={edit.economicCode} onValueChange={(economicCode) => setEdit({ ...edit, economicCode })} /></Field>
+          <Field label="کد پستی"><FormattedInput format="postalCode" value={edit.postalCode} onValueChange={(postalCode) => setEdit({ ...edit, postalCode })} /></Field>
           <Field label="مانده اول دوره">
-            <Input type="number" disabled={customers.some((customer) => customer.id === edit.id)} className={customers.some((customer) => customer.id === edit.id) ? 'bg-slate-100' : ''} value={edit.openingBalance || 0} onChange={(e) => setEdit({ ...edit, openingBalance: Number(e.target.value) })} />
+            <FormattedInput allowNegative disabled={customers.some((customer) => customer.id === edit.id)} className={customers.some((customer) => customer.id === edit.id) ? 'bg-slate-100' : ''} value={edit.openingBalance || 0} onValueChange={(openingBalance) => setEdit({ ...edit, openingBalance })} />
             <span className="mt-1 block text-[10px] leading-5 text-slate-400">مثبت = بدهکار، منفی = بستانکار. اصلاحات بعدی از دفتر حساب ثبت می‌شوند.</span>
           </Field>
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></Field>
@@ -352,7 +353,7 @@ export function CustomerLedgerView({
         <DialogHeader><DialogTitle className="text-lg font-black">ثبت اصلاحیه حساب</DialogTitle><DialogDescription className="text-sm text-slate-500">اصلاحیه به‌عنوان یک گردش مستقل ذخیره می‌شود و مانده اول دوره یا اسناد قبلی را بازنویسی نمی‌کند.</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="نوع اصلاحیه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustDirection} onChange={(e) => setAdjustDirection(e.target.value as 'debit' | 'credit')}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
-          <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={adjustAmount} onChange={(e) => setAdjustAmount(Number(e.target.value))} /></Field>
+          <Field label={'مبلغ (' + settings.currency + ')'}><FormattedInput min={0} value={adjustAmount} onValueChange={setAdjustAmount} /></Field>
           <Field label="تاریخ"><JalaliDatePicker value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="طرف حساب"><Input value={customer?.name || ''} readOnly className="bg-slate-100" /></Field>
           <Field label="دلیل اصلاحیه *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً اصلاح مانده انتقالی طبق سند..." /></Field>
@@ -418,14 +419,14 @@ export function ProductsView() {
           <Field label="کد"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Product['kind'] })}><option value="product">کالا</option><option value="service">خدمت</option></select></Field>
           <Field label="واحد"><Input value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} /></Field>
-          <Field label="قیمت خرید / مبنا"><Input type="number" min="0" value={edit.buyPrice} onChange={(e) => setEdit({ ...edit, buyPrice: Number(e.target.value) })} /></Field>
-          <Field label="قیمت فروش"><Input type="number" min="0" value={edit.salePrice} onChange={(e) => setEdit({ ...edit, salePrice: Number(e.target.value) })} /></Field>
+          <Field label="قیمت خرید / مبنا"><FormattedInput min={0} value={edit.buyPrice} onValueChange={(buyPrice) => setEdit({ ...edit, buyPrice })} /></Field>
+          <Field label="قیمت فروش"><FormattedInput min={0} value={edit.salePrice} onValueChange={(salePrice) => setEdit({ ...edit, salePrice })} /></Field>
           {edit.kind === 'product' && <>
             <Field label={existing ? 'موجودی فعلی' : 'موجودی اولیه'}>
-              <Input type="number" disabled={existing} className={existing ? 'bg-slate-100' : ''} value={edit.stock} onChange={(e) => setEdit({ ...edit, stock: Number(e.target.value) })} />
+              <FormattedInput allowNegative disabled={existing} className={existing ? 'bg-slate-100' : ''} value={edit.stock} onValueChange={(stock) => setEdit({ ...edit, stock })} />
               {existing && <span className="mt-1 block text-[10px] leading-5 text-slate-400">برای تغییر موجودی از «انبار → شمارش / اصلاح موجودی» استفاده کنید.</span>}
             </Field>
-            <Field label="حداقل موجودی"><Input type="number" min="0" value={edit.minStock} onChange={(e) => setEdit({ ...edit, minStock: Number(e.target.value) })} /></Field>
+            <Field label="حداقل موجودی"><FormattedInput min={0} value={edit.minStock} onValueChange={(minStock) => setEdit({ ...edit, minStock })} /></Field>
           </>}
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => void closeProductForm()}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { upsertProduct(edit); productDraft.markClean(edit); setOpen(false); }}>ذخیره</Button></div>
         </div>}
@@ -565,7 +566,7 @@ export function InventoryView({ onOpenInvoice }: { onOpenInvoice?: (invoiceId: s
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="کالا"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustProductId} onChange={(e) => changeAdjustmentProduct(e.target.value)}><option value="">انتخاب...</option>{products.filter((product) => product.kind === 'product').map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name} · موجودی {money(product.stock)}</option>)}</select></Field>
           <Field label="نوع عملیات"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={adjustMode} onChange={(e) => changeAdjustmentMode(e.target.value as 'count' | 'delta')}><option value="count">شمارش انبار (موجودی واقعی)</option><option value="delta">اصلاح افزایشی / کاهشی</option></select></Field>
-          <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><Input type="number" value={adjustQuantity} onChange={(e) => setAdjustQuantity(Number(e.target.value))} /></Field>
+          <Field label={adjustMode === 'count' ? 'موجودی واقعی شمارش‌شده' : 'مقدار اصلاح (+ / -)'}><FormattedInput allowNegative value={adjustQuantity} onValueChange={setAdjustQuantity} /></Field>
           <Field label="تاریخ"><JalaliDatePicker value={adjustDate} onChange={setAdjustDate} /></Field>
           <Field label="دلیل / شرح *" className="sm:col-span-2"><Textarea value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="مثلاً شمارش پایان ماه، شکستگی، کسری انبار..." /></Field>
           {adjustmentProduct && <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-600">
@@ -775,7 +776,7 @@ export function PaymentsView() {
               <option value="">انتخاب چک...</option>{availableChecks.map((check) => <option key={check.id} value={check.id}>{check.number} · {check.bank || 'بدون بانک'} · {money(check.amount)} · {check.status === 'cleared' ? 'وصول/پاس شده' : 'در انتظار'}</option>)}
             </select>
           </Field>}
-          <Field label={`مبلغ (${settings.currency}) *`}><Input type="number" min="0" value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
+          <Field label={`مبلغ (${settings.currency}) *`}><FormattedInput min={0} value={form.amount} readOnly={form.method === 'check' && !!form.checkId} onValueChange={(amount) => setForm({ ...form, amount })} /></Field>
           <Field label="تاریخ"><JalaliDatePicker value={form.date} onChange={(date) => setForm({ ...form, date })} /></Field>
           <Field label="شماره پیگیری / مرجع"><Input value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
           <Field label="توضیحات"><Input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
@@ -891,7 +892,7 @@ export function ChecksView({ initialCheckId }: { initialCheckId?: string | null 
           <Field label="شماره چک"><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></Field>
           <Field label="بانک"><Input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} /></Field>
           <Field label="صاحب چک"><Input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} /></Field>
-          <Field label={`مبلغ (${settings.currency})`}><Input readOnly={!!linkedPayment} className={linkedPayment ? 'bg-slate-100' : ''} type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
+          <Field label={`مبلغ (${settings.currency})`}><FormattedInput readOnly={!!linkedPayment} className={linkedPayment ? 'bg-slate-100' : ''} min={0} value={form.amount} onValueChange={(amount) => setForm({ ...form, amount })} /></Field>
           <Field label="سررسید"><JalaliDatePicker value={form.dueDate || todayIso()} onChange={(dueDate) => setForm({ ...form, dueDate })} /></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CheckRecord['status'] })}><option value="pending">در انتظار</option><option value="cleared">وصول / پاس شده</option><option value="bounced">برگشتی</option></select></Field>
           <Field label="توضیحات" className="sm:col-span-2"><Textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
@@ -962,7 +963,7 @@ export function SettingsView() {
         <CardHeader><CardTitle>تنظیمات عمومی اسناد</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <Field label="واحد پول"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value as 'تومان' | 'ریال' })}><option value="تومان">تومان</option><option value="ریال">ریال</option></select></Field>
-          <Field label="مالیات پیش‌فرض"><Input type="number" min="0" value={draft.defaultTax} onChange={(e) => setDraft({ ...draft, defaultTax: Number(e.target.value) })} /></Field>
+          <Field label="مالیات پیش‌فرض"><FormattedInput min={0} value={draft.defaultTax} onValueChange={(defaultTax) => setDraft({ ...draft, defaultTax })} /></Field>
           <Field label="اندازه پیش‌فرض کاغذ فاکتورهای جدید"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={draft.defaultInvoicePaperSize || 'A4'} onChange={(e) => setDraft({ ...draft, defaultInvoicePaperSize: e.target.value === 'A5' ? 'A5' : 'A4' })}><option value="A4">A4 · ۲۱۰ × ۲۹۷ میلی‌متر</option><option value="A5">A5 · ۱۴۸ × ۲۱۰ میلی‌متر</option></select></Field>
           <div className="sm:col-span-2">
             <div className="mb-2 text-sm font-bold text-slate-700">قالب پیش‌فرض فاکتورهای جدید</div>
@@ -1027,8 +1028,8 @@ function NumberingSettingsEditor({ draft, onChange }: { draft: BusinessSettings;
       {rows.map(([key, label]) => <div key={key} className="grid grid-cols-[1fr_.8fr_.7fr_.6fr] items-end gap-2">
         <div className="text-xs font-bold text-slate-600">{label}</div>
         <Field label="پیشوند"><Input value={draft.numbering[key].prefix} onChange={(e) => update(key, 'prefix', e.target.value)} /></Field>
-        <Field label="شماره بعدی"><Input type="number" min="1" value={draft.numbering[key].next} onChange={(e) => update(key, 'next', Number(e.target.value))} /></Field>
-        <Field label="تعداد رقم"><Input type="number" min="1" max="12" value={draft.numbering[key].padding} onChange={(e) => update(key, 'padding', Number(e.target.value))} /></Field>
+        <Field label="شماره بعدی"><FormattedInput allowDecimal={false} min={1} value={draft.numbering[key].next} onValueChange={(value) => update(key, 'next', value)} /></Field>
+        <Field label="تعداد رقم"><FormattedInput allowDecimal={false} min={1} max={12} value={draft.numbering[key].padding} onValueChange={(value) => update(key, 'padding', value)} /></Field>
       </div>)}
     </div>
   </Panel>;

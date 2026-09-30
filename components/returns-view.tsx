@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
+import { FormattedInput } from '@/components/ui/formatted-input';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
 import { AppNavbarContent } from '@/components/app-navbar';
 import { Field } from '@/components/ui/field';
@@ -225,7 +226,7 @@ export function ReturnsView() {
                   <td>{money(source.qty)} {source.unit}</td>
                   <td>{money(already)}</td>
                   <td className="font-bold">{money(remaining)}</td>
-                  <td><Input className="w-28" type="number" min="0" max={remaining} step="any" value={item.qty} onChange={(e) => patchQty(item.originalItemId, Number(e.target.value))} /></td>
+                  <td><FormattedInput className="w-28" min={0} max={remaining} step="any" value={item.qty} onValueChange={(qty) => patchQty(item.originalItemId, qty)} /></td>
                   <td>{money(source.unitPrice)}</td>
                   <td>{invoiceLineDiscount(source) > 0 ? money(invoiceLineDiscount(source)) : '—'}</td>
                   <td>{money(Number(source.qty || 0) > 0 ? invoiceLineNet(source) / Number(source.qty || 0) : 0)}</td>

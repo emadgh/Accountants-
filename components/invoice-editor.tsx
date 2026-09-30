@@ -16,6 +16,7 @@ import { Panel } from '@/components/ui/panel';
 import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FormattedInput, formatCardNumber, formatIranIban, formatPostalCode, type TextInputFormat } from '@/components/ui/formatted-input';
 import { InvoicePaymentDialog } from '@/components/invoice-payment-dialog';
 import { InvoicePaymentHistoryButton } from '@/components/invoice-payment-history';
 import { AppNavbarContent } from '@/components/app-navbar';
@@ -37,10 +38,8 @@ function blankInvoice(kind: InvoiceKind, customerName = '', number = '', busines
   };
 }
 
-function InvoiceDigitAmount({ value, empty = false }: { value: number; empty?: boolean }) {
-  const digits = empty ? [] : Array.from(new Intl.NumberFormat('fa-IR', { useGrouping: false, maximumFractionDigits: 0 }).format(Math.max(0, Math.round(Number(value || 0)))));
-  const cells = [...Array(Math.max(0, 12 - digits.length)).fill(''), ...digits];
-  return <span className="invoice-violet-digits" dir="ltr" style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}>{cells.map((digit, index) => <span key={index}>{digit}</span>)}</span>;
+function InvoiceAmount({ value, empty = false }: { value: number; empty?: boolean }) {
+  return <span className="invoice-violet-amount" dir="ltr">{empty ? '' : money(value)}</span>;
 }
 
 export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
@@ -427,31 +426,31 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
         {invoice.templateId !== 'blue-ledger' && invoice.templateId !== 'violet-ledger' && !isOfficialTemplate && !isStorefrontTemplate && !isGreenBrandTemplate && <EditableText value={invoiceTitle} onChange={(v) => invoice.kind === 'sale' && updateBusinessProfile({ invoiceTitle: v })} className="invoice-type-title mx-auto max-w-[320px] text-center text-[22px] font-black" readOnly={invoice.kind === 'purchase'} />}
         {isGreenBrandTemplate ? null : isStorefrontTemplate ? null : isOfficialTemplate ? <div className="invoice-official-party-content invoice-official-seller-content">
           <div className="invoice-official-party-main">
-            <InfoLine label={invoice.kind === 'sale' ? 'فروشنده' : 'خریدار'} value={businessProfile?.businessName || ''} onChange={(v) => updateBusinessProfile({ businessName: v })} />
-            <InfoLine label="تلفن" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} valueDirection="rtl" />
-            <InfoLine label="آدرس" value={businessProfile?.address || ''} onChange={(v) => updateBusinessProfile({ address: v })} />
+            <InfoLine label={invoice.kind === 'sale' ? 'فروشنده' : 'خریدار'} value={businessProfile?.businessName || ''} onChange={(v) => updateBusinessProfile({ businessName: v })} hideWhenEmptyForPrint />
+            <InfoLine label="تلفن" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} valueDirection="rtl" hideWhenEmptyForPrint />
+            <InfoLine label="آدرس" value={businessProfile?.address || ''} onChange={(v) => updateBusinessProfile({ address: v })} hideWhenEmptyForPrint />
           </div>
           <div className="invoice-official-party-codes">
-            <InfoLine label="شناسه ملی" value={businessProfile?.nationalId || ''} onChange={(v) => updateBusinessProfile({ nationalId: v })} />
-            <InfoLine label="کد اقتصادی" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} />
-            <InfoLine label="کدپستی" value={businessProfile?.postalCode || ''} onChange={(v) => updateBusinessProfile({ postalCode: v })} />
+            <InfoLine label="شناسه ملی" value={businessProfile?.nationalId || ''} onChange={(v) => updateBusinessProfile({ nationalId: v })} format="nationalId" hideWhenEmptyForPrint />
+            <InfoLine label="کد اقتصادی" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} format="economicCode" hideWhenEmptyForPrint />
+            <InfoLine label="کدپستی" value={businessProfile?.postalCode || ''} onChange={(v) => updateBusinessProfile({ postalCode: v })} format="postalCode" hideWhenEmptyForPrint />
           </div>
         </div> : invoice.templateId === 'violet-ledger' ? <div className="invoice-violet-party-fields invoice-violet-issuer-fields">
           <InfoLine label={invoice.kind === 'sale' ? 'ارائه‌دهنده' : 'خریدار'} value={businessProfile?.businessName || ''} onChange={(v) => updateBusinessProfile({ businessName: v })} />
           <InfoLine label="شماره تماس" value={businessProfile?.phone || ''} onChange={(v) => updateBusinessProfile({ phone: v })} valueDirection="rtl" />
-          <InfoLine label="کد اقتصادی" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} />
+          <InfoLine label="کد اقتصادی" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} format="economicCode" />
           <div className="invoice-violet-party-address"><InfoLine label="آدرس" value={businessProfile?.address || ''} onChange={(v) => updateBusinessProfile({ address: v })} /></div>
         </div> : <div className="invoice-reference-party-content mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-[12px] leading-7 sm:grid-cols-[.85fr_1.55fr]">
           <div className="order-2 sm:order-1">
             <div className="print-only print-block text-[10px] leading-6 text-slate-600">
               <div><b>شناسه ملی:</b> {businessProfile?.nationalId || '—'}</div>
               <div><b>کد اقتصادی:</b> {businessProfile?.economicCode || '—'}</div>
-              <div><b>کدپستی:</b> {businessProfile?.postalCode || '—'}</div>
+              <div><b>کدپستی:</b> {formatPostalCode(businessProfile?.postalCode) || '—'}</div>
             </div>
             <div className="screen-only grid gap-1">
-              <MiniEdit placeholder="شناسه ملی فروشنده" value={businessProfile?.nationalId || ''} onChange={(v) => updateBusinessProfile({ nationalId: v })} />
-              <MiniEdit placeholder="کد اقتصادی فروشنده" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} />
-              <MiniEdit placeholder="کدپستی فروشنده" value={businessProfile?.postalCode || ''} onChange={(v) => updateBusinessProfile({ postalCode: v })} />
+              <MiniEdit placeholder="شناسه ملی فروشنده" value={businessProfile?.nationalId || ''} onChange={(v) => updateBusinessProfile({ nationalId: v })} format="nationalId" />
+              <MiniEdit placeholder="کد اقتصادی فروشنده" value={businessProfile?.economicCode || ''} onChange={(v) => updateBusinessProfile({ economicCode: v })} format="economicCode" />
+              <MiniEdit placeholder="کدپستی فروشنده" value={businessProfile?.postalCode || ''} onChange={(v) => updateBusinessProfile({ postalCode: v })} format="postalCode" />
             </div>
           </div>
           <div className="order-1 sm:order-2">
@@ -466,7 +465,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
         <div className="invoice-reference-party-title">{invoice.kind === 'sale' ? 'مشخصات خریدار' : 'مشخصات فروشنده'}</div>
         {isGreenBrandTemplate ? <div className="invoice-green-party-layout">
           <div className="invoice-green-buyer">
-            <div className="invoice-green-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+          <div className="invoice-green-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
           </div>
@@ -477,7 +476,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
           </div>
         </div> : isStorefrontTemplate ? <div className="invoice-storefront-party-layout">
           <div className="invoice-storefront-buyer">
-            <div className="invoice-storefront-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+          <div className="invoice-storefront-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
           </div>
@@ -488,17 +487,17 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
           </div>
         </div> : isOfficialTemplate ? <div className="invoice-official-party-content invoice-official-buyer-content">
           <div className="invoice-official-party-main">
-            <div className="invoice-official-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'خریدار:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
-            <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
-            <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
+            <div className="invoice-official-customer-name" data-print-empty={!hasText(invoice.customerName) ? 'true' : undefined}><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'خریدار:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+            <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" hideWhenEmptyForPrint />
+            <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} hideWhenEmptyForPrint />
             <div className="invoice-official-party-codes">
-              <InfoLine label="شناسه ملی" value={invoice.customerNationalId || ''} onChange={(v) => patch('customerNationalId', v)} />
-              <InfoLine label="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} />
-              <InfoLine label="کدپستی" value={invoice.customerPostalCode || ''} onChange={(v) => patch('customerPostalCode', v)} />
+              <InfoLine label="شناسه ملی" value={invoice.customerNationalId || ''} onChange={(v) => patch('customerNationalId', v)} format="nationalId" hideWhenEmptyForPrint />
+              <InfoLine label="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} format="economicCode" hideWhenEmptyForPrint />
+              <InfoLine label="کدپستی" value={invoice.customerPostalCode || ''} onChange={(v) => patch('customerPostalCode', v)} format="postalCode" hideWhenEmptyForPrint />
             </div>
           </div>
           <div className="invoice-official-buyer-meta">
-            <div><b>کد شخص:</b><span>{customer?.code || '—'}</span></div>
+            <div data-print-empty={!hasText(customer?.code) ? 'true' : undefined}><b>کد شخص:</b><span>{customer?.code}</span></div>
             <InfoLine label="شماره" value={invoice.number} onChange={(v) => patch('number', v)} readOnly={!isDraft} />
             <div className="invoice-official-date"><span className="font-bold">تاریخ:</span><span className="screen-only"><JalaliDatePicker value={invoice.date} onChange={(value) => patch('date', value)} disabled={isVoid} /></span><span className="print-only">{formatPersianDate(invoice.date)}</span></div>
           </div>
@@ -506,7 +505,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
           <div className="invoice-violet-fields-main">
             <div className="invoice-violet-customer-name"><span className="font-bold">{invoice.kind === 'sale' ? 'خریدار' : 'فروشنده'}:</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="شماره تماس" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
-            <InfoLine label="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} />
+            <InfoLine label="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} format="economicCode" />
           </div>
           <div className="invoice-violet-party-address"><InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} /></div>
         </div> : <div className="invoice-reference-party-content grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-[1.35fr_.65fr]">
@@ -517,11 +516,11 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
             </div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
-            {(invoice.customerNationalId || invoice.customerEconomicCode || invoice.customerPostalCode) && <div className="print-block text-[10px] text-slate-500">شناسه ملی: {invoice.customerNationalId || '—'} &nbsp; کد اقتصادی: {invoice.customerEconomicCode || '—'} &nbsp; کدپستی: {invoice.customerPostalCode || '—'}</div>}
+            {(invoice.customerNationalId || invoice.customerEconomicCode || invoice.customerPostalCode) && <div className="print-block text-[10px] text-slate-500">شناسه ملی: {invoice.customerNationalId || '—'} &nbsp; کد اقتصادی: {invoice.customerEconomicCode || '—'} &nbsp; کدپستی: {formatPostalCode(invoice.customerPostalCode) || '—'}</div>}
             <div className="screen-only grid grid-cols-3 gap-1 pt-1">
-              <MiniEdit placeholder="شناسه ملی" value={invoice.customerNationalId || ''} onChange={(v) => patch('customerNationalId', v)} />
-              <MiniEdit placeholder="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} />
-              <MiniEdit placeholder="کدپستی" value={invoice.customerPostalCode || ''} onChange={(v) => patch('customerPostalCode', v)} />
+              <MiniEdit placeholder="شناسه ملی" value={invoice.customerNationalId || ''} onChange={(v) => patch('customerNationalId', v)} format="nationalId" />
+              <MiniEdit placeholder="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} format="economicCode" />
+              <MiniEdit placeholder="کدپستی" value={invoice.customerPostalCode || ''} onChange={(v) => patch('customerPostalCode', v)} format="postalCode" />
             </div>
           </div>
           <div className="invoice-customer-document-meta space-y-1 sm:text-left">
@@ -570,7 +569,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
           <td className="text-center font-bold">{index + 1}</td>
           <td>
             <div className="screen-only"><SearchableSelect value={item.productId || ''} options={productOptions} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
-            <span className="print-only desc">{item.description || '—'}</span>
+            <span className="print-only desc">{item.description || (isOfficialTemplate ? '' : '—')}</span>
             {!item.productId && <input className="screen-editor invoice-inline-input desc" placeholder="شرح کالا یا خدمت" value={item.description} onChange={(e) => patchItem(item.id, { description: e.target.value })} />}
             <textarea className="screen-editor invoice-inline-textarea detail" placeholder="توضیحات ردیف..." value={item.details || ''} onChange={(e) => patchItem(item.id, { details: e.target.value })} />
             {!!item.details && <div className="print-only print-block detail">{item.details}</div>}
@@ -583,13 +582,13 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
             : <><NumberEdit value={Number(item.discount || 0)} onChange={(v) => patchItem(item.id, { discount: Math.min(invoiceLineGross(item), v) })} formatted />{!!item.discountPercent && <div className="print-only text-[9px] text-slate-400">{item.discountPercent}%</div>}</>}
           </td>
           <td className="text-left font-bold" dir="ltr">
-            {invoice.templateId === 'violet-ledger' ? <InvoiceDigitAmount value={invoiceLineNet(item)} /> : <span>{money(invoiceLineNet(item))}</span>}
+            {invoice.templateId === 'violet-ledger' ? <InvoiceAmount value={invoiceLineNet(item)} /> : <span>{money(invoiceLineNet(item))}</span>}
             {invoiceLineDiscount(item) > 0 && <div className="print-only text-[9px] font-normal text-slate-400">ناخالص {money(invoiceLineGross(item))}</div>}
           </td>
           <td className="screen-only"><button aria-label="حذف ردیف" className="rounded-lg p-1 text-rose-500 hover:bg-rose-50" onClick={() => patch('items', invoice.items.filter((x) => x.id !== item.id))}><Trash2 className="h-4 w-4" /></button></td>
         </tr>)}
         {invoice.templateId === 'violet-ledger' && Array.from({ length: Math.max(0, (paperSize === 'A5' ? 7 : 15) - invoice.items.length) }, (_, index) => <tr className="invoice-violet-blank-row" key={`blank-${index}`}>
-          <td className="text-center">{invoice.items.length + index + 1}</td><td></td><td></td><td></td><td></td><td></td><td><InvoiceDigitAmount value={0} empty /></td><td className="screen-only"></td>
+          <td className="text-center">{invoice.items.length + index + 1}</td><td></td><td></td><td></td><td></td><td></td><td><InvoiceAmount value={0} empty /></td><td className="screen-only"></td>
         </tr>)}
         </tbody>
       </DataTable></div>}
@@ -632,10 +631,10 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
 
       {isGreenBrandTemplate && !!invoice.notes && <div className="invoice-green-notes"><b>توضیحات:</b><span className="whitespace-pre-wrap">{invoice.notes}</span></div>}
 
-      {isOfficialTemplate && <div className="invoice-official-notes">
+      {isOfficialTemplate && <div className="invoice-official-notes" data-print-empty={!hasText(invoice.notes) ? 'true' : undefined}>
         <div className="invoice-official-notes-heading">توضیحات:</div>
         {isPartial
-          ? <div className="invoice-official-notes-value whitespace-pre-wrap">{invoice.notes || '—'}</div>
+          ? <div className="invoice-official-notes-value whitespace-pre-wrap">{invoice.notes}</div>
           : <EditableArea value={invoice.notes} onChange={(v) => patch('notes', v)} placeholder="توضیحات فاکتور..." />}
       </div>}
 
@@ -648,9 +647,9 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
 
       {invoice.templateId === 'violet-ledger' && <div className="invoice-violet-footer">
         <div className="invoice-violet-summary">
-          <div className="invoice-violet-summary-row invoice-type-total"><b>قیمت کل</b><InvoiceDigitAmount value={total} /></div>
-          <div className="invoice-violet-summary-row invoice-type-total"><b>بیعانه</b><InvoiceDigitAmount value={settledAmount} /></div>
-          <div className="invoice-violet-summary-row invoice-type-total"><b>مانده</b><InvoiceDigitAmount value={existing ? outstanding : total} /></div>
+          <div className="invoice-violet-summary-row invoice-type-total"><b>قیمت کل</b><InvoiceAmount value={total} /></div>
+          <div className="invoice-violet-summary-row invoice-type-total"><b>بیعانه</b><InvoiceAmount value={settledAmount} /></div>
+          <div className="invoice-violet-summary-row invoice-type-total"><b>مانده</b><InvoiceAmount value={existing ? outstanding : total} /></div>
           <div className="invoice-violet-signature">مهر و امضاء فروشنده</div>
           <div className="invoice-violet-signature">مهر و امضاء خریدار</div>
         </div>
@@ -672,11 +671,11 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
       </div>}
 
       <div className={'invoice-payment-block mt-8 grid grid-cols-2 gap-8 text-[12px]' + (isStorefrontTemplate ? ' invoice-storefront-footer' : isGreenBrandTemplate ? ' invoice-green-footer' : '')}>
-        <div className="leading-7">
+        <div className="leading-7" data-print-empty={isOfficialTemplate && !hasText(businessProfile?.cardNumber) && !hasText(businessProfile?.iban) && !hasText(businessProfile?.ownerName) ? 'true' : undefined}>
           <div className="font-bold">اطلاعات پرداخت:</div>
-          <InfoLine label="شماره کارت" value={businessProfile?.cardNumber || ''} onChange={(v) => updateBusinessProfile({ cardNumber: v })} valueDirection="rtl" />
-          <InfoLine label="شبا" value={businessProfile?.iban || ''} onChange={(v) => updateBusinessProfile({ iban: v })} valueDirection="rtl" />
-          <InfoLine label="به نام" value={businessProfile?.ownerName || ''} onChange={(v) => updateBusinessProfile({ ownerName: v })} />
+          <CardNumberLine value={businessProfile?.cardNumber || ''} onChange={(cardNumber) => updateBusinessProfile({ cardNumber })} hideWhenEmptyForPrint={isOfficialTemplate} />
+          <InfoLine label="شبا" value={businessProfile?.iban || ''} onChange={(v) => updateBusinessProfile({ iban: v })} format="iban" hideWhenEmptyForPrint={isOfficialTemplate} />
+          <InfoLine label="به نام" value={businessProfile?.ownerName || ''} onChange={(v) => updateBusinessProfile({ ownerName: v })} hideWhenEmptyForPrint={isOfficialTemplate} />
         </div>
         <div className="text-slate-500">{isStorefrontTemplate || isGreenBrandTemplate ? <>
           <textarea className="screen-editor invoice-inline-textarea" value={businessProfile?.footer || ''} onChange={(event) => updateBusinessProfile({ footer: event.target.value })} placeholder="اجناس دریافتی را با فاکتور کنترل کنید. در قسمت تنظیمات فاکتور قابل تغییر" />
@@ -715,17 +714,49 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
   </div>;
 }
 
-function EditableText({ value, onChange, className = '', readOnly = false, valueDirection }: { value: string; onChange: (v: string) => void; className?: string; readOnly?: boolean; valueDirection?: 'rtl' }) {
-  return <><input dir={valueDirection} readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} /><span className={`print-only ${className}`} dir={valueDirection}>{value || '—'}</span></>;
+type IdentifierFormat = Exclude<TextInputFormat, 'card'>;
+
+function formatIdentifierForPrint(value: string, format?: IdentifierFormat) {
+  if (!value) return '—';
+  if (format === 'postalCode') return formatPostalCode(value);
+  if (format === 'iban') return formatIranIban(value);
+  return value;
+}
+
+function hasText(value: string | null | undefined) {
+  return Boolean(value?.trim());
+}
+
+function EditableText({ value, onChange, className = '', readOnly = false, valueDirection, format }: { value: string; onChange: (v: string) => void; className?: string; readOnly?: boolean; valueDirection?: 'rtl'; format?: IdentifierFormat }) {
+  return <>{format
+    ? <FormattedInput format={format} dir="ltr" readOnly={readOnly} unstyled className={`screen-editor invoice-inline-input ${className}`} value={value} onValueChange={onChange} />
+    : <input dir={valueDirection} readOnly={readOnly} className={`screen-editor invoice-inline-input ${className}`} value={value} onChange={(e) => onChange(e.target.value)} />}
+    <span className={`print-only ${className}`} dir={format ? 'ltr' : valueDirection}>{formatIdentifierForPrint(value, format)}</span></>;
 }
 function EditableArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <><textarea className="screen-editor invoice-inline-textarea" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /><div className="print-only print-block whitespace-pre-wrap leading-6">{value}</div></>;
 }
-function MiniEdit({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) { return <input className="invoice-inline-input !border-slate-200 text-[10px]" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />; }
-function NumberEdit({ value, onChange, formatted = false }: { value: number; onChange: (v: number) => void; formatted?: boolean }) {
-  return <><input dir="ltr" type="number" min="0" className="screen-editor invoice-inline-input text-center" value={value} onChange={(e) => onChange(Number(e.target.value))} /><span className="print-only" dir="ltr">{formatted ? money(value) : value}</span></>;
+function MiniEdit({ value, onChange, placeholder, format }: { value: string; onChange: (v: string) => void; placeholder: string; format?: IdentifierFormat }) {
+  return format
+    ? <FormattedInput format={format} dir="ltr" unstyled className="invoice-inline-input !border-slate-200 text-[10px]" value={value} onValueChange={onChange} placeholder={placeholder} />
+    : <input className="invoice-inline-input !border-slate-200 text-[10px]" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
 }
-function InfoLine({ label, value, onChange, readOnly = false, valueDirection }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean; valueDirection?: 'rtl' }) { return <div className="flex min-h-7 items-center gap-1"><span className="shrink-0 font-bold">{label}:</span><EditableText value={value} onChange={onChange} readOnly={readOnly} valueDirection={valueDirection} /></div>; }
+function NumberEdit({ value, onChange, formatted = false }: { value: number; onChange: (v: number) => void; formatted?: boolean }) {
+  return <><FormattedInput dir="ltr" min={0} unstyled className="screen-editor invoice-inline-input text-center" value={value} onValueChange={onChange} /><span className="print-only" dir="ltr">{formatted ? money(value) : value}</span></>;
+}
+function InfoLine({ label, value, onChange, readOnly = false, valueDirection, format, hideWhenEmptyForPrint = false }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean; valueDirection?: 'rtl'; format?: IdentifierFormat; hideWhenEmptyForPrint?: boolean }) {
+  return <div className="invoice-info-line flex min-h-7 items-center gap-1" data-print-empty={hideWhenEmptyForPrint && !hasText(value) ? 'true' : undefined}>
+    <span className="invoice-info-line-label shrink-0 font-bold">{label}:</span>
+    <EditableText value={value} onChange={onChange} readOnly={readOnly} valueDirection={valueDirection} format={format} />
+  </div>;
+}
+function CardNumberLine({ value, onChange, hideWhenEmptyForPrint = false }: { value: string; onChange: (value: string) => void; hideWhenEmptyForPrint?: boolean }) {
+  return <div className="invoice-info-line flex min-h-7 items-center gap-1" data-print-empty={hideWhenEmptyForPrint && !hasText(value) ? 'true' : undefined}>
+    <span className="shrink-0 font-bold">شماره کارت:</span>
+    <FormattedInput format="card" value={value} onValueChange={onChange} unstyled className="screen-editor invoice-inline-input" />
+    <span className="print-only" dir="ltr">{formatCardNumber(value) || '—'}</span>
+  </div>;
+}
 function AmountLine({ label, value, onChange, fixed }: { label: string; value: number; onChange?: (v: number) => void; fixed?: boolean }) { return <div className="flex min-h-8 items-center justify-between gap-4"><span className="font-bold text-slate-600">{label}</span>{fixed ? <span className="font-bold" dir="ltr">{money(value)}</span> : <div className="w-36"><NumberEdit value={value} onChange={onChange!} formatted /></div>}</div>; }
 function invoiceEditableSignature(invoice: Invoice) {
   return JSON.stringify({

@@ -24,7 +24,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="fa" dir="rtl">
+    <html lang="fa" dir="rtl" suppressHydrationWarning>
       <body>
         <LiquidEtherBackground />
         <div className="app-content"><PageTransition>{children}</PageTransition><FeedbackHost /><PwaRegister /></div>

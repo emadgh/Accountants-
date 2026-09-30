@@ -71,6 +71,18 @@ function pad(value: number) {
   return String(value).padStart(2, '0');
 }
 
+export function jalaliDateParts(value: string) {
+  const normalized = normalizeStoredDate(value);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return gregorianToJalali(Number(match[1]), Number(match[2]), Number(match[3]));
+}
+
+export function jalaliMonthStartIso(year: number, month: number) {
+  const gregorian = jalaliToGregorian(year, month, 1);
+  return gregorian.gy + '-' + pad(gregorian.gm) + '-' + pad(gregorian.gd);
+}
+
 export function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }

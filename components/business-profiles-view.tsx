@@ -9,6 +9,7 @@ import { validateOfficialFields } from '@/lib/standards';
 import { flushAccountingPersistence } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
+import { FormattedInput } from '@/components/ui/formatted-input';
 import { Field } from '@/components/ui/field';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -292,12 +293,12 @@ export function BusinessProfilesView() {
           <Field label="نام کسب‌وکار *"><Input value={profileDraft.businessName} onChange={(e) => updateProfileDraft({ businessName: e.target.value })} /></Field>
           <Field label="نام صاحب حساب"><Input value={profileDraft.ownerName} onChange={(e) => updateProfileDraft({ ownerName: e.target.value })} /></Field>
           <Field label="تلفن"><Input dir="rtl" value={profileDraft.phone} onChange={(e) => updateProfileDraft({ phone: e.target.value })} /></Field>
-          <Field label="شناسه ملی / کد ملی"><Input value={profileDraft.nationalId} onChange={(e) => updateProfileDraft({ nationalId: e.target.value })} /></Field>
-          <Field label="کد اقتصادی"><Input value={profileDraft.economicCode} onChange={(e) => updateProfileDraft({ economicCode: e.target.value })} /></Field>
-          <Field label="کد پستی"><Input value={profileDraft.postalCode} onChange={(e) => updateProfileDraft({ postalCode: e.target.value })} /></Field>
+          <Field label="شناسه ملی / کد ملی"><FormattedInput format="nationalId" value={profileDraft.nationalId} onValueChange={(nationalId) => updateProfileDraft({ nationalId })} /></Field>
+          <Field label="کد اقتصادی"><FormattedInput format="economicCode" value={profileDraft.economicCode} onValueChange={(economicCode) => updateProfileDraft({ economicCode })} /></Field>
+          <Field label="کد پستی"><FormattedInput format="postalCode" value={profileDraft.postalCode} onValueChange={(postalCode) => updateProfileDraft({ postalCode })} /></Field>
           <Field label="نام بانک"><Input value={profileDraft.bankName} onChange={(e) => updateProfileDraft({ bankName: e.target.value })} /></Field>
-          <Field label="شماره کارت"><Input dir="rtl" value={profileDraft.cardNumber} onChange={(e) => updateProfileDraft({ cardNumber: e.target.value })} /></Field>
-          <Field label="شماره شبا"><Input dir="rtl" value={profileDraft.iban} onChange={(e) => updateProfileDraft({ iban: e.target.value })} /></Field>
+          <Field label="شماره کارت"><FormattedInput format="card" value={profileDraft.cardNumber} onValueChange={(cardNumber) => updateProfileDraft({ cardNumber })} /></Field>
+          <Field label="شماره شبا"><FormattedInput format="iban" value={profileDraft.iban} onValueChange={(iban) => updateProfileDraft({ iban })} /></Field>
           <Field label="عنوان فاکتور فروش"><Input value={profileDraft.invoiceTitle} onChange={(e) => updateProfileDraft({ invoiceTitle: e.target.value })} /></Field>
           <Field label="آدرس" className="sm:col-span-2"><Textarea value={profileDraft.address} onChange={(e) => updateProfileDraft({ address: e.target.value })} /></Field>
           <Field label="پاورقی فاکتور" className="sm:col-span-2"><Textarea value={profileDraft.footer} onChange={(e) => updateProfileDraft({ footer: e.target.value })} /></Field>

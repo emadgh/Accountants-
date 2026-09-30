@@ -30,6 +30,7 @@
     "react-date-object": "2.1.9",
     "react-dom": "19.3.0",
     "react-multi-date-picker": "4.5.2",
+    "recharts": "^3.10.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "2.6.0",
     "three": "^0.180.0",

@@ -26,6 +26,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
 import { AppNavbarContent } from '@/components/app-navbar';
+import { BalancesChart, CardexStockChart, DueChecksChart, InventoryValueChart, LedgerBalanceChart, SalesPurchaseTrendChart } from '@/components/analytics/charts';
+import { buildTimeSeries } from '@/lib/chart-data';
 
 type ReportTab = 'sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
 
@@ -314,6 +316,74 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
   const cardexOutgoing = cardexRows.filter((movement) => movement.quantity < 0).reduce((sum, movement) => sum + Math.abs(movement.quantity), 0);
   const cardexAsOf = selectedCardexProduct ? asOfInventory(selectedCardexProduct, stockMovements, toDate) : { stock: 0, averageCost: 0 };
 
+  const salesPurchaseTrend = useMemo(() => buildTimeSeries(
+    fromDate,
+    toDate,
+    salesRows,
+    ['sales', 'purchases'],
+    (row) => ({ [row.type.includes('فروش') ? 'sales' : 'purchases']: row.amount * row.sign }),
+  ), [fromDate, toDate, salesRows]);
+
+  const balanceChartRows = balanceRows
+    .filter((row) => Math.abs(row.closing) > 0.0001)
+    .slice(0, 6)
+    .map((row) => ({
+      name: row.customer.name,
+      debtor: row.closing > 0 ? row.closing : 0,
+      creditor: row.closing < 0 ? row.closing : 0,
+    }));
+
+  const checksTrend = useMemo(() => buildTimeSeries(
+    fromDate,
+    toDate,
+    checkRows.filter((row) => row.check.status === 'pending').map((row) => ({
+      date: row.check.dueDate,
+      direction: row.check.direction,
+      amount: Number(row.check.amount || 0),
+    })),
+    ['received', 'issued'],
+    (row) => ({ [row.direction]: row.amount }),
+  ), [fromDate, toDate, checkRows]);
+
+  const inventoryChartRows = inventoryRows
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+    .map((row) => ({ name: row.product.name, value: row.value }));
+
+  const ledgerChartRows = useMemo(() => {
+    let balance = ledgerOpening;
+    const byDate = new Map<string, number>();
+    for (const entry of [...ledgerRows].sort((a, b) => a.sortKey.localeCompare(b.sortKey))) {
+      balance += Number(entry.debit || 0) - Number(entry.credit || 0);
+      byDate.set(normalizedDate(entry.date), balance);
+    }
+    const rows = [...byDate.entries()].map(([date, closing]) => ({ label: formatPersianDate(date).slice(-5), balance: closing }));
+    if (!rows.length) return [{ label: 'شروع بازه', balance: ledgerOpening }, { label: 'پایان بازه', balance: ledgerClosing }];
+    return [{ label: 'شروع بازه', balance: ledgerOpening }, ...rows];
+  }, [ledgerRows, ledgerOpening, ledgerClosing]);
+
+  const cardexChartRows = useMemo(() => {
+    if (!selectedCardexProduct) return [];
+    const opening = stockMovements
+      .filter((movement) => movement.productId === selectedCardexProduct.id && before(movement.date, fromDate))
+      .sort((a, b) => movementSortKey(a).localeCompare(movementSortKey(b)))
+      .at(-1);
+    const startingStock = Number(opening?.balanceAfter || 0);
+    const rows = cardexRows.map((movement) => ({
+      label: formatPersianDate(movement.date).slice(-5),
+      stock: Number(movement.balanceAfter || 0),
+      minimum: Number(selectedCardexProduct.minStock || 0),
+    }));
+    if (!rows.length) {
+      return [
+        { label: 'شروع بازه', stock: startingStock, minimum: Number(selectedCardexProduct.minStock || 0) },
+        { label: 'پایان بازه', stock: startingStock, minimum: Number(selectedCardexProduct.minStock || 0) },
+      ];
+    }
+    return [{ label: 'شروع بازه', stock: startingStock, minimum: Number(selectedCardexProduct.minStock || 0) }, ...rows];
+  }, [selectedCardexProduct, stockMovements, fromDate, cardexRows]);
+
   const activeExport = useMemo((): { title: string; filename: string; headers: ExportCell[]; rows: ExportCell[][] } => {
     if (tab === 'sales') return {
       title: 'گزارش فروش و خرید',
@@ -403,6 +473,12 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="سود ناخالص تقریبی" value={money(grossProfit) + ' ' + settings.currency} subtitle="بر مبنای Stock Movement و بهای ثبت‌شده" />
           <MetricCard title="تعداد سند" value={String(salesRows.length)} />
         </div>
+        <SalesPurchaseTrendChart
+          data={salesPurchaseTrend.map((point) => ({ ...point, sales: Number(point.sales || 0), purchases: Number(point.purchases || 0) }))}
+          currency={settings.currency}
+          series={documentKind === 'sale' ? ['sales'] : documentKind === 'purchase' ? ['purchases'] : ['sales', 'purchases']}
+          description="فقط اسناد ثبت‌شده · مرجوعی قطعی از فروش یا خرید خالص کسر شده است"
+        />
         <Card>
           <CardHeader><CardTitle>جزئیات فروش، خرید و مرجوعی</CardTitle></CardHeader>
           <div className="table-wrap"><DataTable className="data-table min-w-[920px]">
@@ -418,6 +494,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="جمع بستانکاران پایان بازه" value={money(creditors) + ' ' + settings.currency} />
           <MetricCard title="تعداد طرف حساب دارای گردش/مانده" value={String(balanceRows.length)} />
         </div>
+        <BalancesChart data={balanceChartRows} currency={settings.currency} />
         <Card><CardHeader><CardTitle>بدهکاران و بستانکاران</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[900px]">
           <thead><tr><th>کد</th><th>طرف حساب</th><th>مانده ابتدای بازه</th><th>بدهکار بازه</th><th>بستانکار بازه</th><th>مانده پایان بازه</th><th>وضعیت</th><th>عملیات</th></tr></thead>
           <tbody>{balanceRows.map((row) => <tr key={row.customer.id}><td>{row.customer.code}</td><td className="font-bold">{row.customer.name}</td><td>{money(Math.abs(row.opening))}{row.opening > 0 ? ' بدهکار' : row.opening < 0 ? ' بستانکار' : ''}</td><td className="text-rose-700">{money(row.debit)}</td><td className="text-emerald-700">{money(row.credit)}</td><td className="font-black">{money(Math.abs(row.closing))}</td><td>{row.closing > 0 ? <Badge className="bg-rose-50 text-rose-700">بدهکار</Badge> : row.closing < 0 ? <Badge className="bg-emerald-50 text-emerald-700">بستانکار</Badge> : <Badge>تسویه</Badge>}</td><td>{onOpenCustomer && <Button variant="ghost" size="sm" onClick={() => onOpenCustomer(row.customer.id)}><BookOpen className="h-3.5 w-3.5" /> دفتر حساب</Button>}</td></tr>)}{!balanceRows.length && <EmptyRow cols={8} text="گردش یا مانده‌ای در این بازه وجود ندارد." />}</tbody>
@@ -430,6 +507,10 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="چک‌های آینده" value={money(futureChecks) + ' ' + settings.currency} />
           <MetricCard title="تعداد چک در بازه" value={String(checkRows.length)} />
         </div>
+        <DueChecksChart
+          data={checksTrend.map((point) => ({ ...point, received: Number(point.received || 0), issued: Number(point.issued || 0) }))}
+          currency={settings.currency}
+        />
         <Card><CardHeader><CardTitle>چک‌ها بر اساس سررسید</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[960px]">
           <thead><tr><th>سند</th><th>شماره چک</th><th>طرف حساب</th><th>نوع</th><th>بانک</th><th>سررسید</th><th>مبلغ</th><th>وضعیت</th><th>عملیات</th></tr></thead>
           <tbody>{checkRows.map(({ check, customerName, timing }) => <tr key={check.id}><td className="font-bold">{check.documentNumber}</td><td>{check.number}</td><td>{customerName}</td><td>{check.direction === 'received' ? 'دریافتی' : 'پرداختی'}</td><td>{check.bank || '—'}</td><td>{formatPersianDate(check.dueDate)}</td><td className="font-black">{money(check.amount)} {settings.currency}</td><td><Badge className={timing === 'سررسید گذشته' ? 'bg-rose-50 text-rose-700' : timing === 'آینده' ? 'bg-amber-50 text-amber-700' : timing === 'برگشتی' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}>{timing}</Badge></td><td>{onOpenCheck && <Button variant="ghost" size="sm" onClick={() => onOpenCheck(check.id)}><FileText className="h-3.5 w-3.5" /> جزئیات</Button>}</td></tr>)}{!checkRows.length && <EmptyRow cols={9} text="چکی در این بازه وجود ندارد." />}</tbody>
@@ -442,6 +523,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="کالاهای زیر حداقل" value={String(belowMinimumCount)} />
           <MetricCard title="تعداد کالا" value={String(inventoryRows.length)} />
         </div>
+        <InventoryValueChart data={inventoryChartRows} currency={settings.currency} />
         <Card><CardHeader><CardTitle>موجودی و گردش کالا</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[980px]">
           <thead><tr><th>کد</th><th>کالا</th><th>ورود</th><th>خروج</th><th>موجودی پایان بازه</th><th>میانگین هزینه</th><th>ارزش</th><th>حداقل</th><th>وضعیت</th></tr></thead>
           <tbody>{inventoryRows.map((row) => <tr key={row.product.id}><td>{row.product.code}</td><td className="font-bold">{row.product.name}</td><td className="text-emerald-700">{money(row.incoming)} {row.product.unit}</td><td className="text-rose-700">{money(row.outgoing)} {row.product.unit}</td><td className="font-black">{money(row.stock)} {row.product.unit}</td><td>{money(row.averageCost)} {settings.currency}</td><td>{money(row.value)} {settings.currency}</td><td>{money(row.product.minStock)}</td><td>{row.belowMin ? <Badge className="bg-rose-50 text-rose-700">زیر حداقل</Badge> : <Badge className="bg-emerald-50 text-emerald-700">مناسب</Badge>}</td></tr>)}{!inventoryRows.length && <EmptyRow cols={9} text="کالایی مطابق فیلتر وجود ندارد." />}</tbody>
@@ -456,6 +538,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="بستانکار بازه" value={money(ledgerCredit) + ' ' + settings.currency} />
           <MetricCard title="مانده پایان بازه" value={money(Math.abs(ledgerClosing)) + (ledgerClosing > 0 ? ' بدهکار' : ledgerClosing < 0 ? ' بستانکار' : '')} />
         </div>
+        <LedgerBalanceChart data={ledgerChartRows} currency={settings.currency} />
         <Card><CardHeader><CardTitle>دفتر {selectedLedgerCustomer?.name || 'طرف حساب'}</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[840px]">
           <thead><tr><th>تاریخ</th><th>شرح</th><th>مرجع</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
           <tbody>{ledgerRows.map((entry) => <tr key={entry.id}><td>{formatPersianDate(entry.date)}</td><td className="font-bold">{entry.title}</td><td>{entry.reference || '—'}</td><td className="text-rose-700">{entry.debit ? money(entry.debit) : '—'}</td><td className="text-emerald-700">{entry.credit ? money(entry.credit) : '—'}</td></tr>)}{!ledgerRows.length && <EmptyRow cols={5} text="گردشی در این بازه وجود ندارد." />}</tbody>
@@ -470,6 +553,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
           <MetricCard title="موجودی پایان بازه" value={money(cardexAsOf.stock) + ' ' + (selectedCardexProduct?.unit || '')} />
           <MetricCard title="میانگین هزینه پایان بازه" value={money(cardexAsOf.averageCost) + ' ' + settings.currency} />
         </div>
+        <CardexStockChart data={cardexChartRows} unit={selectedCardexProduct?.unit || ''} />
         <Card><CardHeader><CardTitle>کاردکس {selectedCardexProduct?.name || 'کالا'}</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table min-w-[940px]">
           <thead><tr><th>تاریخ</th><th>نوع حرکت</th><th>مرجع</th><th>ورود</th><th>خروج</th><th>مانده</th><th>میانگین بعد حرکت</th><th>بهای واحد</th></tr></thead>
           <tbody>{cardexRows.map((movement) => <tr key={movement.id}><td>{formatPersianDate(movement.date)}</td><td className="font-bold">{movementLabel(movement)}</td><td>{movement.sourceReference || '—'}</td><td className="text-emerald-700">{movement.quantity > 0 ? money(movement.quantity) : '—'}</td><td className="text-rose-700">{movement.quantity < 0 ? money(Math.abs(movement.quantity)) : '—'}</td><td className="font-black">{money(movement.balanceAfter)} {selectedCardexProduct?.unit}</td><td>{money(movement.averageCostAfter)} {settings.currency}</td><td>{money(movement.unitCost)} {settings.currency}</td></tr>)}{!cardexRows.length && <EmptyRow cols={8} text="حرکتی در این بازه وجود ندارد." />}</tbody>

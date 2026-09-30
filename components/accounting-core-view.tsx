@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
+import { FormattedInput } from '@/components/ui/formatted-input';
 import { Field } from '@/components/ui/field';
 import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
 import { AppNavbarContent } from '@/components/app-navbar';
@@ -222,7 +223,7 @@ export function AccountingCoreView() {
           <Field label="تاریخ"><JalaliDatePicker value={moneyDraft.date} onChange={(date) => setMoneyDraft({ ...moneyDraft, date })} /></Field>
           <Field label="حساب صندوق / بانک"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.settlementAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, settlementAccountId: event.target.value })}>{settlementAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
           <Field label="حساب درآمد / هزینه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.categoryAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, categoryAccountId: event.target.value })}>{(moneyDraft.kind === 'income' ? incomeAccounts : expenseAccounts).map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
-          <Field label={'مبلغ (' + settings.currency + ')'}><Input type="number" min="0" value={moneyDraft.amount} onChange={(event) => setMoneyDraft({ ...moneyDraft, amount: Number(event.target.value) })} /></Field>
+          <Field label={'مبلغ (' + settings.currency + ')'}><FormattedInput min={0} value={moneyDraft.amount} onValueChange={(amount) => setMoneyDraft({ ...moneyDraft, amount })} /></Field>
           <Field label="مرجع"><Input value={moneyDraft.reference || ''} onChange={(event) => setMoneyDraft({ ...moneyDraft, reference: event.target.value })} /></Field>
           <Field label="شرح *" className="sm:col-span-2"><Textarea value={moneyDraft.description} onChange={(event) => setMoneyDraft({ ...moneyDraft, description: event.target.value })} /></Field>
           <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setMoneyOpen(false)}>انصراف</Button><Button disabled={moneyDraft.amount <= 0 || !moneyDraft.description.trim()} onClick={saveMoney}><Scale className="h-4 w-4" /> ثبت قطعی و تراز</Button></div>
