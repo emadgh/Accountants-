@@ -14,10 +14,10 @@ import { buildViewHref, getViewForPathname } from '@/components/app-routes';
 import type { InvoiceKind } from '@/lib/types';
 
 type AccountingNavigation = {
-  navigate: (view: ViewKey) => void;
+  navigate: (view: ViewKey, details?: { projectId?: string }) => void;
   viewInvoice: (id: string, kind: InvoiceKind) => void;
   editInvoice: (id: string, kind: InvoiceKind) => void;
-  newInvoice: (kind: InvoiceKind) => void;
+  newInvoice: (kind: InvoiceKind, projectId?: string) => void;
   openCustomerLedger: (customerId: string) => void;
   openCheck: (checkId: string) => void;
 };
@@ -106,8 +106,8 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pathname, router, view]);
 
-  const navigate = (next: ViewKey) => {
-    pushHref(buildViewHref(next));
+  const navigate = (next: ViewKey, details?: { projectId?: string }) => {
+    pushHref(buildViewHref(next, details));
     setMenuOpen(false);
   };
 
@@ -139,8 +139,8 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
     pushHref(buildViewHref(kind === 'sale' ? 'sale-new' : 'purchase-new', { invoiceId: id, invoiceMode: 'edit' }));
   };
 
-  const newInvoice = (kind: InvoiceKind) => {
-    pushHref(buildViewHref(kind === 'sale' ? 'sale-new' : 'purchase-new'));
+  const newInvoice = (kind: InvoiceKind, projectId?: string) => {
+    pushHref(buildViewHref(kind === 'sale' ? 'sale-new' : 'purchase-new', { projectId }));
   };
 
   const openCustomerLedger = (customerId: string) => {

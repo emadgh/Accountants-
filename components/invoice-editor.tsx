@@ -5,7 +5,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ArrowDownToLine, Ban, CheckCircle2, Copy, Edit3, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId } from '@/lib/types';
+import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId, Project } from '@/lib/types';
 import { INVOICE_PAPER_SIZES, INVOICE_TEMPLATES } from '@/lib/invoice-templates';
 import { buildCustomerLedger, invoiceLineDiscount, invoiceLineGross, invoiceLineNet, invoiceOutstandingAmount, invoiceTotal, money, numberToPersianWords, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
@@ -21,7 +21,7 @@ import { InvoicePaymentDialog } from '@/components/invoice-payment-dialog';
 import { InvoicePaymentHistoryButton } from '@/components/invoice-payment-history';
 import { AppNavbarContent } from '@/components/app-navbar';
 
-function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = '', templateId: InvoiceTemplateId = 'classic', paperSize: InvoicePaperSize = 'A4'): Invoice {
+function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = '', templateId: InvoiceTemplateId = 'classic', paperSize: InvoicePaperSize = 'A4', project?: Project, projectCustomer?: Customer): Invoice {
   const now = new Date().toISOString();
   return {
     id: uid('inv'),
@@ -32,9 +32,9 @@ function blankInvoice(kind: InvoiceKind, customerName = '', number = '', busines
     kind,
     status: 'draft',
     date: todayIso(),
-    customerId: '', customerName, customerPhone: '', customerAddress: '', customerNationalId: '', customerEconomicCode: '', customerPostalCode: '',
+    customerId: projectCustomer?.id || '', customerName: projectCustomer?.name || customerName, customerPhone: projectCustomer?.phone || '', customerAddress: projectCustomer?.address || '', customerNationalId: projectCustomer?.nationalId || '', customerEconomicCode: projectCustomer?.economicCode || '', customerPostalCode: projectCustomer?.postalCode || '',
     items: [{ id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0, discount: 0 }],
-    discount: 0, tax: 0, shipping: 0, notes: '', createdAt: now, updatedAt: now,
+    discount: 0, tax: 0, shipping: 0, notes: '', ...(project ? { projectId: project.id } : {}), createdAt: now, updatedAt: now,
   };
 }
 
@@ -42,10 +42,12 @@ function InvoiceAmount({ value, empty = false }: { value: number; empty?: boolea
   return <span className="invoice-violet-amount" dir="ltr">{empty ? '' : money(value)}</span>;
 }
 
-export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
-  const { invoices, customers, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; projectId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
+  const { invoices, customers, projects, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+  const initialProject = projectId ? projects.find((item) => item.id === projectId) : undefined;
+  const initialProjectCustomer = initialProject ? customers.find((item) => item.id === initialProject.customerId) : undefined;
   const selectedInvoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
-  const [invoice, setInvoice] = useState<Invoice>(() => selectedInvoice ? structuredClone(selectedInvoice) : blankInvoice(kind, '', '', '', settings.defaultInvoiceTemplateId, settings.defaultInvoicePaperSize));
+  const [invoice, setInvoice] = useState<Invoice>(() => selectedInvoice ? structuredClone(selectedInvoice) : blankInvoice(kind, '', '', '', settings.defaultInvoiceTemplateId, settings.defaultInvoicePaperSize, initialProject, initialProjectCustomer));
   const existing = useMemo(() => invoices.find((item) => item.id === invoice.id), [invoices, invoice.id]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [paymentAction, setPaymentAction] = useState<{ documentNumber: string } | null>(null);
@@ -56,8 +58,8 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
       setInvoice(structuredClone(selectedInvoice));
       return;
     }
-    setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind), settings.defaultBusinessProfileId, settings.defaultInvoiceTemplateId, settings.defaultInvoicePaperSize));
-  }, [selectedInvoice?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+    setInvoice(blankInvoice(kind, '', reserveDocumentNumber(kind), settings.defaultBusinessProfileId, settings.defaultInvoiceTemplateId, settings.defaultInvoicePaperSize, initialProject, initialProjectCustomer));
+  }, [selectedInvoice?.id, kind, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (selectedInvoice && invoice.id === selectedInvoice.id && (mode === 'view' || selectedInvoice.status === 'settled' || selectedInvoice.status === 'void' || selectedInvoice.status !== invoice.status)) {
@@ -183,6 +185,28 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
     const c = customers.find((x) => x.id === id);
     if (!c) return patch('customerId', '');
     setInvoice((x) => ({ ...x, customerId: c.id, customerName: c.name, customerPhone: c.phone, customerAddress: c.address, customerNationalId: c.nationalId, customerEconomicCode: c.economicCode, customerPostalCode: c.postalCode }));
+  };
+
+  const chooseProject = (id: string) => {
+    if (!canEdit || isPartial) return;
+    if (!id) return patch('projectId', undefined);
+    const project = projects.find((item) => item.id === id);
+    if (!project) return;
+    const projectCustomer = customers.find((item) => item.id === project.customerId);
+    setInvoice((current) => ({
+      ...current,
+      projectId: project.id,
+      ...(projectCustomer ? {
+        customerId: projectCustomer.id,
+        customerName: projectCustomer.name,
+        customerPhone: projectCustomer.phone,
+        customerAddress: projectCustomer.address,
+        customerNationalId: projectCustomer.nationalId,
+        customerEconomicCode: projectCustomer.economicCode,
+        customerPostalCode: projectCustomer.postalCode,
+      } : {}),
+      updatedAt: new Date().toISOString(),
+    }));
   };
 
   const ensureInvoiceCustomer = (source: Invoice): Invoice | null => {
@@ -363,8 +387,8 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
       <InvoicePaperSizeSelect value={paperSize} onChange={choosePaperSize} />
       <Button onClick={print}><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : 'چاپ'}</Button>
     </div> : <AppNavbarContent
-      title={`${isReadOnly ? 'نمایش' : isPartial ? 'ویرایش محدود' : 'ویرایش'} فاکتور ${invoice.kind === 'sale' ? 'فروش' : 'خرید'}`}
-      subtitle={isReadOnly ? 'اطلاعات فاکتور فقط برای مشاهده باز شده است.' : 'همین فرم نسخه قابل چاپ فاکتور است.'}
+      title={`${isReadOnly ? 'نمایش' : isPartial ? 'ویرایش محدود' : existing ? 'ویرایش' : 'ثبت'} فاکتور ${invoice.kind === 'sale' ? 'فروش' : 'خرید'}`}
+      subtitle={isReadOnly ? 'اطلاعات فاکتور فقط برای مشاهده باز شده است.' : existing ? 'همین فرم نسخه قابل چاپ فاکتور است.' : 'اطلاعات را تکمیل کنید؛ می‌توانید پیش‌نویس را ذخیره یا فاکتور را ثبت نهایی کنید.'}
       leading={<>
         {onBack && <Button variant="ghost" size="icon" onClick={onBack} aria-label="بازگشت"><ArrowRight className="h-4 w-4" /></Button>}
         <Badge className={statusClass}>{statusLabel}{(invoice.revision || 0) > 1 ? ` · R${invoice.revision}` : ''}</Badge>
@@ -396,7 +420,10 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
 
     {invoice.kind === 'sale' && <Panel variant="subtle" padding="sm" className="screen-only">
       <div className="grid gap-3 md:grid-cols-[1fr_2fr] md:items-start">
-        <div className="space-y-2"><div className="text-sm font-black">سررسید دریافت</div><JalaliDatePicker value={invoice.dueDate || ''} onChange={(value) => patch('dueDate', value)} disabled={!canEdit || isPartial} placeholder="بدون سررسید" /><Button type="button" size="sm" variant="ghost" disabled={!canEdit || !invoice.dueDate} onClick={() => patch('dueDate', undefined)}>پاک‌کردن سررسید</Button></div>
+        <div className="space-y-3">
+          <label className="block space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="block text-[11px] font-normal text-slate-500">با انتخاب پروژه، طرف حساب همان پروژه هم انتخاب می‌شود.</span></label>
+          <div className="space-y-2"><div className="text-sm font-black">سررسید دریافت</div><JalaliDatePicker value={invoice.dueDate || ''} onChange={(value) => patch('dueDate', value)} disabled={!canEdit || isPartial} placeholder="بدون سررسید" /><Button type="button" size="sm" variant="ghost" disabled={!canEdit || !invoice.dueDate} onClick={() => patch('dueDate', undefined)}>پاک‌کردن سررسید</Button></div>
+        </div>
         <div><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><div className="text-sm font-black">برنامه اقساط (اختیاری)</div><div className="text-[11px] text-slate-500">جمع مبالغ اقساط باید با کل فاکتور برابر باشد؛ این برنامه به‌تنهایی پرداخت ثبت نمی‌کند.</div></div><Button type="button" size="sm" variant="outline" disabled={!canEdit || isPartial} onClick={() => patch('installments', [...(invoice.installments || []), { id: uid('installment'), dueDate: todayIso(), amount: (invoice.installments?.length ? 0 : total) }])}><Plus className="h-3.5 w-3.5" /> افزودن قسط</Button></div>
           <div className="space-y-2">{(invoice.installments || []).map((installment, index) => <div key={installment.id} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2"><span className="text-xs font-bold text-slate-500">قسط {index + 1}</span><JalaliDatePicker value={installment.dueDate} onChange={(dueDate) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, dueDate } : item))} disabled={!canEdit || isPartial} /><input aria-label={`مبلغ قسط ${index + 1}`} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" type="number" min="0" value={installment.amount} onChange={(event) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, amount: Number(event.target.value) } : item))} disabled={!canEdit || isPartial} /><Button type="button" variant="ghost" size="icon" disabled={!canEdit || isPartial} title="حذف قسط" onClick={() => patch('installments', (invoice.installments || []).filter((item) => item.id !== installment.id))}><Trash2 className="h-4 w-4 text-rose-500" /></Button></div>)}
             {!!invoice.installments?.length && <div className="text-left text-xs text-slate-500">جمع اقساط: {money(invoice.installments.reduce((sum, item) => sum + Number(item.amount || 0), 0))} · مبلغ فاکتور: {money(total)} {settings.currency}</div>}
@@ -814,6 +841,7 @@ function invoiceEditableSignature(invoice: Invoice) {
     customerEconomicCode: invoice.customerEconomicCode || '',
     customerPostalCode: invoice.customerPostalCode || '',
     items: invoice.items,
+    projectId: invoice.projectId || '',
     discount: invoice.discount,
     tax: invoice.tax,
     shipping: invoice.shipping,

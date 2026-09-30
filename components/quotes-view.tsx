@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Check, FilePlus2, FileText, Search, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,15 +21,34 @@ const statusNames: Record<Quote['status'], string> = {
 export function QuotesView() {
   const store = useAccountingStore();
   const navigation = useAccountingNavigation();
+  const searchParams = useSearchParams();
+  const initialProjectId = searchParams.get('projectId') || '';
+  const initialProject = store.projects.find((project) => project.id === initialProjectId);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | Quote['status']>('all');
-  const [creating, setCreating] = useState(false);
-  const [customerId, setCustomerId] = useState('');
-  const [projectId, setProjectId] = useState('');
+  const [creating, setCreating] = useState(Boolean(initialProject));
+  const [customerId, setCustomerId] = useState(initialProject?.customerId || '');
+  const [projectId, setProjectId] = useState(initialProject?.id || '');
   const [validUntil, setValidUntil] = useState('');
   const [items, setItems] = useState<Array<{ id: string; productId?: string; description: string; unit: string; qty: string; unitPrice: string }>>([{ id: 'quote-line-1', description: '', unit: 'عدد', qty: '1', unitPrice: '' }]);
   const [notes, setNotes] = useState('');
   const quotes = useMemo(() => store.quotes.filter((quote) => (statusFilter === 'all' || quote.status === statusFilter) && `${quote.number} ${quote.customerName} ${quote.items.map((item) => item.description).join(' ')}`.toLowerCase().includes(query.toLowerCase())), [store.quotes, query, statusFilter]);
+
+  useEffect(() => {
+    if (!initialProjectId) return;
+    const project = store.projects.find((item) => item.id === initialProjectId);
+    if (!project) return;
+    setCreating(true);
+    setProjectId(project.id);
+    setCustomerId(store.customers.some((customer) => customer.id === project.customerId) ? project.customerId : '');
+  }, [initialProjectId, store.projects, store.customers]);
+
+  const startNewQuote = () => {
+    const project = initialProjectId ? store.projects.find((item) => item.id === initialProjectId) : undefined;
+    setCreating(true);
+    setProjectId(project?.id || '');
+    setCustomerId(project && store.customers.some((customer) => customer.id === project.customerId) ? project.customerId : '');
+  };
 
   const save = (status: Quote['status']) => {
     const customer = store.customers.find((item) => item.id === customerId);
@@ -46,7 +66,7 @@ export function QuotesView() {
     };
     const result = store.upsertQuote(quote);
     if (!result.ok) return notify(result.message || 'ذخیره پیش‌فاکتور انجام نشد.', 'error');
-    setCreating(false); setItems([{ id: 'quote-line-1', description: '', unit: 'عدد', qty: '1', unitPrice: '' }]); setNotes(''); setValidUntil(''); setProjectId('');
+    setCreating(false); setCustomerId(''); setItems([{ id: 'quote-line-1', description: '', unit: 'عدد', qty: '1', unitPrice: '' }]); setNotes(''); setValidUntil(''); setProjectId('');
     notify('پیش‌فاکتور ذخیره شد.', 'success');
   };
 
@@ -65,7 +85,7 @@ export function QuotesView() {
   return <div className="space-y-5" dir="rtl">
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div><div className="flex items-center gap-2 text-2xl font-black"><FileText className="h-6 w-6 text-sky-600" />پیش‌فاکتورها</div><p className="mt-1 text-sm text-slate-500">پیش‌فاکتور را ثبت و پس از پذیرش به پیش‌نویس فاکتور فروش تبدیل کنید.</p></div>
-      <Button onClick={() => setCreating((value) => !value)}><FilePlus2 className="h-4 w-4" /> پیش‌فاکتور جدید</Button>
+      <Button onClick={() => creating ? setCreating(false) : startNewQuote()}><FilePlus2 className="h-4 w-4" /> پیش‌فاکتور جدید</Button>
     </div>
 
     {creating && <Card><CardHeader><CardTitle>ثبت پیش‌فاکتور خدماتی</CardTitle><Button variant="ghost" size="sm" onClick={() => setCreating(false)}>بستن</Button></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
