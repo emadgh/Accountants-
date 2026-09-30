@@ -10,7 +10,9 @@ export type InvoiceStatus = 'draft' | 'final' | 'partial' | 'settled' | 'void';
 export type PaymentMethod = 'cash' | 'card' | 'check';
 export type PaymentDirection = 'receipt' | 'payment';
 export type CheckStatus = 'pending' | 'cleared' | 'bounced';
-export type DocumentSequenceKey = 'sale' | 'purchase' | 'receipt' | 'payment' | 'check';
+export type DocumentSequenceKey = 'sale' | 'purchase' | 'receipt' | 'payment' | 'check' | 'quote';
+export type QuoteStatus = 'draft' | 'issued' | 'accepted' | 'rejected' | 'converted';
+export type ProjectStatus = 'in-progress' | 'awaiting-approval' | 'completed' | 'cancelled';
 
 export interface DocumentSequenceConfig {
   prefix: string;
@@ -33,6 +35,7 @@ export interface Customer {
   postalCode: string;
   openingBalance: number;
   notes?: string;
+  priceGroup?: string;
 }
 
 export interface Product {
@@ -46,6 +49,12 @@ export interface Product {
   averageCost: number;
   stock: number;
   minStock: number;
+  sku?: string;
+  barcode?: string;
+  category?: string;
+  archived?: boolean;
+  customerPrices?: Record<string, number>;
+  customerGroupPrices?: Record<string, number>;
   notes?: string;
 }
 
@@ -100,6 +109,55 @@ export interface Invoice {
   voidReason?: string;
   auditTrail?: InvoiceAuditEntry[];
   migrationReview?: { status: 'needs-review'; reason: string };
+  projectId?: string;
+  quoteId?: string;
+  dueDate?: string;
+  installments?: Array<{ id: string; dueDate: string; amount: number }>;
+}
+
+export interface Quote {
+  id: string;
+  number: string;
+  status: QuoteStatus;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  businessProfileId: string;
+  date: string;
+  validUntil?: string;
+  items: InvoiceItem[];
+  discount: number;
+  tax: number;
+  shipping: number;
+  notes: string;
+  projectId?: string;
+  linkedInvoiceId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Project {
+  id: string;
+  customerId: string;
+  title: string;
+  status: ProjectStatus;
+  dueDate?: string;
+  agreedAmount: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttachmentMetadata {
+  id: string;
+  projectId: string;
+  filename: string;
+  mimeType: 'application/pdf' | 'image/webp';
+  size: number;
+  storageKey: string;
+  thumbnailKey?: string;
+  createdAt: string;
 }
 
 export interface ReturnItem {
@@ -321,6 +379,7 @@ export interface MoneyTransaction {
   updatedAt: string;
   voidedAt?: string;
   voidReason?: string;
+  projectId?: string;
 }
 
 export interface BusinessProfile {
@@ -377,6 +436,9 @@ export interface AccountingData {
   accounts: Account[];
   journalEntries: JournalEntry[];
   moneyTransactions: MoneyTransaction[];
+  quotes: Quote[];
+  projects: Project[];
+  attachments: AttachmentMetadata[];
   settings: BusinessSettings;
 }
 

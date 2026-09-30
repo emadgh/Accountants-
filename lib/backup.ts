@@ -1,5 +1,10 @@
 import type { AccountingData } from './types';
 import { ACCOUNTING_SCHEMA_VERSION } from './storage';
+import { strFromU8, unzipSync } from 'fflate';
+import { inspectZipArchive } from './zip-limits';
+
+const MAX_BACKUP_ARCHIVE_BYTES = 200 * 1024 * 1024;
+const MAX_BACKUP_EXPANDED_BYTES = 300 * 1024 * 1024;
 
 export const ACCOUNTING_BACKUP_FORMAT = 'accountants-web-backup-v2';
 
@@ -24,6 +29,9 @@ export interface AccountingBackupPreview {
   checks: number;
   journalEntries: number;
   businessProfiles: number;
+  quotes: number;
+  projects: number;
+  attachments: number;
   warnings: string[];
 }
 
@@ -61,6 +69,9 @@ function validateAccountingShape(raw: unknown): AccountingData {
     accounts: arrayOrEmpty(raw.accounts) as AccountingData['accounts'],
     journalEntries: arrayOrEmpty(raw.journalEntries) as AccountingData['journalEntries'],
     moneyTransactions: arrayOrEmpty(raw.moneyTransactions) as AccountingData['moneyTransactions'],
+    quotes: arrayOrEmpty(raw.quotes) as AccountingData['quotes'],
+    projects: arrayOrEmpty(raw.projects) as AccountingData['projects'],
+    attachments: arrayOrEmpty(raw.attachments) as AccountingData['attachments'],
     settings: raw.settings as unknown as AccountingData['settings'],
   };
 }
@@ -138,7 +149,31 @@ export async function parseAccountingBackup(text: string): Promise<{ data: Accou
       checks: data.checks.length,
       journalEntries: data.journalEntries.length,
       businessProfiles: profiles,
+      quotes: data.quotes.length,
+      projects: data.projects.length,
+      attachments: data.attachments.length,
       warnings,
     },
   };
+}
+
+export async function parseAccountingBackupFile(file: File): Promise<{ data: AccountingData; preview: AccountingBackupPreview; packaged: boolean }> {
+  if (file.size > MAX_BACKUP_ARCHIVE_BYTES) throw new Error('حجم بسته پشتیبان از ۲۰۰ مگابایت بیشتر است.');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    const inspection = inspectZipArchive(bytes, MAX_BACKUP_EXPANDED_BYTES);
+    if (!inspection.ok) throw new Error(inspection.reason === 'too-large' || inspection.reason === 'too-many-entries'
+      ? 'حجم یا تعداد فایل‌های بازشده بسته بیش از حد مجاز است.'
+      : 'ساختار فایل ZIP معتبر نیست.');
+    let archive: Record<string, Uint8Array>;
+    try { archive = unzipSync(bytes); }
+    catch { throw new Error('بسته پشتیبان ZIP خراب است.'); }
+    const manifest = archive['backup.json'];
+    if (!manifest) throw new Error('فایل backup.json در بسته پیدا نشد.');
+    const parsed = await parseAccountingBackup(strFromU8(manifest));
+    const missingFiles = parsed.data.attachments.flatMap((item) => [item.storageKey, item.thumbnailKey].filter((key): key is string => !!key)).filter((key) => !archive[`attachments/${key}`]);
+    if (missingFiles.length) throw new Error(`فایل پیوست در بسته موجود نیست: ${missingFiles[0]}`);
+    return { ...parsed, packaged: true };
+  }
+  return { ...(await parseAccountingBackup(new TextDecoder().decode(bytes))), packaged: false };
 }

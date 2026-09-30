@@ -1,4 +1,4 @@
-export const SQLITE_SCHEMA_VERSION = 1;
+export const SQLITE_SCHEMA_VERSION = 3;
 
 export const SQLITE_SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -215,7 +215,68 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at);
 
-INSERT INTO app_meta(key, value)
-VALUES ('sqlite_schema_version', '1')
-ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 `;
+
+export interface SqliteMigration {
+  version: number;
+  name: string;
+  sql: string;
+}
+
+export const SQLITE_MIGRATIONS: SqliteMigration[] = [
+  {
+    version: 2,
+    name: 'quotes-projects-attachments',
+    sql: `
+      CREATE TABLE quotes (
+        id TEXT PRIMARY KEY,
+        number TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        date TEXT NOT NULL,
+        payload TEXT NOT NULL
+      );
+      CREATE INDEX idx_quotes_status ON quotes(status);
+      CREATE INDEX idx_quotes_customer_id ON quotes(customer_id);
+      CREATE INDEX idx_quotes_date ON quotes(date);
+
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        due_date TEXT,
+        payload TEXT NOT NULL
+      );
+      CREATE INDEX idx_projects_customer_id ON projects(customer_id);
+      CREATE INDEX idx_projects_status ON projects(status);
+      CREATE INDEX idx_projects_due_date ON projects(due_date);
+
+      CREATE TABLE attachments (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        storage_key TEXT NOT NULL UNIQUE,
+        thumbnail_key TEXT,
+        created_at TEXT NOT NULL,
+        payload TEXT NOT NULL
+      );
+      CREATE INDEX idx_attachments_project_id ON attachments(project_id);
+    `,
+  },
+  {
+    version: 3,
+    name: 'product-identifiers-and-categories',
+    sql: `
+      ALTER TABLE products ADD COLUMN sku TEXT;
+      ALTER TABLE products ADD COLUMN barcode TEXT;
+      ALTER TABLE products ADD COLUMN category TEXT;
+      ALTER TABLE products ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+      CREATE UNIQUE INDEX idx_products_sku_unique ON products(sku COLLATE NOCASE) WHERE sku IS NOT NULL AND trim(sku) <> '';
+      CREATE UNIQUE INDEX idx_products_barcode_unique ON products(barcode COLLATE NOCASE) WHERE barcode IS NOT NULL AND trim(barcode) <> '';
+      CREATE INDEX idx_products_category ON products(category);
+    `,
+  },
+];

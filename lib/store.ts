@@ -20,6 +20,9 @@ import type {
   OperationResult,
   Payment,
   Product,
+  Quote,
+  Project,
+  AttachmentMetadata,
   ReturnAuditAction,
   ReturnDocument,
   ReturnItem,
@@ -58,13 +61,19 @@ type Store = AccountingData & {
   hydrated: boolean;
   setHydrated: (v: boolean) => void;
   reserveDocumentNumber: (key: DocumentSequenceKey) => string;
+  upsertQuote: (quote: Quote) => OperationResult;
+  setQuoteStatus: (id: string, status: Quote['status']) => OperationResult;
+  convertQuoteToInvoice: (id: string) => StoreOperationResult;
+  upsertProject: (project: Project) => OperationResult;
+  addAttachment: (attachment: AttachmentMetadata) => OperationResult;
+  removeAttachment: (id: string) => void;
   createBusinessProfile: (profile: BusinessProfile) => OperationResult & { profile?: BusinessProfile };
   upsertBusinessProfile: (profile: BusinessProfile) => OperationResult;
   deleteBusinessProfile: (id: string) => OperationResult;
   setDefaultBusinessProfile: (id: string) => OperationResult;
   upsertCustomer: (customer: Customer) => void;
   deleteCustomer: (id: string) => OperationResult;
-  upsertProduct: (product: Product) => void;
+  upsertProduct: (product: Product) => OperationResult;
   deleteProduct: (id: string) => OperationResult;
   saveInvoiceDraft: (invoice: Invoice) => StoreOperationResult;
   setInvoiceTemplate: (id: string, templateId: Invoice['templateId']) => StoreOperationResult;
@@ -108,6 +117,19 @@ function partialInvoiceContentSignature(invoice: Invoice) {
   });
 }
 
+function validateInstallments(invoice: Invoice): OperationResult {
+  const installments = invoice.installments || [];
+  if (!installments.length) return { ok: true };
+  if (installments.some((item) => !item.dueDate || !Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0)) {
+    return { ok: false, message: 'برای هر قسط تاریخ و مبلغ بیشتر از صفر وارد کنید.' };
+  }
+  const scheduled = installments.reduce((sum, item) => sum + Number(item.amount), 0);
+  if (Math.abs(scheduled - invoiceTotal(invoice)) > 1) {
+    return { ok: false, message: 'جمع اقساط باید با مبلغ فاکتور برابر باشد.' };
+  }
+  return { ok: true };
+}
+
 const MAIN_WAREHOUSE_ID = 'main';
 
 type InventoryApplyResult = OperationResult & {
@@ -119,6 +141,10 @@ function normalizeProducts(products: Product[]) {
   return products.map((product) => ({
     ...product,
     averageCost: Number(product.averageCost ?? product.buyPrice ?? 0),
+    sku: product.sku?.trim() || undefined,
+    barcode: product.barcode?.trim() || undefined,
+    category: product.category?.trim() || undefined,
+    archived: Boolean(product.archived),
   }));
 }
 
@@ -423,9 +449,12 @@ function appendAudit(invoice: Invoice, action: InvoiceAuditAction, revision: num
   ];
 }
 
-function validatePosting(products: Product[], invoice: Invoice, allInvoices: Invoice[]): StoreOperationResult {
+function validatePosting(customers: Customer[], products: Product[], invoice: Invoice, allInvoices: Invoice[]): StoreOperationResult {
   if (!invoice.number.trim()) return { ok: false, message: 'شماره فاکتور نمی‌تواند خالی باشد.' };
   if (!invoice.customerName.trim()) return { ok: false, message: 'طرف حساب را مشخص کنید.' };
+  if (!invoice.customerId || !customers.some((customer) => customer.id === invoice.customerId)) {
+    return { ok: false, message: 'طرف حساب معتبر را انتخاب یا در همین فاکتور ایجاد کنید.' };
+  }
   if (!invoice.items.length) return { ok: false, message: 'فاکتور باید حداقل یک ردیف داشته باشد.' };
 
   const duplicateNumber = allInvoices.some(
@@ -581,17 +610,38 @@ export function normalizeAccountingData(data: AccountingData): AccountingData {
     openingBalance: Number(customer.openingBalance || 0),
   }));
   const products = normalizeProducts(data.products || []);
-  const invoices = (data.invoices || []).map((invoice) => ({
-    ...invoice,
-    businessProfileId: invoice.businessProfileId || settings.defaultBusinessProfileId,
-    templateId: isInvoiceTemplateId(invoice.templateId) ? invoice.templateId : 'classic',
-    date: normalizeStoredDate(invoice.date),
-    items: (invoice.items || []).map((item) => ({
-      ...item,
-      discount: Math.max(0, Number(item.discount || 0)),
-      ...(item.discountPercent == null ? {} : { discountPercent: Math.max(0, Number(item.discountPercent || 0)) }),
-    })),
-  }));
+  const invoices = (data.invoices || []).map((invoice) => {
+    let customerId = invoice.customerId;
+    if (!customerId || !customers.some((customer) => customer.id === customerId)) {
+      customerId ||= `legacy_customer_${invoice.id}`;
+      if (!customers.some((customer) => customer.id === customerId)) {
+        customers.push({
+          id: customerId,
+          code: `LEGACY-${customers.length + 1}`,
+          name: invoice.customerName?.trim() || 'طرف حساب قدیمی',
+          kind: invoice.kind === 'sale' ? 'customer' : 'supplier',
+          status: 'active', phone: invoice.customerPhone || '', address: invoice.customerAddress || '',
+          nationalId: invoice.customerNationalId || '', economicCode: invoice.customerEconomicCode || '',
+          postalCode: invoice.customerPostalCode || '', openingBalance: 0,
+          notes: 'رکورد خودکار برای حفظ ارتباط فاکتور قدیمی',
+        });
+      }
+    }
+    return {
+      ...invoice,
+      customerId,
+      businessProfileId: invoice.businessProfileId || settings.defaultBusinessProfileId,
+      templateId: isInvoiceTemplateId(invoice.templateId) ? invoice.templateId : 'classic',
+      date: normalizeStoredDate(invoice.date),
+      ...(invoice.dueDate ? { dueDate: normalizeStoredDate(invoice.dueDate) } : {}),
+      installments: (invoice.installments || []).map((installment) => ({ ...installment, amount: Number(installment.amount || 0), dueDate: normalizeStoredDate(installment.dueDate) })),
+      items: (invoice.items || []).map((item) => ({
+        ...item,
+        discount: Math.max(0, Number(item.discount || 0)),
+        ...(item.discountPercent == null ? {} : { discountPercent: Math.max(0, Number(item.discountPercent || 0)) }),
+      })),
+    };
+  });
   const returns = (data.returns || []).map((document) => ({ ...document, date: normalizeStoredDate(document.date) }));
   const checks = (data.checks || []).map((check, index) => ({
     ...check,
@@ -618,6 +668,18 @@ export function normalizeAccountingData(data: AccountingData): AccountingData {
     ...transaction,
     date: normalizeStoredDate(transaction.date),
   }));
+  const quotes = (data.quotes || []).map((quote) => ({
+    ...quote,
+    date: normalizeStoredDate(quote.date),
+    ...(quote.validUntil ? { validUntil: normalizeStoredDate(quote.validUntil) } : {}),
+    items: quote.items || [],
+  }));
+  const projects = (data.projects || []).map((project) => ({
+    ...project,
+    dueDate: project.dueDate ? normalizeStoredDate(project.dueDate) : undefined,
+    agreedAmount: Number(project.agreedAmount || 0),
+  }));
+  const attachments = data.attachments || [];
 
   const base: AccountingData = {
     customers,
@@ -631,6 +693,9 @@ export function normalizeAccountingData(data: AccountingData): AccountingData {
     accounts,
     journalEntries,
     moneyTransactions,
+    quotes,
+    projects,
+    attachments,
     settings,
   };
 
@@ -653,6 +718,8 @@ export const useAccountingStore = create<Store>()(
         const used = new Set<string>();
         if (key === 'sale' || key === 'purchase') {
           state.invoices.filter((invoice) => invoice.kind === key).forEach((invoice) => used.add(invoice.number.trim()));
+        } else if (key === 'quote') {
+          state.quotes.forEach((quote) => used.add(quote.number.trim()));
         } else if (key === 'receipt' || key === 'payment') {
           state.payments
             .filter((payment) => payment.direction === key)
@@ -679,6 +746,69 @@ export const useAccountingStore = create<Store>()(
         });
         return candidate;
       },
+
+      upsertQuote: (quote) => {
+        const state = get();
+        if (!state.customers.some((customer) => customer.id === quote.customerId)) return { ok: false, message: 'برای پیش‌فاکتور مشتری معتبر انتخاب کنید.' };
+        if (!quote.number.trim() || !quote.items.length) return { ok: false, message: 'شماره و دست‌کم یک ردیف پیش‌فاکتور لازم است.' };
+        if (state.quotes.some((item) => item.number === quote.number && item.id !== quote.id)) return { ok: false, message: 'شماره پیش‌فاکتور تکراری است.' };
+        const existing = state.quotes.find((item) => item.id === quote.id);
+        if (existing?.status === 'converted') return { ok: false, message: 'پیش‌فاکتور تبدیل‌شده قابل ویرایش نیست.' };
+        const next = { ...quote, updatedAt: new Date().toISOString() };
+        set({ quotes: existing ? state.quotes.map((item) => item.id === quote.id ? next : item) : [next, ...state.quotes] });
+        return { ok: true };
+      },
+
+      setQuoteStatus: (id, status) => {
+        const state = get();
+        const quote = state.quotes.find((item) => item.id === id);
+        if (!quote) return { ok: false, message: 'پیش‌فاکتور پیدا نشد.' };
+        if (quote.status === 'converted') return { ok: false, message: 'وضعیت پیش‌فاکتور تبدیل‌شده تغییر نمی‌کند.' };
+        set({ quotes: state.quotes.map((item) => item.id === id ? { ...item, status, updatedAt: new Date().toISOString() } : item) });
+        return { ok: true };
+      },
+
+      convertQuoteToInvoice: (id) => {
+        const state = get();
+        const quote = state.quotes.find((item) => item.id === id);
+        if (!quote) return { ok: false, message: 'پیش‌فاکتور پیدا نشد.' };
+        const linked = state.invoices.find((item) => item.id === quote.linkedInvoiceId || item.quoteId === id);
+        if (linked) return { ok: true, invoice: linked };
+        if (quote.status !== 'accepted') return { ok: false, message: 'فقط پیش‌فاکتور پذیرفته‌شده به فاکتور تبدیل می‌شود.' };
+        if (!state.customers.some((customer) => customer.id === quote.customerId)) return { ok: false, message: 'مشتری پیش‌فاکتور دیگر معتبر نیست.' };
+        const now = new Date().toISOString();
+        const invoice: Invoice = {
+          id: uid('invoice'), number: get().reserveDocumentNumber('sale'),
+          businessProfileId: quote.businessProfileId || state.settings.defaultBusinessProfileId,
+          templateId: state.settings.defaultInvoiceTemplateId, paperSize: state.settings.defaultInvoicePaperSize,
+          kind: 'sale', status: 'draft', date: quote.date,
+          customerId: quote.customerId, customerName: quote.customerName,
+          customerPhone: quote.customerPhone, customerAddress: quote.customerAddress,
+          items: quote.items.map((item) => ({ ...item, id: uid('item') })),
+          discount: quote.discount, tax: quote.tax, shipping: quote.shipping, notes: quote.notes,
+          createdAt: now, updatedAt: now, quoteId: quote.id, projectId: quote.projectId,
+        };
+        set({ invoices: [invoice, ...get().invoices], quotes: get().quotes.map((item) => item.id === id ? { ...item, status: 'converted', linkedInvoiceId: invoice.id, updatedAt: now } : item) });
+        return { ok: true, invoice };
+      },
+
+      upsertProject: (project) => {
+        const state = get();
+        if (!state.customers.some((customer) => customer.id === project.customerId)) return { ok: false, message: 'برای پروژه مشتری معتبر انتخاب کنید.' };
+        if (!project.title.trim()) return { ok: false, message: 'عنوان پروژه الزامی است.' };
+        const exists = state.projects.some((item) => item.id === project.id);
+        set({ projects: exists ? state.projects.map((item) => item.id === project.id ? { ...project, updatedAt: new Date().toISOString() } : item) : [{ ...project, updatedAt: new Date().toISOString() }, ...state.projects] });
+        return { ok: true };
+      },
+
+      addAttachment: (attachment) => {
+        const state = get();
+        if (!state.projects.some((project) => project.id === attachment.projectId)) return { ok: false, message: 'پروژه پیوست پیدا نشد.' };
+        set({ attachments: [attachment, ...state.attachments.filter((item) => item.id !== attachment.id)] });
+        return { ok: true };
+      },
+
+      removeAttachment: (id) => set({ attachments: get().attachments.filter((item) => item.id !== id) }),
 
       createBusinessProfile: (profile) => {
         const state = get();
@@ -776,59 +906,40 @@ export const useAccountingStore = create<Store>()(
           state.payments.some((payment) => payment.customerId === id) ||
           state.checks.some((check) => check.customerId === id) ||
           state.adjustments.some((adjustment) => adjustment.customerId === id);
-        if (used) {
+        const relatedToQuotesOrProjects = state.quotes.some((quote) => quote.customerId === id) || state.projects.some((project) => project.customerId === id);
+        if (used || relatedToQuotesOrProjects) {
           return { ok: false, message: 'این طرف حساب دارای سند یا گردش است و برای حفظ یکپارچگی سوابق قابل حذف نیست.' };
         }
         set({ customers: state.customers.filter((customer) => customer.id !== id) });
         return { ok: true };
       },
 
-      upsertProduct: (product) =>
-        set((state) => {
-          const previous = state.products.find((item) => item.id === product.id);
-          if (previous) {
-            const normalized: Product = {
-              ...product,
-              stock: previous.stock,
-              averageCost: Number(previous.averageCost ?? previous.buyPrice ?? product.buyPrice ?? 0),
-            };
-            return { products: state.products.map((item) => (item.id === product.id ? normalized : item)) };
-          }
-
-          const normalized: Product = {
-            ...product,
-            averageCost: Number(product.averageCost ?? product.buyPrice ?? 0),
-          };
-          let stockMovements = state.stockMovements;
-          if (normalized.kind === 'product' && Math.abs(Number(normalized.stock || 0)) > 0.0001) {
-            const averageCost = Number(normalized.averageCost || 0);
-            stockMovements = [...stockMovements, {
-              id: uid('stock'),
-              productId: normalized.id,
-              warehouseId: MAIN_WAREHOUSE_ID,
-              date: todayFa(),
-              createdAt: new Date().toISOString(),
-              quantity: Number(normalized.stock || 0),
-              balanceAfter: Number(normalized.stock || 0),
-              averageCostAfter: averageCost,
-              unitCost: averageCost,
-              type: 'opening',
-              action: 'product-opening',
-              sourceType: 'system',
-              sourceId: normalized.id,
-              sourceReference: 'موجودی اولیه کالا',
-            }];
-          }
-          const newMovements = stockMovements.slice(state.stockMovements.length);
-          return {
-            products: [normalized, ...state.products],
-            stockMovements,
-            journalEntries: [
-              ...state.journalEntries,
-              ...newMovements.flatMap((movement) => journalForStockAdjustment(movement, state.accounts)),
-            ],
-          };
-        }),
+      upsertProduct: (product) => {
+        const state = get();
+        const duplicateSku = product.sku?.trim() && state.products.some((item) => item.id !== product.id && item.sku?.trim().toLowerCase() === product.sku!.trim().toLowerCase());
+        const duplicateBarcode = product.barcode?.trim() && state.products.some((item) => item.id !== product.id && item.barcode?.trim().toLowerCase() === product.barcode!.trim().toLowerCase());
+        if (duplicateSku) return { ok: false, message: 'SKU تکراری است.' };
+        if (duplicateBarcode) return { ok: false, message: 'بارکد تکراری است.' };
+        const previous = state.products.find((item) => item.id === product.id);
+        if (previous) {
+          const normalized: Product = { ...product, stock: previous.stock, averageCost: Number(previous.averageCost ?? previous.buyPrice ?? product.buyPrice ?? 0) };
+          set({ products: state.products.map((item) => item.id === product.id ? normalized : item) });
+          return { ok: true };
+        }
+        const normalized: Product = { ...product, averageCost: Number(product.averageCost ?? product.buyPrice ?? 0) };
+        let stockMovements = state.stockMovements;
+        if (normalized.kind === 'product' && Math.abs(Number(normalized.stock || 0)) > 0.0001) {
+          const averageCost = Number(normalized.averageCost || 0);
+          stockMovements = [...stockMovements, {
+            id: uid('stock'), productId: normalized.id, warehouseId: MAIN_WAREHOUSE_ID, date: todayFa(), createdAt: new Date().toISOString(),
+            quantity: Number(normalized.stock || 0), balanceAfter: Number(normalized.stock || 0), averageCostAfter: averageCost, unitCost: averageCost,
+            type: 'opening', action: 'product-opening', sourceType: 'system', sourceId: normalized.id, sourceReference: 'موجودی اولیه کالا',
+          }];
+        }
+        const newMovements = stockMovements.slice(state.stockMovements.length);
+        set({ products: [normalized, ...state.products], stockMovements, journalEntries: [...state.journalEntries, ...newMovements.flatMap((movement) => journalForStockAdjustment(movement, state.accounts))] });
+        return { ok: true };
+      },
 
       deleteProduct: (id) => {
         const state = get();
@@ -849,6 +960,11 @@ export const useAccountingStore = create<Store>()(
         if (previous && previous.status !== 'draft') {
           return { ok: false, message: 'سند قطعی را نمی‌توان به پیش‌نویس برگرداند. برای تغییر از ثبت Revision استفاده کنید.' };
         }
+        if (!invoice.customerId || !state.customers.some((customer) => customer.id === invoice.customerId)) {
+          return { ok: false, message: 'طرف حساب معتبر را انتخاب یا در همین فاکتور ایجاد کنید.' };
+        }
+        const schedule = validateInstallments(invoice);
+        if (!schedule.ok) return schedule;
 
         const next = normalizeForDraft(invoice, previous);
         const invoices = previous
@@ -901,6 +1017,8 @@ export const useAccountingStore = create<Store>()(
         if (previous && previous.status !== 'draft') {
           return { ok: false, message: 'این فاکتور قبلاً قطعی شده است.' };
         }
+        const schedule = validateInstallments(invoice);
+        if (!schedule.ok) return schedule;
 
         const now = new Date().toISOString();
         const revision = Math.max(1, previous?.revision || invoice.revision || 0);
@@ -916,7 +1034,7 @@ export const useAccountingStore = create<Store>()(
           auditTrail: previous?.auditTrail || invoice.auditTrail || [],
         };
         const next: Invoice = { ...base, auditTrail: appendAudit(base, 'finalized', revision) };
-        const valid = validatePosting(state.products, next, state.invoices);
+        const valid = validatePosting(state.customers, state.products, next, state.invoices);
         if (!valid.ok) return valid;
 
         const inventory = applyInvoiceInventory(state.products, state.stockMovements, next, 1, 'finalize');
@@ -992,7 +1110,7 @@ export const useAccountingStore = create<Store>()(
           auditTrail: previous.auditTrail || [],
         };
         const next: Invoice = { ...base, auditTrail: appendAudit(base, 'revised', revision, reason) };
-        const valid = validatePosting(baseProducts, next, state.invoices);
+        const valid = validatePosting(state.customers, baseProducts, next, state.invoices);
         if (!valid.ok) return valid;
 
         const appliedInventory = applyInvoiceInventory(baseProducts, reversedInventory.stockMovements, next, 1, 'revision');
@@ -1595,6 +1713,9 @@ export const useAccountingStore = create<Store>()(
           accounts: state.accounts || [],
           journalEntries: state.journalEntries || [],
           moneyTransactions: state.moneyTransactions || [],
+          quotes: state.quotes || [],
+          projects: state.projects || [],
+          attachments: state.attachments || [],
           settings: migratedSettings,
         });
       },
@@ -1627,6 +1748,9 @@ export const useAccountingStore = create<Store>()(
         accounts: state.accounts,
         journalEntries: state.journalEntries,
         moneyTransactions: state.moneyTransactions,
+        quotes: state.quotes,
+        projects: state.projects,
+        attachments: state.attachments,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => state?.setHydrated(true),

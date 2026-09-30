@@ -844,6 +844,9 @@ export async function analyzeYasDatabase(bytes: ArrayBuffer, current: Accounting
     accounts: JSON.parse(JSON.stringify(SYSTEM_ACCOUNTS)),
     journalEntries: [],
     moneyTransactions,
+    quotes: [],
+    projects: [],
+    attachments: [],
     settings,
   };
 

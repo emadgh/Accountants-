@@ -1,5 +1,13 @@
-const CACHE_NAME = 'accountants-shell-v1';
+const CACHE_NAME = 'accountants-shell-v2';
 const CORE_URLS = ['/', '/manifest.webmanifest', '/icon.svg', '/icon-maskable.svg'];
+
+function isCacheableAsset(url) {
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return false;
+  return url.pathname.startsWith('/_next/static/')
+    || url.pathname === '/manifest.webmanifest'
+    || url.pathname === '/icon.svg'
+    || url.pathname === '/icon-maskable.svg';
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -21,7 +29,7 @@ self.addEventListener('message', (event) => {
   if (event.data?.type !== 'CACHE_URLS' || !Array.isArray(event.data.urls)) return;
   const urls = event.data.urls.filter((url) => {
     try {
-      return new URL(url, self.location.origin).origin === self.location.origin;
+      return isCacheableAsset(new URL(url, self.location.origin));
     } catch {
       return false;
     }
@@ -47,6 +55,8 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Authenticated API responses must never enter the offline cache.
+  if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(
@@ -62,6 +72,8 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+
+  if (!isCacheableAsset(url)) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

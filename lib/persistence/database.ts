@@ -39,6 +39,18 @@ let legacyClientPromise: Promise<SQLiteClient> | null = null;
 let inspectorClient: SQLiteClient | null = null;
 let fileStoragePromise: Promise<void> | null = null;
 
+export interface ServerSqlExecutor {
+  query<T extends Record<string, unknown>>(sql: string, bind?: SqlBind): T[];
+  exec(sql: string, bind?: SqlBind): void;
+  transaction(statements: SqlStatement[]): void;
+}
+
+let serverSqlExecutor: ServerSqlExecutor | null = null;
+
+export function configureServerSqlExecutor(executor: ServerSqlExecutor) {
+  serverSqlExecutor = executor;
+}
+
 class SQLiteClient {
   private worker: Worker;
   private nextId = 1;
@@ -156,6 +168,12 @@ async function ensureFileStorage() {
   return fileStoragePromise;
 }
 
+export async function migrateLegacyBrowserDatabaseIfNeeded() {
+  if (typeof window === 'undefined') return;
+  if (!/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) return;
+  await ensureFileStorage();
+}
+
 async function fileRequest<T>(command: { type: 'exec' | 'query' | 'transaction'; sql?: string; bind?: SqlBind; statements?: SqlStatement[] }) {
   await ensureFileStorage();
   const response = await fetch('/api/sqlite', {
@@ -169,19 +187,28 @@ async function fileRequest<T>(command: { type: 'exec' | 'query' | 'transaction';
 }
 
 export async function sqliteExec(sql: string, bind?: SqlBind) {
-  await fileRequest<void>({ type: 'exec', sql, bind });
+  if (typeof window !== 'undefined' || !serverSqlExecutor) {
+    throw new Error('Direct browser SQLite access is disabled. Use the authenticated data API.');
+  }
+  serverSqlExecutor.exec(sql, bind);
 }
 
 export async function sqliteQuery<T extends Record<string, unknown> = Record<string, unknown>>(
   sql: string,
   bind?: SqlBind
 ) {
-  return fileRequest<T[]>({ type: 'query', sql, bind });
+  if (typeof window !== 'undefined' || !serverSqlExecutor) {
+    throw new Error('Direct browser SQLite access is disabled. Use the authenticated data API.');
+  }
+  return serverSqlExecutor.query<T>(sql, bind);
 }
 
 export async function sqliteTransaction(statements: SqlStatement[]) {
   if (!statements.length) return;
-  await fileRequest<void>({ type: 'transaction', statements });
+  if (typeof window !== 'undefined' || !serverSqlExecutor) {
+    throw new Error('Direct browser SQLite access is disabled. Use the authenticated data API.');
+  }
+  serverSqlExecutor.transaction(statements);
 }
 
 

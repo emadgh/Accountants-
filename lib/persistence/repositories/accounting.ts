@@ -32,6 +32,9 @@ function add(
 }
 
 const DELETE_ACCOUNTING_SQL = [
+  'DELETE FROM attachments',
+  'DELETE FROM quotes',
+  'DELETE FROM projects',
   'DELETE FROM return_items',
   'DELETE FROM returns',
   'DELETE FROM journal_lines',
@@ -105,11 +108,26 @@ export async function replaceAccountingData(
     );
   }
 
+  for (const project of data.projects || []) {
+    add(statements, 'INSERT INTO projects(id, customer_id, title, status, due_date, payload) VALUES (?, ?, ?, ?, ?, ?)',
+      [project.id, project.customerId, project.title, project.status, project.dueDate || null, json(project)]);
+  }
+
+  for (const quote of data.quotes || []) {
+    add(statements, 'INSERT INTO quotes(id, number, status, customer_id, date, payload) VALUES (?, ?, ?, ?, ?, ?)',
+      [quote.id, quote.number, quote.status, quote.customerId, quote.date, json(quote)]);
+  }
+
+  for (const attachment of data.attachments || []) {
+    add(statements, 'INSERT INTO attachments(id, project_id, filename, mime_type, size, storage_key, thumbnail_key, created_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [attachment.id, attachment.projectId, attachment.filename, attachment.mimeType, attachment.size, attachment.storageKey, attachment.thumbnailKey || null, attachment.createdAt, json(attachment)]);
+  }
+
   for (const product of data.products) {
     add(
       statements,
-      'INSERT INTO products(id, code, name, kind, payload) VALUES (?, ?, ?, ?, ?)',
-      [product.id, product.code, product.name, product.kind, json(product)]
+      'INSERT INTO products(id, code, name, kind, sku, barcode, category, archived, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [product.id, product.code, product.name, product.kind, product.sku || null, product.barcode || null, product.category || null, product.archived ? 1 : 0, json(product)]
     );
   }
 
@@ -279,7 +297,10 @@ type OrderedCollectionKey =
   | 'stockMovements'
   | 'accounts'
   | 'journalEntries'
-  | 'moneyTransactions';
+  | 'moneyTransactions'
+  | 'quotes'
+  | 'projects'
+  | 'attachments';
 
 type AccountingArrayOrder = Partial<Record<OrderedCollectionKey, string[]>>;
 
@@ -297,6 +318,9 @@ function accountingArrayOrder(data: AccountingData): AccountingArrayOrder {
     accounts: data.accounts.map((item) => item.id),
     journalEntries: data.journalEntries.map((item) => item.id),
     moneyTransactions: data.moneyTransactions.map((item) => item.id),
+    quotes: (data.quotes || []).map((item) => item.id),
+    projects: (data.projects || []).map((item) => item.id),
+    attachments: (data.attachments || []).map((item) => item.id),
   };
 }
 
@@ -335,10 +359,16 @@ export async function syncAccountingData(previous: AccountingData, next: Account
   const accounts = diffById(previous.accounts, next.accounts);
   const journals = diffById(previous.journalEntries, next.journalEntries);
   const money = diffById(previous.moneyTransactions, next.moneyTransactions);
+  const quotes = diffById(previous.quotes || [], next.quotes || []);
+  const projects = diffById(previous.projects || [], next.projects || []);
+  const attachments = diffById(previous.attachments || [], next.attachments || []);
 
   // Deletions run first. Foreign-key checks are deferred by the database transaction,
   // so a multi-entity accounting operation is validated against its final state.
   for (const item of returns.removed) add(statements, 'DELETE FROM returns WHERE id = ?', [item.id]);
+  for (const item of attachments.removed) add(statements, 'DELETE FROM attachments WHERE id = ?', [item.id]);
+  for (const item of quotes.removed) add(statements, 'DELETE FROM quotes WHERE id = ?', [item.id]);
+  for (const item of projects.removed) add(statements, 'DELETE FROM projects WHERE id = ?', [item.id]);
   for (const item of payments.removed) add(statements, 'DELETE FROM payments WHERE id = ?', [item.id]);
   for (const item of checks.removed) add(statements, 'DELETE FROM checks WHERE id = ?', [item.id]);
   for (const item of adjustments.removed) add(statements, 'DELETE FROM account_adjustments WHERE id = ?', [item.id]);
@@ -395,9 +425,24 @@ export async function syncAccountingData(previous: AccountingData, next: Account
   for (const product of products.changed) {
     add(
       statements,
-      'INSERT INTO products(id, code, name, kind, payload) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET code = excluded.code, name = excluded.name, kind = excluded.kind, payload = excluded.payload',
-      [product.id, product.code, product.name, product.kind, json(product)]
+      'INSERT INTO products(id, code, name, kind, sku, barcode, category, archived, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET code = excluded.code, name = excluded.name, kind = excluded.kind, sku = excluded.sku, barcode = excluded.barcode, category = excluded.category, archived = excluded.archived, payload = excluded.payload',
+      [product.id, product.code, product.name, product.kind, product.sku || null, product.barcode || null, product.category || null, product.archived ? 1 : 0, json(product)]
     );
+  }
+
+  for (const project of projects.changed) {
+    add(statements, 'INSERT INTO projects(id, customer_id, title, status, due_date, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET customer_id = excluded.customer_id, title = excluded.title, status = excluded.status, due_date = excluded.due_date, payload = excluded.payload',
+      [project.id, project.customerId, project.title, project.status, project.dueDate || null, json(project)]);
+  }
+
+  for (const quote of quotes.changed) {
+    add(statements, 'INSERT INTO quotes(id, number, status, customer_id, date, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET number = excluded.number, status = excluded.status, customer_id = excluded.customer_id, date = excluded.date, payload = excluded.payload',
+      [quote.id, quote.number, quote.status, quote.customerId, quote.date, json(quote)]);
+  }
+
+  for (const attachment of attachments.changed) {
+    add(statements, 'INSERT INTO attachments(id, project_id, filename, mime_type, size, storage_key, thumbnail_key, created_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size, storage_key = excluded.storage_key, thumbnail_key = excluded.thumbnail_key, created_at = excluded.created_at, payload = excluded.payload',
+      [attachment.id, attachment.projectId, attachment.filename, attachment.mimeType, attachment.size, attachment.storageKey, attachment.thumbnailKey || null, attachment.createdAt, json(attachment)]);
   }
 
   for (const account of accounts.changed) {
@@ -567,6 +612,9 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     journalRows,
     journalLineRows,
     moneyTransactions,
+    quotes,
+    projects,
+    attachments,
     sequences,
     orderRows,
   ] = await Promise.all([
@@ -588,6 +636,9 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     sqliteQuery<{ id: string; payload: string }>('SELECT id, payload FROM journal_entries ORDER BY rowid'),
     sqliteQuery<{ journal_entry_id: string; payload: string }>('SELECT journal_entry_id, payload FROM journal_lines ORDER BY journal_entry_id, position'),
     payloads<AccountingData['moneyTransactions'][number]>('SELECT payload FROM money_transactions ORDER BY rowid'),
+    payloads<AccountingData['quotes'][number]>('SELECT payload FROM quotes ORDER BY rowid'),
+    payloads<AccountingData['projects'][number]>('SELECT payload FROM projects ORDER BY rowid'),
+    payloads<AccountingData['attachments'][number]>('SELECT payload FROM attachments ORDER BY rowid'),
     sqliteQuery<{ key: DocumentSequenceKey; prefix: string; next_value: number; padding: number }>(
       'SELECT key, prefix, next_value, padding FROM document_sequences'
     ),
@@ -678,6 +729,9 @@ export async function loadAccountingData(): Promise<AccountingData | null> {
     accounts: sortByOrder(accounts, order.accounts),
     journalEntries: sortByOrder(journalEntries, order.journalEntries),
     moneyTransactions: sortByOrder(moneyTransactions, order.moneyTransactions),
+    quotes: sortByOrder(quotes, order.quotes),
+    projects: sortByOrder(projects, order.projects),
+    attachments: sortByOrder(attachments, order.attachments),
     settings,
   };
 }

@@ -62,6 +62,9 @@ export function YasImporterPanel() {
     accounts: store.accounts,
     journalEntries: store.journalEntries,
     moneyTransactions: store.moneyTransactions,
+    quotes: store.quotes,
+    projects: store.projects,
+    attachments: store.attachments,
     settings: store.settings,
   });
 

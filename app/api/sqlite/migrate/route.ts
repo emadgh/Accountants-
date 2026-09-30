@@ -9,6 +9,9 @@ import { isLocalRequest } from '@/lib/persistence/local-request';
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'مهاجرت فایل SQLite قدیمی فقط در اجرای محلی توسعه فعال است.' }, { status: 410 });
+  }
   if (!isLocalRequest(request, true)) {
     return NextResponse.json({ error: 'Local access only.' }, { status: 403 });
   }

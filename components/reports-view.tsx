@@ -12,12 +12,13 @@ import {
   FileSpreadsheet,
   FileText,
   Printer,
+  Package,
   TrendingUp,
   Users,
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { Customer, Invoice, InvoiceKind, Product, ReturnDocument, StockMovement } from '@/lib/types';
-import { buildCustomerLedger, invoiceTotal, money } from '@/lib/utils';
+import { buildCustomerLedger, invoiceLineNet, invoiceTotal, money } from '@/lib/utils';
 import { formatPersianDate, normalizeStoredDate, todayIso } from '@/lib/standards';
 import { downloadCsv, downloadExcel, type ExportCell } from '@/lib/report-export';
 import { JalaliDateRangePicker } from '@/components/ui/jalali-date-picker';
@@ -29,7 +30,7 @@ import { AppNavbarContent } from '@/components/app-navbar';
 import { BalancesChart, CardexStockChart, DueChecksChart, InventoryValueChart, LedgerBalanceChart, SalesPurchaseTrendChart } from '@/components/analytics/charts';
 import { buildTimeSeries } from '@/lib/chart-data';
 
-type ReportTab = 'sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
+type ReportTab = 'sales' | 'product-sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
 
 function daysAgoIso(days: number) {
   const date = new Date();
@@ -227,6 +228,43 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
     return [...invoiceRows, ...returnRows].sort((a, b) => normalizedDate(b.date).localeCompare(normalizedDate(a.date)));
   }, [filteredInvoices, filteredReturns, productId, products]);
 
+  const productSalesRows = useMemo(() => {
+    const rows = new Map<string, { name: string; category: string; quantity: number; sales: number; returns: number }>();
+    const productInfo = new Map(products.map((product) => [product.id, product]));
+    const keyFor = (productId: string | undefined, description: string) => productId || `manual:${description.trim().toLowerCase()}`;
+    for (const invoice of postedInvoices.filter((item) => item.kind === 'sale' && inRange(item.date, fromDate, toDate) && (!customerId || item.customerId === customerId))) {
+      for (const item of invoice.items) {
+        const key = keyFor(item.productId, item.description);
+        const product = item.productId ? productInfo.get(item.productId) : undefined;
+        const row = rows.get(key) || { name: product?.name || item.description || 'شرح دستی', category: product?.category || (product ? 'بدون دسته' : 'خدمات دستی'), quantity: 0, sales: 0, returns: 0 };
+        row.quantity += Number(item.qty || 0);
+        row.sales += invoiceLineNet(item);
+        rows.set(key, row);
+      }
+    }
+    for (const document of finalizedReturns.filter((item) => item.kind === 'sale-return' && inRange(item.date, fromDate, toDate) && (!customerId || item.customerId === customerId))) {
+      for (const item of document.items) {
+        const key = keyFor(item.productId, item.description);
+        const product = item.productId ? productInfo.get(item.productId) : undefined;
+        const row = rows.get(key) || { name: product?.name || item.description || 'شرح دستی', category: product?.category || (product ? 'بدون دسته' : 'خدمات دستی'), quantity: 0, sales: 0, returns: 0 };
+        row.quantity -= Number(item.qty || 0);
+        row.returns += Number(item.qty || 0) * Number(item.unitPrice || 0);
+        rows.set(key, row);
+      }
+    }
+    return [...rows.values()].map((row) => ({ ...row, netSales: row.sales - row.returns })).sort((left, right) => right.netSales - left.netSales);
+  }, [postedInvoices, finalizedReturns, products, fromDate, toDate, customerId]);
+
+  const categorySalesRows = useMemo(() => {
+    const categories = new Map<string, { quantity: number; sales: number; returns: number }>();
+    for (const row of productSalesRows) {
+      const category = categories.get(row.category) || { quantity: 0, sales: 0, returns: 0 };
+      category.quantity += row.quantity; category.sales += row.sales; category.returns += row.returns;
+      categories.set(row.category, category);
+    }
+    return [...categories.entries()].map(([category, value]) => ({ category, ...value, netSales: value.sales - value.returns })).sort((left, right) => right.netSales - left.netSales);
+  }, [productSalesRows]);
+
   const balanceRows = useMemo(() => {
     return customers
       .filter((customer) => !customerId || customer.id === customerId)
@@ -391,6 +429,14 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
       headers: ['تاریخ', 'نوع سند', 'شماره سند', 'طرف حساب', 'کالا / خدمت', 'مبلغ'],
       rows: salesRows.map((row) => [formatPersianDate(row.date), row.type, row.number, row.customer, row.products, row.sign * row.amount]),
     };
+    if (tab === 'product-sales') return {
+      title: 'فروش به تفکیک کالا و دسته', filename: 'product-category-sales-report',
+      headers: ['نوع گزارش', 'کالا / دسته', 'دسته کالا', 'تعداد خالص', 'فروش', 'مرجوعی', 'فروش خالص'],
+      rows: [
+        ...productSalesRows.map((row) => ['کالا', row.name, row.category, row.quantity, row.sales, row.returns, row.netSales]),
+        ...categorySalesRows.map((row) => ['دسته', row.category, row.category, row.quantity, row.sales, row.returns, row.netSales]),
+      ],
+    };
     if (tab === 'balances') return {
       title: 'گزارش بدهکاران و بستانکاران',
       filename: 'customer-balances-report',
@@ -421,13 +467,14 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
       headers: ['تاریخ', 'نوع حرکت', 'مرجع', 'ورود', 'خروج', 'مانده', 'میانگین هزینه', 'بهای واحد'],
       rows: cardexRows.map((movement) => [formatPersianDate(movement.date), movementLabel(movement), movement.sourceReference || '', movement.quantity > 0 ? movement.quantity : 0, movement.quantity < 0 ? Math.abs(movement.quantity) : 0, movement.balanceAfter, movement.averageCostAfter, movement.unitCost]),
     };
-  }, [tab, salesRows, balanceRows, checkRows, inventoryRows, ledgerRows, selectedLedgerCustomer, cardexRows, selectedCardexProduct]);
+  }, [tab, salesRows, productSalesRows, categorySalesRows, balanceRows, checkRows, inventoryRows, ledgerRows, selectedLedgerCustomer, cardexRows, selectedCardexProduct]);
 
   const exportCsv = () => downloadCsv(activeExport.filename + '-' + fromDate + '-' + toDate, activeExport.headers, activeExport.rows);
   const exportExcel = () => downloadExcel(activeExport.filename + '-' + fromDate + '-' + toDate, activeExport.title, activeExport.headers, activeExport.rows);
 
   const tabs: Array<{ key: ReportTab; label: string; icon: typeof TrendingUp }> = [
     { key: 'sales', label: 'فروش / خرید', icon: TrendingUp },
+    { key: 'product-sales', label: 'فروش کالا / دسته', icon: Package },
     { key: 'balances', label: 'بدهکار / بستانکار', icon: Users },
     { key: 'checks', label: 'چک‌ها', icon: CalendarClock },
     { key: 'inventory', label: 'موجودی', icon: Boxes },
@@ -449,7 +496,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
     <Card className="screen-only">
       <CardContent className="grid gap-4 lg:grid-cols-[1fr_1fr_1.2fr_1.2fr]">
         <label className="space-y-1.5 lg:col-span-2"><span className="block text-xs font-bold text-slate-600">بازه تاریخ</span><JalaliDateRangePicker value={{ from: fromDate, to: toDate }} onChange={(range) => { setFromDate(range.from); setToDate(range.to); }} /></label>
-        {(tab === 'sales' || tab === 'balances' || tab === 'checks') && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">طرف حساب</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">همه طرف حساب‌ها</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.code} — {customer.name}</option>)}</select></label>}
+        {(tab === 'sales' || tab === 'product-sales' || tab === 'balances' || tab === 'checks') && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">طرف حساب</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">همه طرف حساب‌ها</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.code} — {customer.name}</option>)}</select></label>}
         {(tab === 'sales' || tab === 'inventory') && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">کالا / خدمت</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={productId} onChange={(event) => setProductId(event.target.value)}><option value="">همه کالا و خدمات</option>{products.map((product) => <option key={product.id} value={product.id}>{product.code} — {product.name}</option>)}</select></label>}
         {tab === 'sales' && <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-600">نوع سند</span><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={documentKind} onChange={(event) => setDocumentKind(event.target.value as 'all' | 'sale' | 'purchase')}><option value="all">فروش و خرید</option><option value="sale">فقط فروش</option><option value="purchase">فقط خرید</option></select></label>}
       </CardContent>
@@ -486,6 +533,12 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
             <tbody>{salesRows.map((row) => <tr key={row.key}><td>{formatPersianDate(row.date)}</td><td><Badge className={row.sign < 0 ? 'bg-rose-50 text-rose-700' : row.type === 'فروش' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}>{row.type}</Badge></td><td className="font-bold">{onOpenInvoice ? <button type="button" className="text-sky-700 underline-offset-4 hover:underline" onClick={() => onOpenInvoice(row.sourceInvoiceId, row.sourceInvoiceKind)} aria-label={'نمایش فاکتور مرجع ' + row.number}>{row.number}</button> : row.number}</td><td>{row.customer}</td><td>{row.products || '—'}</td><td className={row.sign < 0 ? 'font-black text-rose-700' : 'font-black'}>{row.sign < 0 ? '− ' : ''}{money(row.amount)} {settings.currency}</td></tr>)}{!salesRows.length && <EmptyRow cols={6} text="سندی در این بازه و فیلتر وجود ندارد." />}</tbody>
           </DataTable></div>
         </Card>
+      </>}
+
+      {tab === 'product-sales' && <>
+        <div className="grid gap-4 sm:grid-cols-3"><MetricCard title="فروش خالص کالاها" value={money(productSalesRows.reduce((sum, row) => sum + row.netSales, 0)) + ' ' + settings.currency} /><MetricCard title="تعداد کالای/خدمت فروخته‌شده" value={money(productSalesRows.reduce((sum, row) => sum + row.quantity, 0))} /><MetricCard title="دسته‌های دارای فروش" value={String(categorySalesRows.length)} /></div>
+        <Card><CardHeader><CardTitle>فروش و مرجوعی به تفکیک کالا</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table"><thead><tr><th>کالا / خدمت</th><th>دسته</th><th>تعداد خالص</th><th>فروش ناخالص</th><th>مرجوعی</th><th>فروش خالص</th></tr></thead><tbody>{productSalesRows.map((row) => <tr key={row.name + row.category}><td className="font-bold">{row.name}</td><td>{row.category}</td><td>{money(row.quantity)}</td><td>{money(row.sales)}</td><td className="text-rose-600">{money(row.returns)}</td><td className="font-black">{money(row.netSales)} {settings.currency}</td></tr>)}{!productSalesRows.length && <EmptyRow cols={6} text="فروشی در بازه انتخاب‌شده ثبت نشده است." />}</tbody></DataTable></div></Card>
+        <Card><CardHeader><CardTitle>جمع فروش به تفکیک دسته</CardTitle></CardHeader><div className="table-wrap"><DataTable className="data-table"><thead><tr><th>دسته</th><th>تعداد خالص</th><th>فروش</th><th>مرجوعی</th><th>فروش خالص</th></tr></thead><tbody>{categorySalesRows.map((row) => <tr key={row.category}><td className="font-bold">{row.category}</td><td>{money(row.quantity)}</td><td>{money(row.sales)}</td><td className="text-rose-600">{money(row.returns)}</td><td className="font-black">{money(row.netSales)} {settings.currency}</td></tr>)}{!categorySalesRows.length && <EmptyRow cols={5} text="دسته فروشی ثبت نشده است." />}</tbody></DataTable></div></Card>
       </>}
 
       {tab === 'balances' && <>

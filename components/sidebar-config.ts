@@ -1,12 +1,14 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3,
+  BriefcaseBusiness,
   BookOpen,
   Building2,
   Boxes,
   CircleDollarSign,
   ClipboardList,
   FilePlus2,
+  FileText,
   Home,
   Landmark,
   PackageSearch,
@@ -16,12 +18,18 @@ import {
   ShoppingCart,
   Users,
   WalletCards,
+  Zap,
+  ScanBarcode,
 } from 'lucide-react';
 
 export type ViewKey =
   | 'dashboard'
   | 'sales'
+  | 'quotes'
+  | 'projects'
   | 'sale-new'
+  | 'service-quick'
+  | 'retail-quick'
   | 'purchases'
   | 'purchase-new'
   | 'customers'
@@ -63,7 +71,11 @@ export const sidebarGroups: readonly SidebarGroup[] = [
     collapsible: true,
     items: [
       { key: 'sale-new', label: 'فاکتور فروش جدید', icon: FilePlus2 },
+      { key: 'service-quick', label: 'ثبت سریع خدمت', icon: Zap },
+      { key: 'retail-quick', label: 'فروش سریع کالا', icon: ScanBarcode },
       { key: 'sales', label: 'فاکتورهای فروش', icon: ReceiptText },
+      { key: 'quotes', label: 'پیش‌فاکتورها', icon: FileText },
+      { key: 'projects', label: 'پروژه‌ها', icon: BriefcaseBusiness },
       { key: 'returns', label: 'مرجوعی فروش و خرید', icon: RefreshCcw },
     ],
   },

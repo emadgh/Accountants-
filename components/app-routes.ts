@@ -3,7 +3,11 @@ import type { ViewKey } from '@/components/sidebar-config';
 export const VIEW_PATHS: Record<ViewKey, string> = {
   dashboard: '/',
   sales: '/sales',
+  quotes: '/quotes',
+  projects: '/projects',
   'sale-new': '/sales/new',
+  'service-quick': '/sales/quick',
+  'retail-quick': '/retail/quick',
   purchases: '/purchases',
   'purchase-new': '/purchases/new',
   customers: '/customers',

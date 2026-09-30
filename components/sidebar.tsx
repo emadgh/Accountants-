@@ -177,9 +177,9 @@ export function Sidebar({
         <div className="border-t border-white/10 p-4">
           <div className="rounded-xl bg-white/5 p-3 text-xs text-slate-400">
             <div className="mb-1 flex items-center gap-2 font-bold text-slate-200">
-              <FileText className="h-4 w-4" /> ذخیره‌سازی محلی
+              <FileText className="h-4 w-4" /> ذخیره‌سازی روی سرور
             </div>
-            داده‌ها در فایل SQLite روی دیسک پروژه نگهداری می‌شوند.
+            داده‌ها و پیوست‌ها روی دیسک سرور نگهداری می‌شوند.
           </div>
         </div>
       </aside>

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { AccountingData } from '@/lib/types';
-import { createAccountingBackup, parseAccountingBackup, type AccountingBackupPreview } from '@/lib/backup';
+import { parseAccountingBackupFile, type AccountingBackupPreview } from '@/lib/backup';
 import {
   createAccountingSnapshot,
   deleteAccountingSnapshot,
@@ -21,6 +21,8 @@ import {
   importAccountingData,
   listAccountingSnapshots,
   restoreAccountingSnapshot,
+  downloadAccountingArchive,
+  importAccountingArchive,
   type AccountingSnapshotMeta,
 } from '@/lib/storage';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +38,8 @@ type ImportCandidate = {
   data: AccountingData;
   preview: AccountingBackupPreview;
   filename: string;
+  file: File;
+  packaged: boolean;
 };
 
 function formatBytes(value: number) {
@@ -73,30 +77,14 @@ export function StorageBackupPanel() {
     void refresh();
   }, []);
 
-  const currentData = (): AccountingData => ({
-    customers: store.customers,
-    products: store.products,
-    invoices: store.invoices,
-    returns: store.returns,
-    payments: store.payments,
-    checks: store.checks,
-    adjustments: store.adjustments,
-    stockMovements: store.stockMovements,
-    accounts: store.accounts,
-    journalEntries: store.journalEntries,
-    moneyTransactions: store.moneyTransactions,
-    settings: store.settings,
-  });
-
   const exportData = async () => {
     setBusy(true);
     try {
-      const text = await createAccountingBackup(currentData());
-      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const blob = await downloadAccountingArchive();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = 'accountants-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      anchor.download = 'accountants-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.zip';
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -110,8 +98,8 @@ export function StorageBackupPanel() {
     if (!file) return;
     setBusy(true);
     try {
-      const parsed = await parseAccountingBackup(await file.text());
-      setCandidate({ ...parsed, filename: file.name });
+      const parsed = await parseAccountingBackupFile(file);
+      setCandidate({ ...parsed, filename: file.name, file });
     } catch (error) {
       notify(error instanceof Error ? error.message : 'فایل پشتیبان معتبر نیست.', 'error');
     } finally {
@@ -124,7 +112,8 @@ export function StorageBackupPanel() {
     if (!candidate) return;
     setBusy(true);
     try {
-      await importAccountingData(candidate.data);
+      if (candidate.packaged) await importAccountingArchive(candidate.file);
+      else await importAccountingData(candidate.data);
       store.replaceAll(candidate.data);
       setCandidate(null);
       notify('پشتیبان بازیابی شد. نسخه قبل از Import در Snapshotهای محلی نگهداری شد.', 'success');
@@ -191,7 +180,7 @@ export function StorageBackupPanel() {
         <div className="grid gap-2 sm:grid-cols-2">
           <Button variant="outline" disabled={busy} onClick={() => void exportData()}><ArrowDownToLine className="h-4 w-4" /> دانلود Backup نسخه‌دار</Button>
           <Button variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}><ArrowUpFromLine className="h-4 w-4" /> Import و Preview</Button>
-          <input ref={fileRef} type="file" className="hidden" accept="application/json,.json" onChange={(event) => void selectImportFile(event.target.files?.[0])} />
+          <input ref={fileRef} type="file" className="hidden" accept="application/json,.json,application/zip,.zip" onChange={(event) => void selectImportFile(event.target.files?.[0])} />
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
@@ -233,7 +222,7 @@ export function StorageBackupPanel() {
             <div className="mt-1 text-xs text-slate-500">{candidate.preview.source === 'legacy' ? 'Backup قدیمی' : 'Backup نسخه‌دار'} · Schema v{candidate.preview.schemaVersion || 0}{candidate.preview.checksumVerified === true ? ' · Checksum تایید شد' : ''}</div>
           </Panel>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['مرجوعی', candidate.preview.returns], ['پرداخت', candidate.preview.payments], ['چک', candidate.preview.checks], ['Journal', candidate.preview.journalEntries], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <MetricCard key={String(label)} size="sm" title={String(label)} value={Number(value)} align="center" />)}
+            {[['مشتری', candidate.preview.customers], ['کالا/خدمت', candidate.preview.products], ['فاکتور', candidate.preview.invoices], ['پیش‌فاکتور', candidate.preview.quotes], ['پروژه', candidate.preview.projects], ['پیوست', candidate.preview.attachments], ['پرداخت', candidate.preview.payments], ['پروفایل', candidate.preview.businessProfiles]].map(([label, value]) => <MetricCard key={String(label)} size="sm" title={String(label)} value={Number(value)} align="center" />)}
           </div>
           {!!candidate.preview.warnings.length && <Alert className="rounded-xl border-amber-200 bg-amber-50 text-xs leading-6 text-amber-800 [&>svg]:text-amber-700"><AlertDescription className="text-xs leading-6">{candidate.preview.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</AlertDescription></Alert>}
           <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setCandidate(null)}>انصراف</Button><Button disabled={busy} onClick={() => void confirmImport()}><RotateCcw className="h-4 w-4" /> تایید و بازیابی</Button></div>

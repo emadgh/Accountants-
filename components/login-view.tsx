@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Eye, EyeOff, LockKeyhole, LogIn, ShieldCheck, UserRound } from 'lucide-react';
+import { Building2, CircleOff, Eye, EyeOff, LockKeyhole, LogIn, Palette, ShieldCheck, ShoppingBasket, UserRound } from 'lucide-react';
 import { motion } from 'motion/react';
 import BorderGlow from '@/components/react-bits/border-glow';
 import Prism from '@/components/react-bits/prism';
@@ -17,6 +17,7 @@ import {
   authFormSetupActionVariants,
 } from '@/lib/animation-config';
 import { cn } from '@/lib/utils';
+import { SEED_PRESETS, type SeedPresetId } from '@/lib/data';
 
 export type LoginMode = 'login' | 'setup';
 
@@ -36,7 +37,7 @@ export function LoginView({
     email?: string;
     displayName?: string;
     password: string;
-    seedDemoData: boolean;
+    seedPreset: SeedPresetId;
   }) => Promise<void>;
 }) {
   const [identity, setIdentity] = useState('');
@@ -45,7 +46,7 @@ export function LoginView({
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [seedDemoData, setSeedDemoData] = useState(false);
+  const [seedPreset, setSeedPreset] = useState<SeedPresetId>('empty');
   const [showPassword, setShowPassword] = useState(false);
   const [localError, setLocalError] = useState('');
 
@@ -62,7 +63,7 @@ export function LoginView({
         email: email || undefined,
         displayName: displayName || undefined,
         password,
-        seedDemoData,
+        seedPreset,
       });
       return;
     }
@@ -92,7 +93,7 @@ export function LoginView({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(15,23,42,.15),rgba(2,6,23,.86)_72%)]" aria-hidden="true" />
 
       <div className="relative z-10 grid min-h-[100dvh] place-items-center px-4 py-8 sm:px-6">
-        <div className="w-full max-w-md">
+        <div className={cn('w-full', mode === 'setup' ? 'max-w-2xl' : 'max-w-md')}>
           <motion.div
             variants={authFormPanelVariants}
             initial="initial"
@@ -242,53 +243,47 @@ export function LoginView({
                     <motion.fieldset variants={authFormItemVariants} className="rounded-xl border border-white/10 bg-white/[.025] p-3">
                       <legend className="px-1 text-xs font-bold text-slate-300">داده‌های شروع</legend>
                       <p className="mb-2 text-[10px] leading-5 text-slate-500">
-                        انتخاب کنید فضای کاری خالی باشد یا اطلاعات تمرینی داشته باشد.
+                        یک الگوی متناسب با نوع کارتان انتخاب کنید. اطلاعات هر الگو نمونه است و بعداً قابل ویرایش است.
                       </p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <motion.label
-                          variants={authFormItemVariants}
-                          className={cn(
-                            'flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors',
-                            seedDemoData
-                              ? 'border-white/10 bg-white/[.025] hover:border-white/20'
-                              : 'border-sky-400/50 bg-sky-400/10'
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name="seed-data"
-                            value="empty"
-                            checked={!seedDemoData}
-                            onChange={() => setSeedDemoData(false)}
-                            className="mt-1 accent-sky-400"
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-[11px] font-bold text-slate-200">بدون داده نمونه</span>
-                            <span className="mt-1 block text-[10px] leading-4 text-slate-500">شروع با اطلاعات خالی</span>
-                          </span>
-                        </motion.label>
-                        <motion.label
-                          variants={authFormItemVariants}
-                          className={cn(
-                            'flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors',
-                            seedDemoData
-                              ? 'border-sky-400/50 bg-sky-400/10'
-                              : 'border-white/10 bg-white/[.025] hover:border-white/20'
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name="seed-data"
-                            value="seeded"
-                            checked={seedDemoData}
-                            onChange={() => setSeedDemoData(true)}
-                            className="mt-1 accent-sky-400"
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-[11px] font-bold text-slate-200">با داده نمونه</span>
-                            <span className="mt-1 block text-[10px] leading-4 text-slate-500">برای آشنایی با بخش‌ها</span>
-                          </span>
-                        </motion.label>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {SEED_PRESETS.map((preset) => {
+                          const Icon = preset.id === 'empty'
+                            ? CircleOff
+                            : preset.id === 'supermarket'
+                              ? ShoppingBasket
+                              : preset.id === 'creative-studio'
+                                ? Palette
+                                : Building2;
+                          const selected = seedPreset === preset.id;
+                          return (
+                            <motion.label
+                              key={preset.id}
+                              variants={authFormItemVariants}
+                              className={cn(
+                                'flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors',
+                                selected
+                                  ? 'border-sky-400/50 bg-sky-400/10'
+                                  : 'border-white/10 bg-white/[.025] hover:border-white/20'
+                              )}
+                            >
+                              <input
+                                type="radio"
+                                name="seed-preset"
+                                value={preset.id}
+                                checked={selected}
+                                onChange={() => setSeedPreset(preset.id)}
+                                className="mt-1 accent-sky-400"
+                              />
+                              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/[.06] text-sky-300">
+                                <Icon className="h-4 w-4" aria-hidden="true" />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block text-xs font-bold text-slate-200">{preset.title}</span>
+                                <span className="mt-1 block text-[10px] leading-5 text-slate-500">{preset.description}</span>
+                              </span>
+                            </motion.label>
+                          );
+                        })}
                       </div>
                     </motion.fieldset>
                   )}

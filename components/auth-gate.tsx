@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { AccountingApp } from '@/components/accounting-app';
 import { LoginView } from '@/components/login-view';
 import { useAccountingStore } from '@/lib/store';
+import type { SeedPresetId } from '@/lib/data';
 import { pageTransitionVariants } from '@/lib/animation-config';
 import {
   getAuthSnapshot,
@@ -62,7 +63,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     email?: string;
     displayName?: string;
     password: string;
-    seedDemoData: boolean;
+    seedPreset: SeedPresetId;
   }) => {
     setBusy(true);
     setError('');

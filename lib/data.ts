@@ -1,4 +1,13 @@
-import type { AccountingData, JournalEntry } from './types';
+import type {
+  AccountingData,
+  Customer,
+  Invoice,
+  JournalEntry,
+  MoneyTransaction,
+  Product,
+  Project,
+  Quote,
+} from './types';
 import { SYSTEM_ACCOUNTS } from './accounting';
 
 function documentNumbering() {
@@ -8,6 +17,7 @@ function documentNumbering() {
     receipt: { prefix: 'R-', next: 1, padding: 6 },
     payment: { prefix: 'PY-', next: 1, padding: 6 },
     check: { prefix: 'C-', next: 1, padding: 6 },
+    quote: { prefix: 'Q-', next: 1, padding: 6 },
   };
 }
 
@@ -64,8 +74,23 @@ export function createEmptyAccountingData(): AccountingData {
     accounts: SYSTEM_ACCOUNTS.map((account) => ({ ...account })),
     journalEntries: [],
     moneyTransactions: [],
+    quotes: [],
+    projects: [],
+    attachments: [],
   };
 }
+
+export const SEED_PRESETS = [
+  { id: 'empty', title: 'بدون داده', description: 'شروع با پرونده خالی و سرفصل‌های پایه حسابداری' },
+  { id: 'supermarket', title: 'فروشگاهی؛ سوپرمارکت', description: 'کالاهای دسته‌بندی‌شده، بارکد، موجودی و مشتریان نمونه' },
+  { id: 'creative-studio', title: 'خدمات طراحی و چاپ', description: 'طراحی هویت بصری، چاپ و طراحی وب‌سایت با پیش‌فاکتور و پروژه' },
+  { id: 'construction-suite', title: 'ساخت‌وساز و معماری', description: 'پروژه نمونه ساخت سوییت یک‌خوابه با سرویس بهداشتی' },
+] as const;
+
+export type SeedPresetId = (typeof SEED_PRESETS)[number]['id'];
+
+const sampleCreatedAt = '2026-09-30T09:00:00.000Z';
+const sampleDate = '۱۴۰۵/۰۷/۰۹';
 
 function sampleJournal(
   id: string,
@@ -84,214 +109,304 @@ function sampleJournal(
     sourceId,
     sourceReference,
     action: 'post',
-    createdAt: '2026-09-20T09:00:00.000Z',
-    lines: lines.map((line, index) => ({ ...line, id: id + '_line_' + (index + 1) })),
+    createdAt: sampleCreatedAt,
+    lines: lines.map((line, index) => ({ ...line, id: `${id}_line_${index + 1}` })),
   };
 }
 
-const sampleMainProfile = {
-  id: 'business_default',
-  label: 'شعبه مرکزی',
-  businessName: 'فروشگاه نمونه آریا',
-  ownerName: 'مدیر فروشگاه',
-  phone: '',
-  address: 'تهران، نشانی نمونه',
-  nationalId: '',
-  economicCode: '',
-  postalCode: '',
-  cardNumber: '',
-  iban: '',
-  bankName: '',
-  invoiceTitle: 'فاکتور فروش',
-  footer: 'از اعتماد شما سپاسگزاریم.',
-};
+function sampleProfile(businessName: string, ownerName: string, address: string) {
+  return {
+    id: 'business_default',
+    label: 'دفتر اصلی',
+    businessName,
+    ownerName,
+    phone: '',
+    address,
+    nationalId: '',
+    economicCode: '',
+    postalCode: '',
+    cardNumber: '',
+    iban: '',
+    bankName: '',
+    invoiceTitle: 'فاکتور فروش',
+    footer: 'این اطلاعات نمونه است؛ پیش از استفاده، مشخصات کسب‌وکار را ویرایش کنید.',
+  };
+}
 
-const sampleWestProfile = {
-  ...sampleMainProfile,
-  id: 'business_west',
-  label: 'شعبه غرب',
-  address: 'تهران، محدوده غرب، نشانی نمونه',
-};
-
-export const seedData: AccountingData = {
-  settings: {
-    businessName: sampleMainProfile.businessName,
-    ownerName: sampleMainProfile.ownerName,
-    phone: sampleMainProfile.phone,
-    address: sampleMainProfile.address,
-    nationalId: sampleMainProfile.nationalId,
-    economicCode: sampleMainProfile.economicCode,
-    postalCode: sampleMainProfile.postalCode,
-    cardNumber: sampleMainProfile.cardNumber,
-    iban: sampleMainProfile.iban,
-    bankName: sampleMainProfile.bankName,
-    invoiceTitle: sampleMainProfile.invoiceTitle,
-    footer: sampleMainProfile.footer,
-    currency: 'تومان',
-    defaultTax: 0,
+function setBusiness(data: AccountingData, businessName: string, ownerName: string, address: string) {
+  const profile = sampleProfile(businessName, ownerName, address);
+  data.settings = {
+    ...data.settings,
+    businessName,
+    ownerName,
+    address,
+    businessProfiles: [profile],
+    defaultBusinessProfileId: profile.id,
     numbering: {
-      sale: { prefix: 'S-', next: 3, padding: 6 },
-      purchase: { prefix: 'P-', next: 2, padding: 6 },
-      receipt: { prefix: 'R-', next: 4, padding: 6 },
-      payment: { prefix: 'PY-', next: 2, padding: 6 },
-      check: { prefix: 'C-', next: 4, padding: 6 },
+      ...data.settings.numbering,
+      sale: { prefix: 'S-', next: 1, padding: 6 },
+      purchase: { prefix: 'P-', next: 1, padding: 6 },
+      quote: { prefix: 'Q-', next: 1, padding: 6 },
     },
-    businessProfiles: [sampleMainProfile, sampleWestProfile],
-    defaultBusinessProfileId: sampleMainProfile.id,
-    defaultInvoiceTemplateId: 'classic',
-    defaultInvoicePaperSize: 'A4',
-  },
-  customers: [
-    {
-      id: 'cus_bahar', code: '100001', name: 'فروشگاه بهار', kind: 'both', status: 'active',
-      phone: '', address: 'تهران، نشانی نمونه', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
-      notes: 'مشتری و تأمین‌کننده نمونه',
-    },
-    {
-      id: 'cus_baranco', code: '100002', name: 'شرکت باران', kind: 'customer', status: 'active',
-      phone: '', address: 'کرج، نشانی نمونه', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
-    },
-    {
-      id: 'cus_sepehr', code: '200001', name: 'پخش سپهر', kind: 'supplier', status: 'active',
-      phone: '', address: 'تهران، نشانی نمونه', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0,
-    },
-  ],
-  products: [
-    { id: 'prd_tile', code: '1001', name: 'کاشی پرسلان ۶۰×۱۲۰', kind: 'product', unit: 'مترمربع', salePrice: 850000, buyPrice: 550000, averageCost: 525000, stock: 30, minStock: 10 },
-    { id: 'prd_adhesive', code: '1002', name: 'چسب کاشی', kind: 'product', unit: 'کیسه', salePrice: 320000, buyPrice: 180000, averageCost: 180000, stock: 15, minStock: 8 },
-    { id: 'prd_install', code: '2001', name: 'خدمات نصب', kind: 'service', unit: 'مترمربع', salePrice: 420000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0 },
-  ],
-  invoices: [
-    {
-      id: 'inv_sale_001', number: 'S-000001', businessProfileId: 'business_default', templateId: 'classic', kind: 'sale', status: 'partial',
-      date: '۱۴۰۵/۰۷/۰۱', customerId: 'cus_bahar', customerName: 'فروشگاه بهار', customerPhone: '', customerAddress: 'تهران، نشانی نمونه',
-      items: [
-        { id: 'item_sale_tile', productId: 'prd_tile', description: 'کاشی پرسلان ۶۰×۱۲۰', unit: 'مترمربع', qty: 12, unitPrice: 850000 },
-        { id: 'item_sale_glue', productId: 'prd_adhesive', description: 'چسب کاشی', unit: 'کیسه', qty: 2, unitPrice: 320000 },
-      ],
-      discount: 0, tax: 0, shipping: 0, notes: 'تحویل مرحله‌ای سفارش',
-      createdAt: '2026-09-20T09:00:00.000Z', updatedAt: '2026-09-20T09:00:00.000Z', finalizedAt: '2026-09-20T09:00:00.000Z',
-    },
-    {
-      id: 'inv_purchase_001', number: 'P-000001', businessProfileId: 'business_default', templateId: 'classic', kind: 'purchase', status: 'partial',
-      date: '۱۴۰۵/۰۷/۰۲', customerId: 'cus_sepehr', customerName: 'پخش سپهر', customerPhone: '', customerAddress: 'تهران، نشانی نمونه',
-      items: [
-        { id: 'item_purchase_tile', productId: 'prd_tile', description: 'کاشی پرسلان ۶۰×۱۲۰', unit: 'مترمربع', qty: 20, unitPrice: 550000 },
-        { id: 'item_purchase_glue', productId: 'prd_adhesive', description: 'چسب کاشی', unit: 'کیسه', qty: 12, unitPrice: 180000 },
-      ],
-      discount: 0, tax: 0, shipping: 0, notes: 'خرید دوره‌ای کالا',
-      createdAt: '2026-09-21T09:00:00.000Z', updatedAt: '2026-09-21T09:00:00.000Z', finalizedAt: '2026-09-21T09:00:00.000Z',
-    },
-    {
-      id: 'inv_sale_002', number: 'S-000002', businessProfileId: 'business_west', templateId: 'classic', kind: 'sale', status: 'settled',
-      date: '۱۴۰۵/۰۷/۰۳', customerId: 'cus_baranco', customerName: 'شرکت باران', customerPhone: '', customerAddress: 'کرج، نشانی نمونه',
-      items: [
-        { id: 'item_sale_adhesive', productId: 'prd_adhesive', description: 'چسب کاشی', unit: 'کیسه', qty: 3, unitPrice: 320000 },
-      ],
-      discount: 0, tax: 0, shipping: 0, notes: '',
-      createdAt: '2026-09-22T09:00:00.000Z', updatedAt: '2026-09-22T09:00:00.000Z', finalizedAt: '2026-09-22T09:00:00.000Z',
-    },
-  ],
-  returns: [
-    {
-      id: 'ret_sale_001', number: 'SR-000001', kind: 'sale-return', status: 'final', originalInvoiceId: 'inv_sale_001',
-      originalInvoiceNumber: 'S-000001', customerId: 'cus_bahar', customerName: 'فروشگاه بهار', date: '۱۴۰۵/۰۷/۰۵',
-      items: [{ id: 'item_return_tile', originalItemId: 'item_sale_tile', productId: 'prd_tile', description: 'کاشی پرسلان ۶۰×۱۲۰', unit: 'مترمربع', qty: 2, unitPrice: 850000 }],
-      totalAmount: 1700000, notes: 'دو مترمربع مرجوع شد', createdAt: '2026-09-24T09:00:00.000Z', updatedAt: '2026-09-24T09:00:00.000Z', finalizedAt: '2026-09-24T09:00:00.000Z',
-    },
-    {
-      id: 'ret_purchase_001', number: 'PR-000001', kind: 'purchase-return', status: 'final', originalInvoiceId: 'inv_purchase_001',
-      originalInvoiceNumber: 'P-000001', customerId: 'cus_sepehr', customerName: 'پخش سپهر', date: '۱۴۰۵/۰۷/۰۶',
-      items: [{ id: 'item_return_glue', originalItemId: 'item_purchase_glue', productId: 'prd_adhesive', description: 'چسب کاشی', unit: 'کیسه', qty: 2, unitPrice: 180000 }],
-      totalAmount: 360000, notes: 'دو کیسه مرجوع شد', createdAt: '2026-09-25T09:00:00.000Z', updatedAt: '2026-09-25T09:00:00.000Z', finalizedAt: '2026-09-25T09:00:00.000Z',
-    },
-  ],
-  payments: [
-    { id: 'pay_receipt_001', documentNumber: 'R-000001', invoiceId: 'inv_sale_001', customerId: 'cus_bahar', direction: 'receipt', method: 'card', amount: 6000000, date: '۱۴۰۵/۰۷/۰۲', reference: 'واریز بانکی' },
-    { id: 'pay_check_001', documentNumber: 'R-000002', invoiceId: 'inv_sale_001', customerId: 'cus_bahar', direction: 'receipt', method: 'check', checkId: 'chk_received_001', amount: 2000000, date: '۱۴۰۵/۰۷/۰۴', reference: 'چک وصول‌شده' },
-    { id: 'pay_receipt_002', documentNumber: 'R-000003', invoiceId: 'inv_sale_002', customerId: 'cus_baranco', direction: 'receipt', method: 'cash', amount: 960000, date: '۱۴۰۵/۰۷/۰۳', reference: 'تسویه نقدی' },
-    { id: 'pay_supplier_001', documentNumber: 'PY-000001', invoiceId: 'inv_purchase_001', customerId: 'cus_sepehr', direction: 'payment', method: 'card', amount: 5000000, date: '۱۴۰۵/۰۷/۰۳', reference: 'پرداخت بخشی از خرید' },
-  ],
-  checks: [
-    { id: 'chk_received_001', documentNumber: 'C-000001', direction: 'received', customerId: 'cus_bahar', amount: 2000000, dueDate: '۱۴۰۵/۰۷/۰۴', number: '10001', bank: 'بانک نمونه', owner: 'فروشگاه بهار', status: 'cleared', notes: 'به‌عنوان دریافت ثبت شده' },
-    { id: 'chk_received_002', documentNumber: 'C-000002', direction: 'received', customerId: 'cus_baranco', amount: 1500000, dueDate: '۱۴۰۵/۰۷/۱۸', number: '10002', bank: 'بانک نمونه', owner: 'شرکت باران', status: 'pending' },
-    { id: 'chk_issued_001', documentNumber: 'C-000003', direction: 'issued', customerId: 'cus_sepehr', amount: 1200000, dueDate: '۱۴۰۵/۰۷/۲۰', number: '20001', bank: 'بانک نمونه', owner: 'فروشگاه نمونه آریا', status: 'pending' },
-  ],
-  adjustments: [
-    { id: 'adj_baranco_001', customerId: 'cus_baranco', date: '۱۴۰۵/۰۷/۰۱', amount: 250000, note: 'مانده افتتاحیه نمونه', createdAt: '2026-09-20T08:00:00.000Z' },
-  ],
-  stockMovements: [
-    { id: 'stock_tile_open', productId: 'prd_tile', warehouseId: 'main', date: 'ابتدای دوره', createdAt: '2026-09-20T08:00:00.000Z', quantity: 20, balanceAfter: 20, averageCostAfter: 500000, unitCost: 500000, type: 'opening', action: 'product-opening', sourceType: 'system', sourceId: 'opening:prd_tile', sourceReference: 'افتتاحیه', note: 'موجودی ابتدای دوره' },
-    { id: 'stock_tile_purchase', productId: 'prd_tile', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۲', createdAt: '2026-09-21T09:00:00.000Z', quantity: 20, balanceAfter: 40, averageCostAfter: 525000, unitCost: 550000, type: 'purchase', action: 'finalize', sourceType: 'invoice', sourceId: 'inv_purchase_001', sourceReference: 'P-000001', sourceKind: 'purchase' },
-    { id: 'stock_tile_sale', productId: 'prd_tile', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۱', createdAt: '2026-09-20T09:00:00.000Z', quantity: -12, balanceAfter: 28, averageCostAfter: 525000, unitCost: 525000, type: 'sale', action: 'finalize', sourceType: 'invoice', sourceId: 'inv_sale_001', sourceReference: 'S-000001', sourceKind: 'sale' },
-    { id: 'stock_tile_return', productId: 'prd_tile', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۵', createdAt: '2026-09-24T09:00:00.000Z', quantity: 2, balanceAfter: 30, averageCostAfter: 525000, unitCost: 525000, type: 'sale-return', action: 'return-finalize', sourceType: 'return', sourceId: 'ret_sale_001', sourceReference: 'SR-000001', sourceKind: 'sale-return' },
-    { id: 'stock_glue_open', productId: 'prd_adhesive', warehouseId: 'main', date: 'ابتدای دوره', createdAt: '2026-09-20T08:00:00.000Z', quantity: 10, balanceAfter: 10, averageCostAfter: 180000, unitCost: 180000, type: 'opening', action: 'product-opening', sourceType: 'system', sourceId: 'opening:prd_adhesive', sourceReference: 'افتتاحیه', note: 'موجودی ابتدای دوره' },
-    { id: 'stock_glue_purchase', productId: 'prd_adhesive', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۲', createdAt: '2026-09-21T09:00:00.000Z', quantity: 12, balanceAfter: 22, averageCostAfter: 180000, unitCost: 180000, type: 'purchase', action: 'finalize', sourceType: 'invoice', sourceId: 'inv_purchase_001', sourceReference: 'P-000001', sourceKind: 'purchase' },
-    { id: 'stock_glue_sale_001', productId: 'prd_adhesive', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۱', createdAt: '2026-09-20T09:00:00.000Z', quantity: -2, balanceAfter: 20, averageCostAfter: 180000, unitCost: 180000, type: 'sale', action: 'finalize', sourceType: 'invoice', sourceId: 'inv_sale_001', sourceReference: 'S-000001', sourceKind: 'sale' },
-    { id: 'stock_glue_sale_002', productId: 'prd_adhesive', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۳', createdAt: '2026-09-22T09:00:00.000Z', quantity: -3, balanceAfter: 17, averageCostAfter: 180000, unitCost: 180000, type: 'sale', action: 'finalize', sourceType: 'invoice', sourceId: 'inv_sale_002', sourceReference: 'S-000002', sourceKind: 'sale' },
-    { id: 'stock_glue_return', productId: 'prd_adhesive', warehouseId: 'main', date: '۱۴۰۵/۰۷/۰۶', createdAt: '2026-09-25T09:00:00.000Z', quantity: -2, balanceAfter: 15, averageCostAfter: 180000, unitCost: 180000, type: 'purchase-return', action: 'return-finalize', sourceType: 'return', sourceId: 'ret_purchase_001', sourceReference: 'PR-000001', sourceKind: 'purchase-return' },
-  ],
-  accounts: SYSTEM_ACCOUNTS.map((account) => ({ ...account })),
-  journalEntries: [
-    sampleJournal('je_sale_001', '۱۴۰۵/۰۷/۰۱', 'ثبت فاکتور فروش S-000001', 'invoice', 'inv_sale_001', 'S-000001', [
-      { accountId: 'acct_ar', debit: 10840000, credit: 0, memo: 'فروشگاه بهار' },
-      { accountId: 'acct_sales', debit: 0, credit: 10840000, memo: 'فروش کالا' },
-    ]),
-    sampleJournal('je_purchase_001', '۱۴۰۵/۰۷/۰۲', 'ثبت فاکتور خرید P-000001', 'invoice', 'inv_purchase_001', 'P-000001', [
-      { accountId: 'acct_inventory', debit: 13160000, credit: 0, memo: 'پخش سپهر' },
-      { accountId: 'acct_ap', debit: 0, credit: 13160000, memo: 'خرید کالا' },
-    ]),
-    sampleJournal('je_sale_002', '۱۴۰۵/۰۷/۰۳', 'ثبت فاکتور فروش S-000002', 'invoice', 'inv_sale_002', 'S-000002', [
-      { accountId: 'acct_ar', debit: 960000, credit: 0, memo: 'شرکت باران' },
-      { accountId: 'acct_sales', debit: 0, credit: 960000, memo: 'فروش کالا' },
-    ]),
-    sampleJournal('je_return_sale_001', '۱۴۰۵/۰۷/۰۵', 'ثبت برگشت از فروش SR-000001', 'return', 'ret_sale_001', 'SR-000001', [
-      { accountId: 'acct_sales_returns', debit: 1700000, credit: 0, memo: 'فروشگاه بهار' },
-      { accountId: 'acct_ar', debit: 0, credit: 1700000, memo: 'برگشت کالا' },
-    ]),
-    sampleJournal('je_return_purchase_001', '۱۴۰۵/۰۷/۰۶', 'ثبت برگشت از خرید PR-000001', 'return', 'ret_purchase_001', 'PR-000001', [
-      { accountId: 'acct_ap', debit: 360000, credit: 0, memo: 'پخش سپهر' },
-      { accountId: 'acct_inventory', debit: 0, credit: 360000, memo: 'برگشت کالا' },
-    ]),
-    sampleJournal('je_receipt_001', '۱۴۰۵/۰۷/۰۲', 'ثبت دریافت R-000001', 'payment', 'pay_receipt_001', 'R-000001', [
-      { accountId: 'acct_bank', debit: 6000000, credit: 0 },
-      { accountId: 'acct_ar', debit: 0, credit: 6000000 },
-    ]),
-    sampleJournal('je_receipt_002', '۱۴۰۵/۰۷/۰۴', 'ثبت دریافت R-000002', 'payment', 'pay_check_001', 'R-000002', [
-      { accountId: 'acct_bank', debit: 2000000, credit: 0 },
-      { accountId: 'acct_ar', debit: 0, credit: 2000000 },
-    ]),
-    sampleJournal('je_receipt_003', '۱۴۰۵/۰۷/۰۳', 'ثبت دریافت R-000003', 'payment', 'pay_receipt_002', 'R-000003', [
-      { accountId: 'acct_cash', debit: 960000, credit: 0 },
-      { accountId: 'acct_ar', debit: 0, credit: 960000 },
-    ]),
-    sampleJournal('je_payment_001', '۱۴۰۵/۰۷/۰۳', 'ثبت پرداخت PY-000001', 'payment', 'pay_supplier_001', 'PY-000001', [
-      { accountId: 'acct_ap', debit: 5000000, credit: 0 },
-      { accountId: 'acct_bank', debit: 0, credit: 5000000 },
-    ]),
-    sampleJournal('je_adjustment_001', '۱۴۰۵/۰۷/۰۱', 'مانده افتتاحیه نمونه', 'system', 'adj_baranco_001', 'adj_baranco_001', [
-      { accountId: 'acct_ar', debit: 250000, credit: 0, memo: 'شرکت باران' },
-      { accountId: 'acct_opening', debit: 0, credit: 250000 },
-    ]),
-    sampleJournal('je_expense_001', '۱۴۰۵/۰۷/۰۴', 'خرید ملزومات فروشگاه', 'money-transaction', 'money_expense_001', 'EXP-000001', [
-      { accountId: 'acct_general_expense', debit: 450000, credit: 0 },
-      { accountId: 'acct_bank', debit: 0, credit: 450000 },
-    ]),
-    sampleJournal('je_income_001', '۱۴۰۵/۰۷/۰۵', 'درآمد متفرقه نمونه', 'money-transaction', 'money_income_001', 'INC-000001', [
-      { accountId: 'acct_cash', debit: 300000, credit: 0 },
-      { accountId: 'acct_other_income', debit: 0, credit: 300000 },
-    ]),
-  ],
-  moneyTransactions: [
-    {
-      id: 'money_expense_001', kind: 'expense', status: 'final', date: '۱۴۰۵/۰۷/۰۴', amount: 450000,
-      settlementAccountId: 'acct_bank', categoryAccountId: 'acct_general_expense', description: 'خرید ملزومات فروشگاه',
-      reference: 'EXP-000001', createdAt: '2026-09-23T09:00:00.000Z', updatedAt: '2026-09-23T09:00:00.000Z',
-    },
-    {
-      id: 'money_income_001', kind: 'income', status: 'final', date: '۱۴۰۵/۰۷/۰۵', amount: 300000,
-      settlementAccountId: 'acct_cash', categoryAccountId: 'acct_other_income', description: 'درآمد متفرقه نمونه',
-      reference: 'INC-000001', createdAt: '2026-09-24T09:00:00.000Z', updatedAt: '2026-09-24T09:00:00.000Z',
-    },
-  ],
-};
+  };
+}
+
+function sampleCustomer(input: Pick<Customer, 'id' | 'code' | 'name' | 'kind'> & Partial<Pick<Customer, 'address' | 'phone' | 'notes'>>): Customer {
+  return {
+    id: input.id,
+    code: input.code,
+    name: input.name,
+    kind: input.kind,
+    status: 'active',
+    phone: input.phone || '',
+    address: input.address || '',
+    nationalId: '',
+    economicCode: '',
+    postalCode: '',
+    openingBalance: 0,
+    ...(input.notes ? { notes: input.notes } : {}),
+  };
+}
+
+function sampleProduct(input: Pick<Product, 'id' | 'code' | 'name' | 'kind' | 'unit' | 'salePrice' | 'buyPrice' | 'averageCost' | 'stock' | 'minStock'> & Partial<Pick<Product, 'sku' | 'barcode' | 'category' | 'notes'>>): Product {
+  return { ...input };
+}
+
+function sampleProject(input: Omit<Project, 'createdAt' | 'updatedAt'>): Project {
+  return { ...input, createdAt: sampleCreatedAt, updatedAt: sampleCreatedAt };
+}
+
+function sampleMoneyExpense(input: Pick<MoneyTransaction, 'id' | 'amount' | 'description' | 'projectId'> & { reference: string }): MoneyTransaction {
+  return {
+    id: input.id,
+    kind: 'expense',
+    status: 'final',
+    date: sampleDate,
+    amount: input.amount,
+    settlementAccountId: 'acct_bank',
+    categoryAccountId: 'acct_general_expense',
+    description: input.description,
+    reference: input.reference,
+    createdAt: sampleCreatedAt,
+    updatedAt: sampleCreatedAt,
+    projectId: input.projectId,
+  };
+}
+
+function sampleInvoice(input: Omit<Invoice, 'createdAt' | 'updatedAt'>): Invoice {
+  return { ...input, createdAt: sampleCreatedAt, updatedAt: sampleCreatedAt };
+}
+
+function sampleQuote(input: Omit<Quote, 'createdAt' | 'updatedAt'>): Quote {
+  return { ...input, createdAt: sampleCreatedAt, updatedAt: sampleCreatedAt };
+}
+
+function createSupermarketSeed(): AccountingData {
+  const data = createEmptyAccountingData();
+  setBusiness(data, 'سوپرمارکت نمونه بهار', 'مدیر فروشگاه', 'تهران، نشانی نمونه');
+
+  data.customers = [
+    sampleCustomer({ id: 'cus_walk_in', code: '100001', name: 'مشتری حضوری', kind: 'customer', notes: 'برای تمرین ثبت فروش سریع' }),
+    sampleCustomer({ id: 'cus_negin', code: '100002', name: 'خانواده نگین', kind: 'customer', address: 'تهران، نشانی نمونه' }),
+    sampleCustomer({ id: 'cus_food_supplier', code: '200001', name: 'پخش مواد غذایی سپهر', kind: 'supplier', address: 'تهران، نشانی نمونه' }),
+  ];
+
+  data.products = [
+    sampleProduct({ id: 'prd_rice', code: '1001', sku: 'RICE-IR-10', barcode: '6261000001001', name: 'برنج ایرانی ۱۰ کیلویی', kind: 'product', unit: 'کیسه', category: 'برنج و غلات', salePrice: 1_850_000, buyPrice: 1_520_000, averageCost: 1_520_000, stock: 18, minStock: 5 }),
+    sampleProduct({ id: 'prd_milk', code: '1002', sku: 'DAIRY-MILK-1L', barcode: '6261000001002', name: 'شیر کم‌چرب یک لیتری', kind: 'product', unit: 'عدد', category: 'لبنیات', salePrice: 48_000, buyPrice: 39_000, averageCost: 39_000, stock: 42, minStock: 12 }),
+    sampleProduct({ id: 'prd_tea', code: '1003', sku: 'TEA-500', barcode: '6261000001003', name: 'چای سیاه ۵۰۰ گرمی', kind: 'product', unit: 'بسته', category: 'نوشیدنی گرم', salePrice: 315_000, buyPrice: 260_000, averageCost: 260_000, stock: 9, minStock: 6 }),
+    sampleProduct({ id: 'prd_detergent', code: '1004', sku: 'HOME-LIQ-1L', barcode: '6261000001004', name: 'مایع ظرف‌شویی یک لیتری', kind: 'product', unit: 'عدد', category: 'شوینده و بهداشتی', salePrice: 92_000, buyPrice: 74_000, averageCost: 74_000, stock: 4, minStock: 8, notes: 'موجودی کمتر از حداقل؛ نمونه هشدار موجودی' }),
+  ];
+
+  data.stockMovements = data.products.map((product) => ({
+    id: `stock_open_${product.id}`,
+    productId: product.id,
+    warehouseId: 'main',
+    date: 'ابتدای دوره',
+    createdAt: sampleCreatedAt,
+    quantity: product.stock,
+    balanceAfter: product.stock,
+    averageCostAfter: product.averageCost,
+    unitCost: product.averageCost,
+    type: 'opening',
+    action: 'product-opening',
+    sourceType: 'system',
+    sourceId: `opening:${product.id}`,
+    sourceReference: 'موجودی نمونه',
+    note: 'موجودی آغازین پریست فروشگاهی',
+  }));
+  return data;
+}
+
+function createCreativeStudioSeed(): AccountingData {
+  const data = createEmptyAccountingData();
+  setBusiness(data, 'استودیو خلاق نمونه', 'مدیر استودیو', 'تهران، نشانی نمونه');
+  data.customers = [
+    sampleCustomer({ id: 'cus_studio_arman', code: '100001', name: 'شرکت آرمان داده', kind: 'customer', address: 'تهران، نشانی نمونه' }),
+    sampleCustomer({ id: 'cus_studio_chap', code: '200001', name: 'چاپخانه نقش آرا', kind: 'supplier', address: 'تهران، نشانی نمونه' }),
+  ];
+  data.products = [
+    sampleProduct({ id: 'srv_logo', code: 'S-001', name: 'طراحی لوگو و هویت بصری', kind: 'service', unit: 'پروژه', salePrice: 12_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'طراحی' }),
+    sampleProduct({ id: 'srv_catalog', code: 'S-002', name: 'طراحی کاتالوگ ۱۲ صفحه‌ای', kind: 'service', unit: 'پروژه', salePrice: 8_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'طراحی' }),
+    sampleProduct({ id: 'srv_brochure', code: 'S-003', name: 'چاپ بروشور رنگی', kind: 'service', unit: 'هزار عدد', salePrice: 3_500_000, buyPrice: 2_600_000, averageCost: 2_600_000, stock: 0, minStock: 0, category: 'چاپ' }),
+    sampleProduct({ id: 'srv_website', code: 'S-004', name: 'طراحی وب‌سایت شرکتی', kind: 'service', unit: 'پروژه', salePrice: 24_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'طراحی وب' }),
+    sampleProduct({ id: 'srv_maintenance', code: 'S-005', name: 'نگهداری ماهانه وب‌سایت', kind: 'service', unit: 'ماه', salePrice: 4_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'طراحی وب' }),
+  ];
+
+  const project = sampleProject({
+    id: 'project_brand_website',
+    customerId: 'cus_studio_arman',
+    title: 'هویت بصری و وب‌سایت شرکتی آرمان داده',
+    status: 'awaiting-approval',
+    dueDate: '۱۴۰۵/۰۸/۱۵',
+    agreedAmount: 44_000_000,
+    notes: 'نمونه پروژه خدماتی شامل طراحی هویت بصری، کاتالوگ و وب‌سایت شرکتی.',
+  });
+  data.projects = [project];
+  data.quotes = [sampleQuote({
+    id: 'quote_studio_001',
+    number: 'Q-000001',
+    status: 'issued',
+    customerId: 'cus_studio_arman',
+    customerName: 'شرکت آرمان داده',
+    customerPhone: '',
+    customerAddress: 'تهران، نشانی نمونه',
+    businessProfileId: 'business_default',
+    date: sampleDate,
+    validUntil: '۱۴۰۵/۰۸/۰۹',
+    items: [
+      { id: 'quote_studio_logo', productId: 'srv_logo', description: 'طراحی لوگو و هویت بصری', unit: 'پروژه', qty: 1, unitPrice: 12_000_000 },
+      { id: 'quote_studio_catalog', productId: 'srv_catalog', description: 'طراحی کاتالوگ ۱۲ صفحه‌ای', unit: 'پروژه', qty: 1, unitPrice: 8_000_000 },
+      { id: 'quote_studio_web', productId: 'srv_website', description: 'طراحی وب‌سایت شرکتی', unit: 'پروژه', qty: 1, unitPrice: 24_000_000 },
+    ],
+    discount: 0,
+    tax: 0,
+    shipping: 0,
+    notes: 'پیش‌فاکتور نمونه برای مشاهده شرح خدمات و تبدیل به فاکتور.',
+    projectId: project.id,
+  })];
+  data.invoices = [sampleInvoice({
+    id: 'inv_studio_maintenance',
+    number: 'S-000001',
+    businessProfileId: 'business_default',
+    templateId: 'classic',
+    kind: 'sale',
+    status: 'draft',
+    date: sampleDate,
+    customerId: 'cus_studio_arman',
+    customerName: 'شرکت آرمان داده',
+    customerPhone: '',
+    customerAddress: 'تهران، نشانی نمونه',
+    items: [{ id: 'inv_studio_maintenance_line', productId: 'srv_maintenance', description: 'نگهداری ماهانه وب‌سایت', unit: 'ماه', qty: 2, unitPrice: 4_000_000 }],
+    discount: 0,
+    tax: 0,
+    shipping: 0,
+    notes: 'پیش‌نویس نمونه؛ برای نمایش موعد و اقساط.',
+    projectId: project.id,
+    dueDate: '۱۴۰۵/۰۹/۰۹',
+    installments: [
+      { id: 'inst_studio_1', dueDate: '۱۴۰۵/۰۸/۰۹', amount: 4_000_000 },
+      { id: 'inst_studio_2', dueDate: '۱۴۰۵/۰۹/۰۹', amount: 4_000_000 },
+    ],
+  })];
+  data.settings.numbering.sale.next = 2;
+  data.settings.numbering.quote.next = 2;
+  data.moneyTransactions = [sampleMoneyExpense({
+    id: 'money_studio_project_cost',
+    amount: 2_600_000,
+    description: 'هزینه چاپ نمونه کاتالوگ پروژه آرمان داده',
+    reference: 'EXP-STUDIO-001',
+    projectId: project.id,
+  })];
+  data.journalEntries = [sampleJournal(
+    'je_studio_project_cost', sampleDate, 'هزینه چاپ نمونه کاتالوگ پروژه آرمان داده',
+    'money-transaction', 'money_studio_project_cost', 'EXP-STUDIO-001', [
+      { accountId: 'acct_general_expense', debit: 2_600_000, credit: 0 },
+      { accountId: 'acct_bank', debit: 0, credit: 2_600_000 },
+    ]
+  )];
+  return data;
+}
+
+function createConstructionSeed(): AccountingData {
+  const data = createEmptyAccountingData();
+  setBusiness(data, 'شرکت معماری و ساخت آبان', 'مدیر پروژه', 'تهران، نشانی نمونه');
+  data.customers = [
+    sampleCustomer({ id: 'cus_construction_client', code: '100001', name: 'شرکت مهرسازان سپهر', kind: 'customer', address: 'تهران، نشانی نمونه', notes: 'کارفرمای نمونه پروژه ساخت سوییت' }),
+    sampleCustomer({ id: 'cus_construction_supplier', code: '200001', name: 'تأمین مصالح پارس', kind: 'supplier', address: 'تهران، نشانی نمونه' }),
+  ];
+  data.products = [
+    sampleProduct({ id: 'srv_arch_design', code: 'A-001', name: 'طراحی معماری و نقشه اجرایی', kind: 'service', unit: 'پروژه', salePrice: 80_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'طراحی و نظارت' }),
+    sampleProduct({ id: 'srv_earthworks', code: 'A-002', name: 'خاک‌برداری و آماده‌سازی زمین', kind: 'service', unit: 'مرحله', salePrice: 140_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'عملیات عمرانی' }),
+    sampleProduct({ id: 'srv_structure', code: 'A-003', name: 'اجرای سازه و دیوارچینی', kind: 'service', unit: 'مرحله', salePrice: 420_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'ساخت' }),
+    sampleProduct({ id: 'srv_installations', code: 'A-004', name: 'تأسیسات برق و لوله‌کشی سرویس', kind: 'service', unit: 'مرحله', salePrice: 280_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'تأسیسات' }),
+    sampleProduct({ id: 'srv_finish', code: 'A-005', name: 'کاشی‌کاری و نازک‌کاری داخلی', kind: 'service', unit: 'مرحله', salePrice: 280_000_000, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, category: 'نازک‌کاری' }),
+  ];
+
+  const project = sampleProject({
+    id: 'project_suite_one_bedroom',
+    customerId: 'cus_construction_client',
+    title: 'ساخت سوییت اقامتی یک‌خوابه با سرویس بهداشتی',
+    status: 'in-progress',
+    dueDate: '۱۴۰۵/۱۲/۲۹',
+    agreedAmount: 1_200_000_000,
+    notes: 'مشخصات نمونه: یک اتاق‌خواب، یک سرویس بهداشتی و حمام، فضای نشیمن و آبدارخانه. برآوردها و اطلاعات کارفرما نمونه‌اند و باید با قرارداد واقعی جایگزین شوند.',
+  });
+  data.projects = [project];
+  data.quotes = [sampleQuote({
+    id: 'quote_suite_001',
+    number: 'Q-000001',
+    status: 'accepted',
+    customerId: 'cus_construction_client',
+    customerName: 'شرکت مهرسازان سپهر',
+    customerPhone: '',
+    customerAddress: 'تهران، نشانی نمونه',
+    businessProfileId: 'business_default',
+    date: sampleDate,
+    validUntil: '۱۴۰۵/۰۸/۰۹',
+    items: [
+      { id: 'quote_suite_design', productId: 'srv_arch_design', description: 'طراحی معماری و نقشه اجرایی سوییت یک‌خوابه', unit: 'پروژه', qty: 1, unitPrice: 80_000_000 },
+      { id: 'quote_suite_earthworks', productId: 'srv_earthworks', description: 'خاک‌برداری و آماده‌سازی زمین', unit: 'مرحله', qty: 1, unitPrice: 140_000_000 },
+      { id: 'quote_suite_structure', productId: 'srv_structure', description: 'اجرای سازه و دیوارچینی', unit: 'مرحله', qty: 1, unitPrice: 420_000_000 },
+      { id: 'quote_suite_installations', productId: 'srv_installations', description: 'تأسیسات برق و لوله‌کشی سرویس بهداشتی و حمام', unit: 'مرحله', qty: 1, unitPrice: 280_000_000 },
+      { id: 'quote_suite_finish', productId: 'srv_finish', description: 'کاشی‌کاری سرویس و نازک‌کاری اتاق‌خواب و نشیمن', unit: 'مرحله', qty: 1, unitPrice: 280_000_000 },
+    ],
+    discount: 0,
+    tax: 0,
+    shipping: 0,
+    notes: 'برآورد نمونه؛ پس از بررسی نقشه، محل اجرا و مشخصات مصالح اصلاح شود.',
+    projectId: project.id,
+  })];
+  data.settings.numbering.quote.next = 2;
+  data.moneyTransactions = [sampleMoneyExpense({
+    id: 'money_suite_project_cost',
+    amount: 75_000_000,
+    description: 'هزینه مستقیم نمونه؛ بازدید و آماده‌سازی اولیه پروژه سوییت',
+    reference: 'EXP-SUITE-001',
+    projectId: project.id,
+  })];
+  data.journalEntries = [sampleJournal(
+    'je_suite_project_cost', sampleDate, 'هزینه مستقیم پروژه ساخت سوییت',
+    'money-transaction', 'money_suite_project_cost', 'EXP-SUITE-001', [
+      { accountId: 'acct_general_expense', debit: 75_000_000, credit: 0 },
+      { accountId: 'acct_bank', debit: 0, credit: 75_000_000 },
+    ]
+  )];
+  return data;
+}
+
+export function createSeedData(preset: SeedPresetId): AccountingData {
+  switch (preset) {
+    case 'empty':
+      return createEmptyAccountingData();
+    case 'supermarket':
+      return createSupermarketSeed();
+    case 'creative-studio':
+      return createCreativeStudioSeed();
+    case 'construction-suite':
+      return createConstructionSeed();
+  }
+}
+
+// Kept for callers that need sample defaults; each new account setup uses a fresh preset object.
+export const seedData = createSeedData('supermarket');

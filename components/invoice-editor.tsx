@@ -5,7 +5,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ArrowDownToLine, Ban, CheckCircle2, Copy, Edit3, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { BusinessProfile, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId } from '@/lib/types';
+import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId } from '@/lib/types';
 import { INVOICE_PAPER_SIZES, INVOICE_TEMPLATES } from '@/lib/invoice-templates';
 import { buildCustomerLedger, invoiceLineDiscount, invoiceLineGross, invoiceLineNet, invoiceOutstandingAmount, invoiceTotal, money, numberToPersianWords, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
@@ -43,7 +43,7 @@ function InvoiceAmount({ value, empty = false }: { value: number; empty?: boolea
 }
 
 export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
-  const { invoices, customers, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+  const { invoices, customers, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
   const selectedInvoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const [invoice, setInvoice] = useState<Invoice>(() => selectedInvoice ? structuredClone(selectedInvoice) : blankInvoice(kind, '', '', '', settings.defaultInvoiceTemplateId, settings.defaultInvoicePaperSize));
   const existing = useMemo(() => invoices.find((item) => item.id === invoice.id), [invoices, invoice.id]);
@@ -123,9 +123,10 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
         keywords: [c.code, c.phone, c.nationalId, c.economicCode].filter(Boolean).join(' '),
       })),
   ];
+  const invoiceProductIds = new Set(invoice.items.map((item) => item.productId).filter(Boolean));
   const productOptions: SearchableOption[] = [
     { value: '', label: 'شرح دستی', description: 'ردیف بدون اتصال به کالا/خدمت' },
-    ...products.map((p) => ({
+    ...products.filter((product) => !product.archived || invoiceProductIds.has(product.id)).map((p) => ({
       value: p.id,
       label: p.name,
       description: [p.code, p.kind === 'product' ? 'کالا' : 'خدمت', p.unit].join(' · '),
@@ -184,6 +185,32 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
     setInvoice((x) => ({ ...x, customerId: c.id, customerName: c.name, customerPhone: c.phone, customerAddress: c.address, customerNationalId: c.nationalId, customerEconomicCode: c.economicCode, customerPostalCode: c.postalCode }));
   };
 
+  const ensureInvoiceCustomer = (source: Invoice): Invoice | null => {
+    if (source.customerId && customers.some((item) => item.id === source.customerId)) return source;
+    if (!source.customerName.trim()) {
+      notify('نام طرف حساب را وارد کنید یا یک طرف حساب انتخاب کنید.', 'error');
+      return null;
+    }
+    const customer: Customer = {
+      id: source.customerId || uid('cus'),
+      code: `GUEST-${Date.now().toString(36).toUpperCase()}`,
+      name: source.customerName.trim(),
+      kind: source.kind === 'sale' ? 'customer' : 'supplier',
+      status: 'active',
+      phone: source.customerPhone || '',
+      address: source.customerAddress || '',
+      nationalId: source.customerNationalId || '',
+      economicCode: source.customerEconomicCode || '',
+      postalCode: source.customerPostalCode || '',
+      openingBalance: 0,
+      notes: 'طرف حساب ساخته‌شده هنگام ثبت فاکتور',
+    };
+    upsertCustomer(customer);
+    const updated = { ...source, customerId: customer.id, customerName: customer.name };
+    setInvoice(updated);
+    return updated;
+  };
+
   const chooseProduct = (rowId: string, productId: string) => {
     if (!canEdit || isPartial) return;
     const p = products.find((x) => x.id === productId);
@@ -200,8 +227,11 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
     if (!canEdit) return null;
     if (isVoid) return null;
 
+    const invoiceWithCustomer = ensureInvoiceCustomer(invoice);
+    if (!invoiceWithCustomer) return null;
+
     if (isDraft) {
-      const result = saveInvoiceDraft(invoice);
+      const result = saveInvoiceDraft(invoiceWithCustomer);
       if (!result.ok || !result.invoice) {
         notify(result.message || 'ذخیره فاکتور انجام نشد.', 'error');
         return null;
@@ -211,7 +241,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
       return result.invoice;
     }
 
-    if (!isDirty) {
+    if (!existing || invoiceEditableSignature(existing) === invoiceEditableSignature(invoiceWithCustomer)) {
       notify('تغییری برای ثبت Revision وجود ندارد.', 'info');
       return existing || invoice;
     }
@@ -221,7 +251,7 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
       { title: 'ثبت Revision', confirmLabel: 'ثبت Revision', placeholder: 'دلیل ویرایش...' }
     );
     if (!reason?.trim()) return null;
-    const result = reviseInvoice(invoice, reason);
+    const result = reviseInvoice(invoiceWithCustomer, reason);
     if (!result.ok || !result.invoice) {
       notify(result.message || 'ثبت Revision انجام نشد.', 'error');
       return null;
@@ -246,12 +276,14 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
     }
 
     if (isDraft) {
+      const invoiceWithCustomer = ensureInvoiceCustomer(invoice);
+      if (!invoiceWithCustomer) return;
       const approved = await confirmDialog(
-        `فاکتور ${invoice.kind === 'sale' ? 'فروش' : 'خرید'} ${invoice.number} به مبلغ ${money(invoiceTotal(invoice))} ${settings.currency} قطعی می‌شود و اثر حسابداری و موجودی آن ثبت خواهد شد. بعد از ثبت، اصلاح سند از مسیر Revision انجام می‌شود. ادامه می‌دهید؟`,
+        `فاکتور ${invoiceWithCustomer.kind === 'sale' ? 'فروش' : 'خرید'} ${invoiceWithCustomer.number} به مبلغ ${money(invoiceTotal(invoiceWithCustomer))} ${settings.currency} قطعی می‌شود و اثر حسابداری و موجودی آن ثبت خواهد شد. بعد از ثبت، اصلاح سند از مسیر Revision انجام می‌شود. ادامه می‌دهید؟`,
         { title: 'تأیید ثبت نهایی فاکتور', confirmLabel: 'ثبت نهایی و چاپ' }
       );
       if (!approved) return;
-      const result = finalizeInvoice(invoice);
+      const result = finalizeInvoice(invoiceWithCustomer);
       if (!result.ok || !result.invoice) {
         notify(result.message || 'ثبت نهایی فاکتور انجام نشد.', 'error');
         return;
@@ -361,6 +393,17 @@ export function InvoiceEditor({ kind, invoiceId, mode, onRequestEdit, onBack }: 
 
     {isPartial && mode === 'edit' && <Alert className="screen-only rounded-xl border-amber-200 bg-amber-50 text-amber-900"><AlertDescription>این فاکتور بخشی‌تسویه است. فقط توضیحات قابل تغییر است و ثبت آن به وارد کردن دلیل و تأیید Revision نیاز دارد.</AlertDescription></Alert>}
     {isSettled && <Alert className="screen-only rounded-xl border-emerald-200 bg-emerald-50 text-emerald-900"><AlertDescription>این فاکتور تسویه شده است و ویرایش آن غیرفعال است.</AlertDescription></Alert>}
+
+    {invoice.kind === 'sale' && <Panel variant="subtle" padding="sm" className="screen-only">
+      <div className="grid gap-3 md:grid-cols-[1fr_2fr] md:items-start">
+        <div className="space-y-2"><div className="text-sm font-black">سررسید دریافت</div><JalaliDatePicker value={invoice.dueDate || ''} onChange={(value) => patch('dueDate', value)} disabled={!canEdit || isPartial} placeholder="بدون سررسید" /><Button type="button" size="sm" variant="ghost" disabled={!canEdit || !invoice.dueDate} onClick={() => patch('dueDate', undefined)}>پاک‌کردن سررسید</Button></div>
+        <div><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><div className="text-sm font-black">برنامه اقساط (اختیاری)</div><div className="text-[11px] text-slate-500">جمع مبالغ اقساط باید با کل فاکتور برابر باشد؛ این برنامه به‌تنهایی پرداخت ثبت نمی‌کند.</div></div><Button type="button" size="sm" variant="outline" disabled={!canEdit || isPartial} onClick={() => patch('installments', [...(invoice.installments || []), { id: uid('installment'), dueDate: todayIso(), amount: (invoice.installments?.length ? 0 : total) }])}><Plus className="h-3.5 w-3.5" /> افزودن قسط</Button></div>
+          <div className="space-y-2">{(invoice.installments || []).map((installment, index) => <div key={installment.id} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2"><span className="text-xs font-bold text-slate-500">قسط {index + 1}</span><JalaliDatePicker value={installment.dueDate} onChange={(dueDate) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, dueDate } : item))} disabled={!canEdit || isPartial} /><input aria-label={`مبلغ قسط ${index + 1}`} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" type="number" min="0" value={installment.amount} onChange={(event) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, amount: Number(event.target.value) } : item))} disabled={!canEdit || isPartial} /><Button type="button" variant="ghost" size="icon" disabled={!canEdit || isPartial} title="حذف قسط" onClick={() => patch('installments', (invoice.installments || []).filter((item) => item.id !== installment.id))}><Trash2 className="h-4 w-4 text-rose-500" /></Button></div>)}
+            {!!invoice.installments?.length && <div className="text-left text-xs text-slate-500">جمع اقساط: {money(invoice.installments.reduce((sum, item) => sum + Number(item.amount || 0), 0))} · مبلغ فاکتور: {money(total)} {settings.currency}</div>}
+          </div>
+        </div>
+      </div>
+    </Panel>}
 
     <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize}>
       {isDraft && <div className="print-only print-watermark text-slate-500">پیش‌نویس</div>}
@@ -775,6 +818,8 @@ function invoiceEditableSignature(invoice: Invoice) {
     tax: invoice.tax,
     shipping: invoice.shipping,
     notes: invoice.notes,
+    dueDate: invoice.dueDate || '',
+    installments: invoice.installments || [],
   });
 }
 
