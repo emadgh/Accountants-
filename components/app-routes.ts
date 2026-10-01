@@ -46,7 +46,7 @@ export function buildViewHref(
     params.set('invoiceId', details.invoiceId);
     params.set('mode', details.invoiceMode || 'view');
   }
-  if ((view === 'sale-new' || view === 'quotes') && details.projectId) params.set('projectId', details.projectId);
+  if ((view === 'sale-new' || view === 'purchase-new' || view === 'quotes') && details.projectId) params.set('projectId', details.projectId);
   if (view === 'ledger' && details.customerId) params.set('customerId', details.customerId);
   if (view === 'checks' && details.checkId) params.set('checkId', details.checkId);
 

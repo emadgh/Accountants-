@@ -35,7 +35,7 @@ function blankInvoice(kind: InvoiceKind, customerName = '', number = '', busines
     kind,
     status: 'draft',
     date: todayIso(),
-    customerId: projectCustomer?.id || '', customerName: projectCustomer?.name || customerName, customerPhone: projectCustomer?.phone || '', customerAddress: projectCustomer?.address || '', customerNationalId: projectCustomer?.nationalId || '', customerEconomicCode: projectCustomer?.economicCode || '', customerPostalCode: projectCustomer?.postalCode || '',
+    customerId: kind === 'sale' ? projectCustomer?.id || '' : '', customerName: kind === 'sale' ? projectCustomer?.name || customerName : customerName, customerPhone: kind === 'sale' ? projectCustomer?.phone || '' : '', customerAddress: kind === 'sale' ? projectCustomer?.address || '' : '', customerNationalId: kind === 'sale' ? projectCustomer?.nationalId || '' : '', customerEconomicCode: kind === 'sale' ? projectCustomer?.economicCode || '' : '', customerPostalCode: kind === 'sale' ? projectCustomer?.postalCode || '' : '',
     items: [{ id: uid('row'), description: '', details: '', unit: 'عدد', qty: 1, unitPrice: 0, discount: 0 }],
     discount: 0, tax: 0, shipping: 0, notes: '', ...(project ? { projectId: project.id } : {}), createdAt: now, updatedAt: now,
   };
@@ -200,7 +200,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     setInvoice((current) => ({
       ...current,
       projectId: project.id,
-      ...(projectCustomer ? {
+      ...(invoice.kind === 'sale' && projectCustomer ? {
         customerId: projectCustomer.id,
         customerName: projectCustomer.name,
         customerPhone: projectCustomer.phone,
@@ -454,11 +454,10 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
         <Button size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
-      {invoice.kind === 'sale' && <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
-        <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
-        <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>
+      <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
+        <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="block text-[11px] font-normal text-slate-500">{invoice.kind === 'sale' ? 'در فاکتور فروش، طرف‌حساب همان پروژه انتخاب می‌شود.' : 'اتصال پروژه، طرف‌حساب تأمین‌کننده را تغییر نمی‌دهد.'}</span></label>
+        {invoice.kind === 'sale' && <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>}
       </div>
-      }
     </Panel>}
 
     <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize} data-editing={canEdit && !previewOpen ? 'true' : undefined}>

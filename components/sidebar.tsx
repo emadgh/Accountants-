@@ -3,12 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Building2,
-  ChevronDown,
-  ChevronLeft,
   FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { sidebarGroups, type ViewKey } from '@/components/sidebar-config';
+import { BranchedMenu, type BranchedMenuGroup } from '@/components/branched-menu';
 
 export type { ViewKey } from '@/components/sidebar-config';
 
@@ -17,6 +16,12 @@ const defaultExpanded = Object.fromEntries(
 ) as Record<string, boolean>;
 
 const SESSION_KEY = 'accountants:sidebar-groups';
+const branchedMenuItems: readonly BranchedMenuGroup[] = sidebarGroups.map((group) => ({
+  id: group.id,
+  label: group.label,
+  collapsible: group.collapsible,
+  children: group.items.map(({ key, label, icon }) => ({ value: key, label, icon })),
+}));
 
 export function Sidebar({
   active,
@@ -35,6 +40,11 @@ export function Sidebar({
     () => sidebarGroups.find((group) => group.items.some((item) => item.key === active))?.id,
     [active]
   );
+  const openSections = useMemo(() => new Set(sidebarGroups.flatMap((group, index) => {
+    const activeInside = group.id === activeGroupId;
+    const isOpen = !group.collapsible || activeInside || expanded[group.id] !== false;
+    return isOpen ? [index] : [];
+  })), [activeGroupId, expanded]);
 
   useEffect(() => {
     try {
@@ -73,6 +83,11 @@ export function Sidebar({
     onOpenChange(false);
   };
 
+  const toggleMenuGroup = (index: number) => {
+    const group = sidebarGroups[index];
+    if (group?.collapsible) toggleGroup(group.id);
+  };
+
   return (
     <>
       {open && (
@@ -102,76 +117,14 @@ export function Sidebar({
         </div>
 
         <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 py-3" aria-label="منوی اصلی">
-          <div className="space-y-4">
-            {sidebarGroups.map((group) => {
-              const activeInside = group.id === activeGroupId;
-              const isOpen = !group.collapsible || activeInside || expanded[group.id] !== false;
-              const groupContentId = `sidebar-group-${group.id}`;
-
-              return (
-                <section key={group.id} aria-labelledby={`sidebar-group-label-${group.id}`}>
-                  {group.collapsible ? (
-                    <button
-                      id={`sidebar-group-label-${group.id}`}
-                      type="button"
-                      aria-expanded={isOpen}
-                      aria-controls={groupContentId}
-                      onClick={() => toggleGroup(group.id)}
-                      className={cn(
-                        'mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1 text-right text-[10px] font-black tracking-wide text-slate-500 transition hover:bg-white/5 hover:text-slate-300',
-                        activeInside && 'text-sky-300'
-                      )}
-                    >
-                      <span>{group.label}</span>
-                      <ChevronDown
-                        className={cn(
-                          'h-3.5 w-3.5 transition-transform duration-200',
-                          !isOpen && '-rotate-90'
-                        )}
-                      />
-                    </button>
-                  ) : (
-                    <div
-                      id={`sidebar-group-label-${group.id}`}
-                      className="mb-1 px-2 py-1 text-[10px] font-black tracking-wide text-slate-500"
-                    >
-                      {group.label}
-                    </div>
-                  )}
-
-                  {isOpen && (
-                    <div id={groupContentId} className="space-y-1">
-                      {group.items.map(({ key, label, icon: Icon }) => {
-                        const isActive = active === key;
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => navigate(key)}
-                            className={cn(
-                              'group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-right text-sm transition',
-                              isActive
-                                ? 'bg-sky-500/16 text-white ring-1 ring-inset ring-sky-400/20'
-                                : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                            )}
-                          >
-                            <Icon
-                              className={cn(
-                                'h-4.5 w-4.5 shrink-0',
-                                isActive ? 'text-sky-300' : 'text-slate-400 group-hover:text-slate-200'
-                              )}
-                            />
-                            <span className="flex-1">{label}</span>
-                            {isActive && <ChevronLeft className="h-4 w-4 text-sky-300" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
+          <BranchedMenu
+            items={branchedMenuItems}
+            activeValue={active}
+            openSections={openSections}
+            onSelect={(value) => navigate(value as ViewKey)}
+            onToggle={toggleMenuGroup}
+            className="gap-2"
+          />
         </nav>
 
         <div className="border-t border-white/10 p-4">

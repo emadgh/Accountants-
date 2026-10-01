@@ -9,13 +9,15 @@ export default function NewPurchasePage() {
   const searchParams = useSearchParams();
   const navigation = useAccountingNavigation();
   const invoiceId = searchParams.get('invoiceId');
+  const projectId = searchParams.get('projectId');
   const mode = invoiceId && searchParams.get('mode') !== 'edit' ? 'view' : 'edit';
 
   return (
     <InvoiceEditor
-      key={`purchase:${invoiceId || 'new'}`}
+      key={`purchase:${invoiceId || 'new'}:${projectId || ''}`}
       kind="purchase"
       invoiceId={invoiceId}
+      projectId={projectId}
       mode={mode}
       onRequestEdit={() => { if (invoiceId) navigation.editInvoice(invoiceId, 'purchase'); }}
       onBack={() => router.back()}

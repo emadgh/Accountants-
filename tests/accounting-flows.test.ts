@@ -7,6 +7,7 @@ import type { Quote } from '../lib/types';
 import { formatDocumentNumber } from '../lib/standards';
 import { validateAccountingData, validateAccountingTransition } from '../lib/accounting-validation';
 import { calculateAutomaticInstallments } from '../lib/installment-plan';
+import { projectPurchaseInvoiceAllocation, projectPurchaseReturnAllocation } from '../lib/accounting';
 
 vi.mock('../lib/storage', () => ({
   ACCOUNTING_SCHEMA_VERSION: 9,
@@ -69,6 +70,28 @@ describe('accounting store flows', () => {
     expect(validateAccountingData(data).ok).toBe(true);
     data.invoices[0].status = 'final';
     expect(validateAccountingData(data).ok).toBe(false);
+  });
+
+  it('separates project purchase service expenses from inventory and nets purchase returns', () => {
+    const product: Product = { id: 'project-material', code: 'M1', name: 'مصالح', kind: 'product', unit: 'عدد', salePrice: 4_000, buyPrice: 3_000, averageCost: 3_000, stock: 0, minStock: 0 };
+    const purchase = invoice([
+      { id: 'purchase-service', description: 'نصب', unit: 'خدمت', qty: 1, unitPrice: 2_000 },
+      { id: 'purchase-material', productId: product.id, description: product.name, unit: product.unit, qty: 2, unitPrice: 1_500 },
+    ], 'P-project-cost');
+    purchase.kind = 'purchase';
+    purchase.projectId = 'project_1';
+    purchase.tax = 1_000;
+    expect(projectPurchaseInvoiceAllocation(purchase, [product])).toEqual({ service: 2_400, product: 3_600 });
+
+    const returnDocument: ReturnDocument = {
+      id: 'purchase-return-project', number: 'PR-1', kind: 'purchase-return', status: 'final', originalInvoiceId: purchase.id,
+      originalInvoiceNumber: purchase.number, customerId: customer.id, customerName: customer.name, date: todayIso(),
+      items: [
+        { id: 'return-service', originalItemId: 'purchase-service', description: 'نصب', unit: 'خدمت', qty: 1, unitPrice: 2_000 },
+        { id: 'return-material', originalItemId: 'purchase-material', productId: product.id, description: product.name, unit: product.unit, qty: 1, unitPrice: 1_500 },
+      ], totalAmount: 4_200, notes: '', createdAt: todayIso(), updatedAt: todayIso(),
+    };
+    expect(projectPurchaseReturnAllocation(returnDocument, purchase, [product])).toEqual({ service: 2_400, product: 1_800 });
   });
 
   it('posts a service invoice, treats pending checks as unsettled, and settles after clearing', () => {

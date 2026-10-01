@@ -87,7 +87,7 @@ function entry(
   return isBalancedJournal(result) ? result : null;
 }
 
-function productAllocation(invoice: Invoice, products: Product[]) {
+export function projectPurchaseInvoiceAllocation(invoice: Invoice, products: Product[]) {
   const raw = invoice.items.map((item) => {
     const product = item.productId ? products.find((candidate) => candidate.id === item.productId) : undefined;
     return { amount: invoiceLineNet(item), product: product?.kind === 'product' };
@@ -100,7 +100,7 @@ function productAllocation(invoice: Invoice, products: Product[]) {
   return { product, service: total - product };
 }
 
-function returnProductAllocation(document: ReturnDocument, original: Invoice, products: Product[]) {
+export function projectPurchaseReturnAllocation(document: ReturnDocument, original: Invoice, products: Product[]) {
   const raw = document.items.map((item) => {
     const source = original.items.find((candidate) => candidate.id === item.originalItemId);
     const product = source?.productId ? products.find((candidate) => candidate.id === source.productId) : undefined;
@@ -159,7 +159,7 @@ export function journalForInvoice(
       if (costEntry) results.push(costEntry);
     }
   } else {
-    const allocation = productAllocation(invoice, products);
+    const allocation = projectPurchaseInvoiceAllocation(invoice, products);
     const financial = entry(
       invoice.date,
       'ثبت فاکتور خرید ' + invoice.number,
@@ -221,7 +221,7 @@ export function journalForReturn(
       if (costEntry) results.push(costEntry);
     }
   } else {
-    const allocation = returnProductAllocation(document, original, products);
+    const allocation = projectPurchaseReturnAllocation(document, original, products);
     const financial = entry(
       document.date,
       'مرجوعی خرید ' + document.number,
