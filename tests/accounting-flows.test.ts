@@ -4,9 +4,13 @@ import { todayIso } from '../lib/standards';
 import { getReceivableDueBuckets } from '../lib/receivables';
 import type { Customer, Invoice, Payment, Product, ReturnDocument } from '../lib/types';
 import type { Quote } from '../lib/types';
+import { formatDocumentNumber } from '../lib/standards';
+import { validateAccountingData, validateAccountingTransition } from '../lib/accounting-validation';
+import { calculateAutomaticInstallments } from '../lib/installment-plan';
 
 vi.mock('../lib/storage', () => ({
   ACCOUNTING_SCHEMA_VERSION: 9,
+  alignAccountingPersistedBaseline: vi.fn(),
   accountingStateStorage: {
     getItem: vi.fn(async () => null),
     setItem: vi.fn(async () => undefined),
@@ -41,6 +45,32 @@ function setup(products: Product[] = []) {
 describe('accounting store flows', () => {
   beforeEach(() => setup());
 
+  it('saves and posts an automatically financed installment invoice with a balanced schedule', () => {
+    const draft = invoice([{ id: 'design-line', description: 'خدمت طراحی', unit: 'مورد', qty: 1, unitPrice: 1_000_000 }], 'S-installment');
+    const plan = calculateAutomaticInstallments(draft, { downPayment: 200_000, count: 3, profitPercent: 10, firstDueDate: todayIso() });
+    expect(useAccountingStore.getState().saveInvoiceDraft(plan.invoice).ok).toBe(true);
+    expect(useAccountingStore.getState().finalizeInvoice(plan.invoice).ok).toBe(true);
+    const posted = useAccountingStore.getState().invoices.find((item) => item.id === draft.id);
+    expect(posted?.items.some((item) => item.description.includes('سود فروش اقساطی') && item.unitPrice === 80_000)).toBe(true);
+    expect(posted?.installments?.reduce((sum, item) => sum + item.amount, 0)).toBe(1_080_000);
+    const due = getReceivableDueBuckets([posted!], [], [], [], todayIso(), todayIso()).upcoming;
+    expect(due[0]).toMatchObject({ downPayment: true, amount: 200_000 });
+    expect(due[1]).toMatchObject({ installmentNumber: 1 });
+    expect(validateAccountingData(useAccountingStore.getState()).ok).toBe(true);
+  });
+
+  it('keeps a zero-quantity imported row as audit history after the invoice is voided', () => {
+    const data = createEmptyAccountingData();
+    data.customers = [customer];
+    const legacy = invoice([{ id: 'legacy-line', description: 'ردیف وارداتی', unit: 'عدد', qty: 0, unitPrice: 1_500_000 }], 'S-legacy');
+    legacy.status = 'void';
+    legacy.voidReason = 'ردیف وارداتی با تعداد صفر';
+    data.invoices = [legacy];
+    expect(validateAccountingData(data).ok).toBe(true);
+    data.invoices[0].status = 'final';
+    expect(validateAccountingData(data).ok).toBe(false);
+  });
+
   it('posts a service invoice, treats pending checks as unsettled, and settles after clearing', () => {
     const service: Product = {
       id: 'service_1', code: 'S1', name: 'طراحی', kind: 'service', unit: 'پروژه',
@@ -64,6 +94,10 @@ describe('accounting store flows', () => {
     };
     expect(useAccountingStore.getState().addPayment(payment).ok).toBe(true);
     expect(useAccountingStore.getState().invoices.find((item) => item.id === draft.id)?.status).toBe('final');
+    expect(useAccountingStore.getState().addPayment({
+      id: 'cash_while_check_pending', documentNumber: 'R-pending-cash', invoiceId: draft.id,
+      customerId: customer.id, direction: 'receipt', method: 'cash', amount: 50_000, date: todayIso(),
+    }).ok).toBe(false);
 
     expect(useAccountingStore.getState().upsertCheck({ ...check, status: 'cleared' }).ok).toBe(true);
     expect(useAccountingStore.getState().invoices.find((item) => item.id === draft.id)?.status).toBe('partial');
@@ -132,6 +166,32 @@ describe('accounting store flows', () => {
     expect(useAccountingStore.getState().products.map((product) => product.stock)).toEqual([3, 1]);
   });
 
+  it('finalizes a quick sale, stock movement, balanced journals and card receipt as one valid state change', () => {
+    const product: Product = { id: 'quick_product', code: 'Q1', name: 'کالای سریع', kind: 'product', unit: 'عدد', salePrice: 500, buyPrice: 250, averageCost: 250, stock: 3, minStock: 1 };
+    setup([product]);
+    const before = createEmptyAccountingData();
+    before.customers = [customer];
+    before.products = [product];
+    const state = useAccountingStore.getState();
+    const sale = invoice([{ id: 'quick_line', productId: product.id, description: product.name, unit: product.unit, qty: 1, unitPrice: 500 }], formatDocumentNumber(state.settings.numbering.sale));
+    const receipt: Payment = {
+      id: 'quick_receipt', documentNumber: formatDocumentNumber(state.settings.numbering.receipt), invoiceId: sale.id,
+      customerId: customer.id, direction: 'receipt', method: 'card', amount: 500, date: todayIso(),
+    };
+    const result = state.finalizeInvoiceWithPayment(sale, receipt);
+    expect(result.ok).toBe(true);
+    const after = useAccountingStore.getState();
+    expect(after.products[0].stock).toBe(2);
+    expect(after.payments.map((item) => item.id)).toContain(receipt.id);
+    expect(after.journalEntries.some((entry) => entry.sourceType === 'invoice' && entry.sourceId === sale.id)).toBe(true);
+    expect(after.journalEntries.some((entry) => entry.sourceType === 'payment' && entry.sourceId === receipt.id)).toBe(true);
+    expect(validateAccountingData(after)).toMatchObject({ ok: true });
+    expect(validateAccountingTransition(before, after)).toMatchObject({ ok: true });
+
+    const altered = { ...after, invoices: after.invoices.map((item) => item.id === sale.id ? { ...item, items: [{ ...item.items[0], qty: 2 }] } : item) };
+    expect(validateAccountingTransition(after, altered)).toMatchObject({ ok: false });
+  });
+
   it('converts an accepted quote to one unposted sales draft and keeps quote history', () => {
     const now = new Date().toISOString();
     const quote: Quote = {
@@ -189,7 +249,57 @@ describe('accounting store flows', () => {
     const payment: Payment = { id: 'due_payment', documentNumber: 'RP-1', invoiceId: settled.id, customerId: customer.id, direction: 'receipt', method: 'cash', amount: 100, date: '2026-01-02' };
 
     const buckets = getReceivableDueBuckets([overdue, upcoming, later, settled], [payment], [], [], '2026-01-05', '2026-01-12');
-    expect(buckets.overdue.map((item) => item.id)).toEqual([overdue.id]);
-    expect(buckets.upcoming.map((item) => item.id)).toEqual([upcoming.id]);
+    expect(buckets.overdue.map((item) => item.invoiceId)).toEqual([overdue.id]);
+    expect(buckets.upcoming.map((item) => item.invoiceId)).toEqual([upcoming.id]);
+  });
+
+  it('allocates receipts to installments oldest first and still shows a late installment when the final due date is later', () => {
+    const scheduled = invoice([{ id: 'schedule_line', description: 'خدمت', unit: 'پروژه', qty: 1, unitPrice: 300 }], 'SCHED-1');
+    scheduled.status = 'final';
+    scheduled.dueDate = '2026-01-30';
+    scheduled.installments = [
+      { id: 'schedule_1', dueDate: '2026-01-04', amount: 100 },
+      { id: 'schedule_2', dueDate: '2026-01-10', amount: 100 },
+      { id: 'schedule_3', dueDate: '2026-01-30', amount: 100 },
+    ];
+    const partial: Payment = {
+      id: 'schedule_payment', documentNumber: 'SCHED-R1', invoiceId: scheduled.id, customerId: customer.id,
+      direction: 'receipt', method: 'cash', amount: 25, date: '2026-01-02',
+    };
+    const buckets = getReceivableDueBuckets([scheduled], [partial], [], [], '2026-01-05', '2026-01-12');
+    expect(buckets.overdue).toMatchObject([{ installmentNumber: 1, amount: 75 }]);
+    expect(buckets.upcoming).toMatchObject([{ installmentNumber: 2, amount: 100 }]);
+  });
+
+  it('applies returns to the last installments first and ignores pending checks as collected money', () => {
+    const scheduled = invoice([{ id: 'return_schedule_line', description: 'خدمت', unit: 'پروژه', qty: 1, unitPrice: 300 }], 'SCHED-2');
+    scheduled.status = 'partial';
+    scheduled.dueDate = '2026-01-30';
+    scheduled.installments = [
+      { id: 'return_schedule_1', dueDate: '2026-01-04', amount: 100 },
+      { id: 'return_schedule_2', dueDate: '2026-01-10', amount: 100 },
+      { id: 'return_schedule_3', dueDate: '2026-01-30', amount: 100 },
+    ];
+    const receipt: Payment = {
+      id: 'return_schedule_receipt', documentNumber: 'SCHED-R2', invoiceId: scheduled.id, customerId: customer.id,
+      direction: 'receipt', method: 'cash', amount: 80, date: '2026-01-02',
+    };
+    const pendingCheck: Payment = {
+      id: 'return_schedule_pending', documentNumber: 'SCHED-C2', invoiceId: scheduled.id, customerId: customer.id,
+      direction: 'receipt', method: 'check', checkId: 'return_schedule_check', amount: 20, date: '2026-01-02',
+    };
+    const check = {
+      id: 'return_schedule_check', documentNumber: 'C-SCHED-2', direction: 'received' as const, customerId: customer.id,
+      amount: 20, dueDate: '2026-01-15', number: '20', bank: 'آزمایشی', owner: customer.name, status: 'pending' as const,
+    };
+    const returned: ReturnDocument = {
+      id: 'return_schedule_doc', number: 'SR-SCHED-2', kind: 'sale-return', status: 'final', originalInvoiceId: scheduled.id,
+      originalInvoiceNumber: scheduled.number, customerId: customer.id, customerName: customer.name, date: '2026-01-03',
+      items: [], totalAmount: 60, notes: '', createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+
+    const buckets = getReceivableDueBuckets([scheduled], [receipt, pendingCheck], [check], [returned], '2026-01-05', '2026-02-01');
+    expect(buckets.overdue).toMatchObject([{ installmentNumber: 1, amount: 20 }]);
+    expect(buckets.upcoming).toMatchObject([{ installmentNumber: 2, amount: 100 }, { installmentNumber: 3, amount: 40 }]);
   });
 });

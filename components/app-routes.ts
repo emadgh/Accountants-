@@ -25,6 +25,7 @@ export const VIEW_PATHS: Record<ViewKey, string> = {
 
 export function getViewForPathname(pathname: string): ViewKey {
   const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+  if (normalizedPath === '/sales/installments') return 'sales';
   return (Object.entries(VIEW_PATHS).find(([, path]) => path === normalizedPath)?.[0] as ViewKey | undefined)
     || 'dashboard';
 }

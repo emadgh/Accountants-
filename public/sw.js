@@ -1,4 +1,4 @@
-const CACHE_NAME = 'accountants-shell-v2';
+const CACHE_NAME = 'accountants-shell-v3';
 const CORE_URLS = ['/', '/manifest.webmanifest', '/icon.svg', '/icon-maskable.svg'];
 
 function isCacheableAsset(url) {
@@ -76,17 +76,14 @@ self.addEventListener('fetch', (event) => {
   if (!isCacheableAsset(url)) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached || Response.error());
-      return cached || network;
-    })
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(async () => (await caches.match(request)) || Response.error())
   );
 });

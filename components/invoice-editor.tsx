@@ -3,6 +3,7 @@
 import { DataTable } from '@/components/ui/data-table';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ArrowRight, ArrowDownToLine, Ban, CheckCircle2, Copy, Edit3, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId, Project } from '@/lib/types';
@@ -20,6 +21,8 @@ import { FormattedInput, formatCardNumber, formatIranIban, formatPostalCode, typ
 import { InvoicePaymentDialog } from '@/components/invoice-payment-dialog';
 import { InvoicePaymentHistoryButton } from '@/components/invoice-payment-history';
 import { AppNavbarContent } from '@/components/app-navbar';
+import ElectricBorder from '@/components/react-bits/electric-border';
+import { flushAccountingPersistence } from '@/lib/storage';
 
 function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = '', templateId: InvoiceTemplateId = 'classic', paperSize: InvoicePaperSize = 'A4', project?: Project, projectCustomer?: Customer): Invoice {
   const now = new Date().toISOString();
@@ -43,6 +46,7 @@ function InvoiceAmount({ value, empty = false }: { value: number; empty?: boolea
 }
 
 export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; projectId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
+  const router = useRouter();
   const { invoices, customers, projects, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
   const initialProject = projectId ? projects.find((item) => item.id === projectId) : undefined;
   const initialProjectCustomer = initialProject ? customers.find((item) => item.id === initialProject.customerId) : undefined;
@@ -285,6 +289,21 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     return result.invoice;
   };
 
+  const openInstallments = async () => {
+    let target = existing;
+    if (canEdit && (isDirty || !target)) {
+      target = await persist() || undefined;
+      if (!target) return;
+      try {
+        await flushAccountingPersistence();
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'پیش‌نویس روی سرور ذخیره نشد.', 'error');
+        return;
+      }
+    }
+    if (target) router.push(`/sales/installments?invoiceId=${encodeURIComponent(target.id)}`);
+  };
+
   const previewPrint = () => {
     setPreviewOpen(true);
   };
@@ -312,12 +331,24 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         notify(result.message || 'ثبت نهایی فاکتور انجام نشد.', 'error');
         return;
       }
+      try {
+        await flushAccountingPersistence();
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'ثبت قطعی روی سرور انجام نشد؛ پیش‌نویس را بررسی کنید.', 'error');
+        return;
+      }
       setInvoice(structuredClone(result.invoice));
       window.setTimeout(() => window.print(), 120);
       return;
     }
 
     if (isDirty && !(await persist())) return;
+    try {
+      await flushAccountingPersistence();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'ذخیره فاکتور روی سرور انجام نشد؛ اطلاعات فرم حفظ شده است.', 'error');
+      return;
+    }
     window.setTimeout(() => window.print(), 80);
   };
 
@@ -379,7 +410,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  return <div className={'invoice-editor-root space-y-4' + (previewOpen ? ' invoice-preview-active' : '')}>
+  return <div className={'invoice-editor-root invoice-editor-layout space-y-4' + (previewOpen ? ' invoice-preview-active' : '')}>
     <style>{`@media print { @page { size: ${paperSize} portrait; margin: ${paperSize === 'A5' ? '5mm' : '8mm 8mm 10mm'}; } }`}</style>
     {previewOpen ? <div className="invoice-preview-toolbar screen-only" data-paper-size={paperSize}>
       <Button variant="outline" onClick={() => setPreviewOpen(false)}><ArrowRight className="h-4 w-4" /> بازگشت به ویرایش</Button>
@@ -392,9 +423,19 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       leading={<>
         {onBack && <Button variant="ghost" size="icon" onClick={onBack} aria-label="بازگشت"><ArrowRight className="h-4 w-4" /></Button>}
         <Badge className={statusClass}>{statusLabel}{(invoice.revision || 0) > 1 ? ` · R${invoice.revision}` : ''}</Badge>
+        {canEdit && <Badge className="border border-sky-300 bg-sky-100 text-sky-800">{isPartial ? 'ویرایش محدود' : 'در حال ویرایش'}</Badge>}
       </>}
-      actions={<>
+    />}
+
+    {isPartial && mode === 'edit' && <Alert className="invoice-editor-alert screen-only mx-auto max-w-[210mm] rounded-xl border-amber-200 bg-amber-50 text-amber-900"><AlertDescription>این فاکتور بخشی‌تسویه است. فقط توضیحات قابل تغییر است و ثبت آن به وارد کردن دلیل و تأیید Revision نیاز دارد.</AlertDescription></Alert>}
+    {isSettled && <Alert className="invoice-editor-alert screen-only mx-auto max-w-[210mm] rounded-xl border-emerald-200 bg-emerald-50 text-emerald-900"><AlertDescription>این فاکتور تسویه شده است و ویرایش آن غیرفعال است.</AlertDescription></Alert>}
+
+    {!previewOpen && <Panel padding="sm" className="invoice-editor-tools screen-only mx-auto w-full max-w-[210mm]" spotlight={false}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div><div className="text-sm font-black text-slate-900">ابزارهای فاکتور</div><div className="text-xs text-slate-500">شماره {invoice.number || 'جدید'} · {statusLabel}</div></div>
         {savedFlash && <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><CheckCircle2 className="h-4 w-4" /> ذخیره شد</span>}
+      </div>
+      <div className="invoice-tool-actions mt-3 flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
           <span>قالب</span>
           <select className="h-9 min-w-[130px] rounded-xl border border-slate-200 bg-white px-2 text-sm" value={invoice.templateId} onChange={(event) => chooseTemplate(event.target.value as InvoiceTemplateId)} aria-label="قالب این فاکتور">
@@ -406,33 +447,25 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         {canEdit && !isPartial && <Button variant="outline" size="sm" onClick={duplicate}><Copy className="h-4 w-4" /> کپی فاکتور</Button>}
         {canEdit && <Button variant="outline" size="sm" onClick={persist} title="Ctrl/Cmd + S"><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
         {canEdit && isPosted && !isSettled && <Button variant="danger" size="sm" onClick={voidCurrent}><Ban className="h-4 w-4" /> ابطال</Button>}
-        {existing && currentStatus !== 'draft' && <InvoicePaymentHistoryButton invoiceId={existing.id} />}
+        {existing && currentStatus !== 'draft' && <InvoicePaymentHistoryButton invoiceId={existing.id} showLabel />}
         {existing && isPosted && outstanding > 0 && <>
           <Button variant="outline" size="sm" disabled={isDirty} title={isDirty ? 'ابتدا تغییرات را ثبت کنید.' : undefined} onClick={startPayment}><ArrowDownToLine className="h-4 w-4" />{invoice.kind === 'sale' ? 'دریافت / تسویه' : 'پرداخت / تسویه'}</Button>
         </>}
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
         <Button size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
-      </>}
-    />}
-
-    {isPartial && mode === 'edit' && <Alert className="screen-only rounded-xl border-amber-200 bg-amber-50 text-amber-900"><AlertDescription>این فاکتور بخشی‌تسویه است. فقط توضیحات قابل تغییر است و ثبت آن به وارد کردن دلیل و تأیید Revision نیاز دارد.</AlertDescription></Alert>}
-    {isSettled && <Alert className="screen-only rounded-xl border-emerald-200 bg-emerald-50 text-emerald-900"><AlertDescription>این فاکتور تسویه شده است و ویرایش آن غیرفعال است.</AlertDescription></Alert>}
-
-    {invoice.kind === 'sale' && <Panel variant="subtle" padding="sm" className="screen-only">
-      <div className="grid gap-3 md:grid-cols-[1fr_2fr] md:items-start">
-        <div className="space-y-3">
-          <label className="block space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="block text-[11px] font-normal text-slate-500">با انتخاب پروژه، طرف حساب همان پروژه هم انتخاب می‌شود.</span></label>
-          <div className="space-y-2"><div className="text-sm font-black">سررسید دریافت</div><JalaliDatePicker value={invoice.dueDate || ''} onChange={(value) => patch('dueDate', value)} disabled={!canEdit || isPartial} placeholder="بدون سررسید" /><Button type="button" size="sm" variant="ghost" disabled={!canEdit || !invoice.dueDate} onClick={() => patch('dueDate', undefined)}>پاک‌کردن سررسید</Button></div>
-        </div>
-        <div><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><div className="text-sm font-black">برنامه اقساط (اختیاری)</div><div className="text-[11px] text-slate-500">جمع مبالغ اقساط باید با کل فاکتور برابر باشد؛ این برنامه به‌تنهایی پرداخت ثبت نمی‌کند.</div></div><Button type="button" size="sm" variant="outline" disabled={!canEdit || isPartial} onClick={() => patch('installments', [...(invoice.installments || []), { id: uid('installment'), dueDate: todayIso(), amount: (invoice.installments?.length ? 0 : total) }])}><Plus className="h-3.5 w-3.5" /> افزودن قسط</Button></div>
-          <div className="space-y-2">{(invoice.installments || []).map((installment, index) => <div key={installment.id} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2"><span className="text-xs font-bold text-slate-500">قسط {index + 1}</span><JalaliDatePicker value={installment.dueDate} onChange={(dueDate) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, dueDate } : item))} disabled={!canEdit || isPartial} /><input aria-label={`مبلغ قسط ${index + 1}`} className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" type="number" min="0" value={installment.amount} onChange={(event) => patch('installments', (invoice.installments || []).map((item) => item.id === installment.id ? { ...item, amount: Number(event.target.value) } : item))} disabled={!canEdit || isPartial} /><Button type="button" variant="ghost" size="icon" disabled={!canEdit || isPartial} title="حذف قسط" onClick={() => patch('installments', (invoice.installments || []).filter((item) => item.id !== installment.id))}><Trash2 className="h-4 w-4 text-rose-500" /></Button></div>)}
-            {!!invoice.installments?.length && <div className="text-left text-xs text-slate-500">جمع اقساط: {money(invoice.installments.reduce((sum, item) => sum + Number(item.amount || 0), 0))} · مبلغ فاکتور: {money(total)} {settings.currency}</div>}
-          </div>
-        </div>
       </div>
+      {invoice.kind === 'sale' && <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
+        <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
+        <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>
+      </div>
+      }
     </Panel>}
 
-    <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize}>
+    <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize} data-editing={canEdit && !previewOpen ? 'true' : undefined}>
+      {canEdit && !previewOpen && <>
+        <ElectricBorder className="invoice-edit-border screen-only" color="#51c187" speed={0.6} chaos={0.02} borderRadius={5} />
+        <span className="invoice-edit-label screen-only"><Edit3 className="h-3.5 w-3.5" /> {isPartial ? 'ویرایش محدود فاکتور' : 'در حال ویرایش فاکتور'}</span>
+      </>}
       {isDraft && <div className="print-only print-watermark text-slate-500">پیش‌نویس</div>}
       {isVoid && <div className="print-only print-watermark text-rose-500">باطل</div>}
       {isVoid && <Alert variant="destructive" className="screen-only mb-4 rounded-xl border-rose-200 bg-rose-50 text-sm font-bold text-rose-700 [&>svg]:text-rose-700"><AlertDescription>این فاکتور باطل شده است.{invoice.voidReason ? ' دلیل: ' + invoice.voidReason : ''}</AlertDescription></Alert>}
@@ -765,13 +798,13 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       </fieldset>
     </div>
 
-    {isPartial && mode === 'edit' && <Panel padding="sm" className="screen-only">
+    {isPartial && mode === 'edit' && <Panel padding="sm" className="invoice-editor-followup screen-only">
       <label className="grid gap-2 text-sm font-bold text-slate-700">ویرایش مجاز: توضیحات فاکتور
         <textarea className="min-h-24 rounded-xl border border-slate-200 bg-white p-3 text-sm font-normal" value={invoice.notes} onChange={(event) => patch('notes', event.target.value)} placeholder="توضیحات فاکتور..." />
       </label>
     </Panel>}
 
-    {!!invoice.auditTrail?.length && <Panel padding="sm" className="screen-only">
+    {!!invoice.auditTrail?.length && <Panel padding="sm" className="invoice-editor-followup screen-only">
       <div className="mb-3 flex items-center gap-2 font-black text-slate-800"><History className="h-4 w-4 text-sky-600" /> تاریخچه سند</div>
       <div className="space-y-2">
         {[...invoice.auditTrail].reverse().map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">

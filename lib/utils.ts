@@ -147,6 +147,13 @@ export function invoiceOutstandingAmount(
   return Math.max(0, invoiceTotal(invoice) - returned - settledForInvoice(invoice, payments, checks));
 }
 
+export function invoiceReservedByPendingChecks(invoice: Pick<Invoice, 'id'>, payments: Payment[], checks: CheckRecord[]) {
+  const pendingCheckIds = new Set(checks.filter((check) => check.status === 'pending').map((check) => check.id));
+  return payments
+    .filter((payment) => payment.invoiceId === invoice.id && payment.method === 'check' && payment.checkId && pendingCheckIds.has(payment.checkId))
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+}
+
 export function normalizeDateKey(value: string) {
   if (!value || value === 'ابتدای دوره') return value;
   return normalizeStoredDate(value);

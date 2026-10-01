@@ -1,0 +1,20 @@
+.electric-border {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+}
+.eb-canvas-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.eb-canvas { display: block; }
+.eb-content { position: relative; z-index: 1; border-radius: inherit; }
+.eb-layers { position: absolute; inset: 0; z-index: 0; border-radius: inherit; pointer-events: none; }
+.eb-glow-1, .eb-glow-2, .eb-background-glow { position: absolute; inset: 0; box-sizing: border-box; border-radius: inherit; pointer-events: none; }
+.eb-glow-1 { border: 2px solid color-mix(in srgb, var(--electric-border-color) 60%, transparent); filter: blur(1px); }
+.eb-glow-2 { border: 2px solid var(--electric-border-color); filter: blur(5px); }
+.eb-background-glow { z-index: -1; transform: scale(1.04); filter: blur(24px); opacity: .2; background: linear-gradient(-30deg, var(--electric-border-color), transparent, var(--electric-border-color)); }

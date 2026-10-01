@@ -35,6 +35,7 @@ import type {
 import {
   expectedPaymentDirection,
   invoiceOutstandingAmount,
+  invoiceReservedByPendingChecks,
   invoiceTotal,
   returnDocumentAmount,
   returnedQuantityForItem,
@@ -55,7 +56,7 @@ import {
   reverseActiveSourceEntries,
 } from './accounting';
 import { formatDocumentNumber, normalizeStoredDate } from './standards';
-import { ACCOUNTING_SCHEMA_VERSION, accountingStateStorage } from './storage';
+import { ACCOUNTING_SCHEMA_VERSION, accountingStateStorage, alignAccountingPersistedBaseline } from './storage';
 
 type Store = AccountingData & {
   hydrated: boolean;
@@ -79,6 +80,7 @@ type Store = AccountingData & {
   setInvoiceTemplate: (id: string, templateId: Invoice['templateId']) => StoreOperationResult;
   setInvoicePaperSize: (id: string, paperSize: InvoicePaperSize) => StoreOperationResult;
   finalizeInvoice: (invoice: Invoice) => StoreOperationResult;
+  finalizeInvoiceWithPayment: (invoice: Invoice, payment?: Payment) => StoreOperationResult;
   reviseInvoice: (invoice: Invoice, reason: string) => StoreOperationResult;
   voidInvoice: (id: string, reason: string) => StoreOperationResult;
   deleteInvoice: (id: string) => StoreOperationResult;
@@ -1053,6 +1055,68 @@ export const useAccountingStore = create<Store>()(
         return { ok: true, invoice: saved };
       },
 
+      finalizeInvoiceWithPayment: (invoice, payment) => {
+        const state = get();
+        const previous = state.invoices.find((item) => item.id === invoice.id);
+        if (previous && previous.status !== 'draft') return { ok: false, message: 'این فاکتور قبلاً قطعی شده است.' };
+        const schedule = validateInstallments(invoice);
+        if (!schedule.ok) return schedule;
+        const now = new Date().toISOString();
+        const revision = Math.max(1, previous?.revision || invoice.revision || 0);
+        const base: Invoice = {
+          ...invoice, status: 'final', revision, finalizedAt: previous?.finalizedAt || now,
+          voidedAt: undefined, voidReason: undefined, createdAt: previous?.createdAt || invoice.createdAt || now,
+          updatedAt: now, auditTrail: previous?.auditTrail || invoice.auditTrail || [],
+        };
+        const next: Invoice = { ...base, auditTrail: appendAudit(base, 'finalized', revision) };
+        const valid = validatePosting(state.customers, state.products, next, state.invoices);
+        if (!valid.ok) return valid;
+        const saleSequence = state.settings.numbering.sale;
+        const receiptSequence = state.settings.numbering.receipt;
+        if (invoice.number !== formatDocumentNumber(saleSequence) || (payment && payment.documentNumber !== formatDocumentNumber(receiptSequence))) {
+          return { ok: false, message: 'شماره اسناد تغییر کرده است؛ فروش را دوباره ثبت کنید.' };
+        }
+        if (payment) {
+          if (!['cash', 'card'].includes(payment.method)) return { ok: false, message: 'فروش سریع فقط دریافت نقد یا کارت را می‌پذیرد.' };
+          if (payment.invoiceId !== next.id || payment.customerId !== next.customerId || payment.direction !== 'receipt') {
+            return { ok: false, message: 'مشخصات دریافت با فاکتور فروش همخوانی ندارد.' };
+          }
+          if (!Number.isFinite(payment.amount) || payment.amount <= 0 || payment.amount > invoiceTotal(next)) {
+            return { ok: false, message: 'مبلغ دریافت معتبر نیست.' };
+          }
+          if (state.payments.some((item) => item.id === payment.id || item.documentNumber === payment.documentNumber)) {
+            return { ok: false, message: 'شناسه یا شماره سند دریافت تکراری است.' };
+          }
+          const outstanding = invoiceOutstandingAmount(next, state.payments, state.checks, state.returns);
+          const reserved = invoiceReservedByPendingChecks(next, state.payments, state.checks);
+          if (payment.amount > outstanding - reserved + 0.0001) return { ok: false, message: 'مبلغ دریافت از مانده آزاد فاکتور بیشتر است.' };
+        }
+        const inventory = applyInvoiceInventory(state.products, state.stockMovements, next, 1, 'finalize');
+        if (!inventory.ok) return { ok: false, message: inventory.message };
+        const merged = previous
+          ? state.invoices.map((item) => item.id === next.id ? next : item)
+          : [next, ...state.invoices];
+        const payments = payment ? [payment, ...state.payments] : state.payments;
+        const invoices = withInvoiceStatuses(merged, payments, state.checks, state.returns);
+        const saved = invoices.find((item) => item.id === next.id) || next;
+        const newMovements = inventory.stockMovements.slice(state.stockMovements.length);
+        const journalEntries = [
+          ...state.journalEntries,
+          ...journalForInvoice(next, state.products, newMovements, state.accounts, 'post'),
+          ...(payment ? journalForPayment(payment, state.accounts) : []),
+        ];
+        const settings: BusinessSettings = {
+          ...state.settings,
+          numbering: {
+            ...state.settings.numbering,
+            sale: { ...saleSequence, next: saleSequence.next + 1 },
+            ...(payment ? { receipt: { ...receiptSequence, next: receiptSequence.next + 1 } } : {}),
+          },
+        };
+        set({ settings, products: inventory.products, stockMovements: inventory.stockMovements, invoices, payments, journalEntries });
+        return { ok: true, invoice: saved };
+      },
+
       reviseInvoice: (invoice, reason) => {
         const state = get();
         const previous = state.invoices.find((item) => item.id === invoice.id);
@@ -1347,7 +1411,12 @@ export const useAccountingStore = create<Store>()(
             state.checks,
             state.returns
           );
-          if (Number(payment.amount) > outstanding + 0.0001) {
+          const reservedByOtherPendingChecks = invoiceReservedByPendingChecks(
+            linkedInvoice,
+            state.payments.filter((item) => item.id !== payment.id),
+            state.checks
+          );
+          if (Number(payment.amount) > outstanding - reservedByOtherPendingChecks + 0.0001) {
             return { ok: false, message: 'مبلغ تراکنش از مانده فاکتور بیشتر است.' };
           }
         }
@@ -1734,7 +1803,9 @@ export const useAccountingStore = create<Store>()(
             },
           },
         } as AccountingData;
-        return { ...currentState, ...normalizeAccountingData(data) };
+        const normalized = normalizeAccountingData(data);
+        alignAccountingPersistedBaseline(normalized);
+        return { ...currentState, ...normalized };
       },
       partialize: (state) => ({
         customers: state.customers,

@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
 import { INVOICE_TEMPLATES } from '@/lib/invoice-templates';
-import { clearApplicationDatabase } from '@/lib/storage';
+import { clearApplicationDatabase, flushAccountingPersistence } from '@/lib/storage';
 import type { BusinessSettings, CheckRecord, Customer, InvoiceKind, Payment, Product, StockMovement } from '@/lib/types';
 import { buildCustomerLedger, customerNetBalance, effectivePaymentAmount, invoiceOutstandingAmount, invoiceTotal, money, normalizeDateKey, resolvedPaymentDirection, settledForInvoice, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso, validateOfficialFields } from '@/lib/standards';
@@ -120,6 +120,7 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
   const [edit, setEdit] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [open, setOpen] = useState(false);
+  const [formError, setFormError] = useState('');
   const customerDraft = useUnsavedDraft<Customer>('طرف حساب');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('active');
   const list = customers.filter((customer) =>
@@ -143,20 +144,24 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
       priceGroup: '',
     };
     customerDraft.markClean(draft);
+    setFormError('');
     setEdit(draft);
     setOpen(true);
   };
 
   const closeCustomerForm = () => customerDraft.requestClose(edit, () => setOpen(false));
 
-  const saveCustomer = () => {
+  const saveCustomer = async () => {
     if (!edit) return;
+    setFormError('');
     const errors = validateOfficialFields(edit);
     if (errors.length) {
-      notify(errors.join('\n'), 'error');
+      setFormError(errors.join(' '));
       return;
     }
     upsertCustomer(edit);
+    try { await flushAccountingPersistence(); }
+    catch (error) { setFormError(error instanceof Error ? error.message : 'ذخیره مشتری روی سرور انجام نشد. اطلاعات فرم حفظ شد.'); return; }
     customerDraft.markClean(edit);
     setOpen(false);
   };
@@ -206,7 +211,8 @@ export function CustomersView({ onOpenLedger }: { onOpenLedger?: (customerId: st
           <DialogDescription className="text-sm text-slate-500">اطلاعات حقوقی برای فاکتور رسمی قابل استفاده است. مانده اول دوره فقط هنگام ساخت طرف حساب تعیین می‌شود.</DialogDescription>
         </DialogHeader>
         {edit && <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+          {formError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2">{formError}</p>}
+          <Field label="نام *"><Input value={edit.name} aria-invalid={!edit.name.trim()} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد شخص"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
           <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as Customer['kind'] })}><option value="customer">مشتری</option><option value="supplier">تامین‌کننده</option><option value="both">هر دو</option></select></Field>
           <Field label="وضعیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value as Customer['status'] })}><option value="active">فعال</option><option value="archived">آرشیو</option></select></Field>
@@ -397,6 +403,7 @@ export function ProductsView() {
   const [edit, setEdit] = useState<Product | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [open, setOpen] = useState(false);
+  const [formError, setFormError] = useState('');
   const [archiveFilter, setArchiveFilter] = useState<'active' | 'archived' | 'all'>('active');
   const [priceCustomerId, setPriceCustomerId] = useState('');
   const [priceCustomerAmount, setPriceCustomerAmount] = useState('');
@@ -408,6 +415,7 @@ export function ProductsView() {
     const draft = product ? { ...product } : { id: uid('prd'), code: String(1000 + products.length + 1), name: '', kind: 'product' as const, unit: 'عدد', salePrice: 0, buyPrice: 0, averageCost: 0, stock: 0, minStock: 0, sku: '', barcode: '', category: '', archived: false, customerPrices: {}, customerGroupPrices: {} };
     setPriceCustomerId(''); setPriceCustomerAmount(''); setPriceGroupName(''); setPriceGroupAmount('');
     productDraft.markClean(draft);
+    setFormError('');
     setEdit(draft);
     setOpen(true);
   };
@@ -438,6 +446,7 @@ export function ProductsView() {
       <DialogContent>
         <DialogHeader><div className="flex flex-wrap items-center gap-2"><DialogTitle className="text-lg font-black">تعریف کالا / خدمت</DialogTitle><UnsavedChangesBadge visible={productDraft.hasChanges(edit)} /></div><DialogDescription className="text-sm text-slate-500">موجودی اولیه فقط هنگام ایجاد کالا قابل ثبت است. بعد از آن هر تغییر موجودی در کاردکس ثبت می‌شود.</DialogDescription></DialogHeader>
         {edit && <div className="grid gap-3 sm:grid-cols-2">
+          {formError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2">{formError}</p>}
           <Field label="نام *"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
           <Field label="کد"><Input value={edit.code} onChange={(e) => setEdit({ ...edit, code: e.target.value })} /></Field>
           <Field label="SKU"><Input value={edit.sku || ''} onChange={(e) => setEdit({ ...edit, sku: e.target.value })} /></Field>
@@ -455,7 +464,7 @@ export function ProductsView() {
             <Field label="حداقل موجودی"><FormattedInput min={0} value={edit.minStock} onValueChange={(minStock) => setEdit({ ...edit, minStock })} /></Field>
           </>}
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 sm:col-span-2"><div className="text-xs font-black">قیمت‌های ویژه فروش</div><div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]"><select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" value={priceCustomerId} onChange={(event) => setPriceCustomerId(event.target.value)}><option value="">مشتری</option>{customers.filter((customer) => customer.kind !== 'supplier').map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select><Input type="number" min="0" placeholder="قیمت مشتری" value={priceCustomerAmount} onChange={(event) => setPriceCustomerAmount(event.target.value)} /><Button type="button" variant="outline" onClick={() => { if (!priceCustomerId || Number(priceCustomerAmount) < 0) return; setEdit({ ...edit, customerPrices: { ...(edit.customerPrices || {}), [priceCustomerId]: Number(priceCustomerAmount) } }); }}>افزودن</Button></div><div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]"><Input placeholder="گروه مشتری (مثلاً همکار)" value={priceGroupName} onChange={(event) => setPriceGroupName(event.target.value)} /><Input type="number" min="0" placeholder="قیمت گروه" value={priceGroupAmount} onChange={(event) => setPriceGroupAmount(event.target.value)} /><Button type="button" variant="outline" onClick={() => { const key = priceGroupName.trim(); if (!key || Number(priceGroupAmount) < 0) return; setEdit({ ...edit, customerGroupPrices: { ...(edit.customerGroupPrices || {}), [key]: Number(priceGroupAmount) } }); }}>ثبت قیمت گروه</Button></div><div className="flex flex-wrap gap-2 text-[11px] text-slate-500">{Object.entries(edit.customerPrices || {}).map(([id, price]) => <span key={id} className="rounded-lg bg-white px-2 py-1">{customers.find((customer) => customer.id === id)?.name || id}: {money(price)}</span>)}{Object.entries(edit.customerGroupPrices || {}).map(([group, price]) => <span key={group} className="rounded-lg bg-white px-2 py-1">گروه {group}: {money(price)}</span>)}</div></div>
-          <div className="flex items-center justify-between gap-2 sm:col-span-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(edit.archived)} onChange={(event) => setEdit({ ...edit, archived: event.target.checked })} /> آرشیو شده</label><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => void closeProductForm()}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={() => { const result = upsertProduct(edit); if (!result.ok) { notify(result.message || 'ذخیره کالا انجام نشد.', 'error'); return; } productDraft.markClean(edit); setOpen(false); }}>ذخیره</Button></div></div>
+          <div className="flex items-center justify-between gap-2 sm:col-span-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(edit.archived)} onChange={(event) => setEdit({ ...edit, archived: event.target.checked })} /> آرشیو شده</label><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => void closeProductForm()}>انصراف</Button><Button disabled={!edit.name.trim()} onClick={async () => { setFormError(''); const result = upsertProduct(edit); if (!result.ok) { setFormError(result.message || 'ذخیره کالا انجام نشد.'); return; } try { await flushAccountingPersistence(); } catch (error) { setFormError(error instanceof Error ? error.message : 'ذخیره کالا روی سرور انجام نشد. اطلاعات فرم حفظ شد.'); return; } productDraft.markClean(edit); setOpen(false); }}>ذخیره</Button></div></div>
         </div>}
       </DialogContent>
     </Dialog>
@@ -623,6 +632,7 @@ function stockMovementLabel(movement: StockMovement) {
 export function PaymentsView() {
   const { payments, customers, invoices, checks, returns, reserveDocumentNumber, addPayment, deletePayment, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
+  const [formError, setFormError] = useState('');
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [q, setQ] = useState('');
   const emptyPayment = (direction: Payment['direction'] = 'receipt', documentNumber = ''): Payment => ({
@@ -642,6 +652,7 @@ export function PaymentsView() {
 
   const start = (direction: Payment['direction'] = 'receipt') => {
     setForm(emptyPayment(direction, reserveDocumentNumber(direction)));
+    setFormError('');
     setOpen(true);
   };
 
@@ -711,12 +722,15 @@ export function PaymentsView() {
     });
   };
 
-  const submit = () => {
+  const submit = async () => {
+    setFormError('');
     const result = addPayment(form);
     if (!result.ok) {
-      notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
+      setFormError(result.message || 'ثبت تراکنش انجام نشد.');
       return;
     }
+    try { await flushAccountingPersistence(); }
+    catch (error) { setFormError(error instanceof Error ? error.message : 'ذخیره دریافت روی سرور انجام نشد. اطلاعات فرم حفظ شد.'); return; }
     setOpen(false);
   };
 
@@ -780,6 +794,7 @@ export function PaymentsView() {
           <DialogDescription className="text-sm text-slate-500">فاکتور فروش فقط با دریافت و فاکتور خرید فقط با پرداخت تسویه می‌شود. چک تا زمان وصول/پاس شدن روی تسویه اثر ندارد.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
+          {formError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2">{formError}</p>}
           <Field label="نوع تراکنش">
             <select className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm" value={form.direction} onChange={(e) => { const direction = e.target.value as Payment['direction']; setForm({ ...form, direction, documentNumber: reserveDocumentNumber(direction), invoiceId: '', checkId: undefined }); }}>
               <option value="receipt">دریافت</option><option value="payment">پرداخت</option>
@@ -811,7 +826,7 @@ export function PaymentsView() {
           <Field label="شماره پیگیری / مرجع"><Input value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
           <Field label="توضیحات"><Input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           {form.method === 'check' && <div className="sm:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">تراکنش چکی هنگام ثبت ایجاد می‌شود، اما تا زمانی که وضعیت چک «وصول/پاس شده» نباشد، مبلغ آن در مانده تسویه فاکتور محاسبه نمی‌شود.</div>}
-          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!form.customerId || form.amount <= 0 || (form.method === 'check' && !form.checkId)} onClick={submit}>ثبت {form.direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Button></div>
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button><Button disabled={!form.customerId || form.amount <= 0 || (form.method === 'check' && !form.checkId)} onClick={() => void submit()}>ثبت {form.direction === 'receipt' ? 'دریافت' : 'پرداخت'}</Button></div>
         </div>
       </DialogContent>
     </Dialog>
@@ -837,6 +852,7 @@ export function PaymentsView() {
 export function ChecksView({ initialCheckId }: { initialCheckId?: string | null } = {}) {
   const { checks, payments, customers, reserveDocumentNumber, upsertCheck, deleteCheck, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
+  const [formError, setFormError] = useState('');
   const [selectedCheck, setSelectedCheck] = useState<CheckRecord | null>(null);
   const [filter, setFilter] = useState('all');
   const [form, setForm] = useState<CheckRecord>({ id: '', documentNumber: '', direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
@@ -855,6 +871,7 @@ export function ChecksView({ initialCheckId }: { initialCheckId?: string | null 
   const start = (check?: CheckRecord) => {
     setForm(check ? { ...check } : { id: uid('chk'), documentNumber: reserveDocumentNumber('check'), direction: 'received', customerId: '', amount: 0, dueDate: todayIso(), number: '', bank: '', owner: '', status: 'pending', notes: '' });
     setOpen(true);
+    setFormError('');
   };
   const list = checks.filter((check) => filter === 'all' || check.status === filter);
   const customerName = (id: string) => customers.find((customer) => customer.id === id)?.name || '—';
@@ -878,9 +895,11 @@ export function ChecksView({ initialCheckId }: { initialCheckId?: string | null 
     }
     const result = upsertCheck(form);
     if (!result.ok) {
-      notify(result.message || 'ذخیره چک انجام نشد.', 'error');
+      setFormError(result.message || 'ذخیره چک انجام نشد.');
       return;
     }
+    try { await flushAccountingPersistence(); }
+    catch (error) { setFormError(error instanceof Error ? error.message : 'ذخیره چک روی سرور انجام نشد. اطلاعات فرم حفظ شد.'); return; }
     setOpen(false);
   };
 
@@ -917,6 +936,7 @@ export function ChecksView({ initialCheckId }: { initialCheckId?: string | null 
       <DialogContent>
         <DialogHeader><DialogTitle className="text-lg font-black">ثبت / ویرایش چک</DialogTitle><DialogDescription className="text-sm text-slate-500">{linkedPayment ? 'این چک به تراکنش متصل است؛ نوع، طرف حساب و مبلغ قفل هستند. تغییر وضعیت چک، تسویه فاکتور را خودکار باز محاسبه می‌کند.' : 'چک می‌تواند بعداً از بخش دریافت و پرداخت به یک تراکنش متصل شود.'}</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
+          {formError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2">{formError}</p>}
           <Field label="نوع"><select disabled={!!linkedPayment} className="h-10 w-full rounded-xl border border-slate-200 px-3 disabled:bg-slate-100" value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value as CheckRecord['direction'] })}><option value="received">دریافتی</option><option value="issued">پرداختی</option></select></Field>
           <Field label="طرف حساب"><select disabled={!!linkedPayment} className="h-10 w-full rounded-xl border border-slate-200 px-3 disabled:bg-slate-100" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}><option value="">انتخاب...</option>{customers.filter((customer) => customer.status !== 'archived' || customer.id === form.customerId).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></Field>
           <Field label="شماره چک"><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></Field>
@@ -974,7 +994,7 @@ export function SettingsView() {
 
   const resetDatabase = async () => {
     const approved = await confirmDialog(
-      'همه اطلاعات این مرورگر، از جمله اسناد، نسخه‌های پشتیبان و حساب‌های ورود حذف می‌شوند. پس از پاک‌سازی باید حساب مدیر اول را دوباره بسازید. این عملیات قابل بازگشت نیست.',
+      'اسناد و تنظیمات حسابداری پاک می‌شوند. پیش از پاک‌سازی یک Snapshot کامل ساخته می‌شود؛ حساب مدیر و Snapshotها باقی می‌مانند. این عملیات را می‌توان با بازیابی Snapshot برگرداند.',
       { title: 'پاک‌کردن کل پایگاه داده', confirmLabel: 'پاک‌کردن و شروع دوباره', danger: true }
     );
     if (!approved) return;

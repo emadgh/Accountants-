@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { AccountingData } from '@/lib/types';
 import { createAccountingBackup, parseAccountingBackup } from '@/lib/backup';
@@ -11,11 +11,13 @@ import { getServerDatabase } from '@/lib/persistence/server-database';
 import { attachmentFileStore } from '@/lib/persistence/attachment-files';
 import { clearAccountingData, loadAccountingData, replaceAccountingData } from '@/lib/persistence/repositories/accounting';
 import { inspectZipArchive } from '@/lib/zip-limits';
+import { createFullAccountingSnapshot, deleteAccountingSnapshot, installSnapshotAttachments, listAccountingSnapshotMetadata, readAccountingSnapshot } from '@/lib/persistence/snapshots';
+import { revisionAdvanceStatement } from '@/lib/persistence/revision';
+import { validateAccountingData } from '@/lib/accounting-validation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const MAX_SNAPSHOTS = 15;
 const MAX_BACKUP_ARCHIVE_BYTES = 200 * 1024 * 1024;
 const MAX_BACKUP_EXPANDED_BYTES = 300 * 1024 * 1024;
 
@@ -39,18 +41,6 @@ function hasBackupToken(request: NextRequest) {
 
 function isAdmin(user: { role: string; permissions: string[] }) {
   return user.role === 'admin' || user.permissions.includes('*');
-}
-
-function createSnapshot(data: AccountingData, reason: SnapshotReason) {
-  const db = getServerDatabase();
-  const createdAt = new Date().toISOString();
-  const id = `${reason}-${createdAt}-${randomUUID()}`;
-  const payload = JSON.stringify(data);
-  db.prepare('INSERT INTO snapshots(id, created_at, reason, size, payload) VALUES (?, ?, ?, ?, ?)')
-    .run(id, createdAt, reason, payload.length, payload);
-  db.prepare('DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY created_at DESC LIMIT ?)')
-    .run(MAX_SNAPSHOTS);
-  return id;
 }
 
 function hasDataShape(value: unknown): value is AccountingData {
@@ -91,8 +81,7 @@ export async function GET(request: NextRequest) {
       });
     }
     if (action === 'snapshot.list') {
-      const snapshots = db.prepare('SELECT id, created_at AS createdAt, reason, size FROM snapshots ORDER BY created_at DESC')
-        .all() as Array<{ id: string; createdAt: string; reason: SnapshotReason; size: number }>;
+      const snapshots = await listAccountingSnapshotMetadata();
       return NextResponse.json({ snapshots });
     }
     if (action === 'info') {
@@ -128,7 +117,18 @@ export async function POST(request: NextRequest) {
     try {
       const form = await request.formData();
       const file = form.get('file');
+      const expectedRevision = Number(form.get('expectedRevision'));
+      const commandId = String(form.get('commandId') || '');
       if (!(file instanceof File) || file.size > MAX_BACKUP_ARCHIVE_BYTES) return NextResponse.json({ error: 'فایل ZIP معتبر نیست یا بیش از حد بزرگ است.' }, { status: 400 });
+      if (!Number.isInteger(expectedRevision) || !/^[A-Za-z0-9_-]{12,100}$/.test(commandId)) return NextResponse.json({ error: 'شناسه فرمان یا شماره بازنگری import معتبر نیست.' }, { status: 400 });
+      const prior = db.prepare('SELECT user_id AS userId, response_json AS responseJson FROM accounting_commands WHERE command_id = ? LIMIT 1')
+        .get(commandId) as { userId: string; responseJson: string } | undefined;
+      if (prior) {
+        if (prior.userId !== user.id) return NextResponse.json({ error: 'شناسه فرمان قبلاً استفاده شده است.' }, { status: 409 });
+        return NextResponse.json(JSON.parse(prior.responseJson));
+      }
+      const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0);
+      if (revision !== expectedRevision) return NextResponse.json({ error: 'داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.' }, { status: 409 });
       const archiveBytes = new Uint8Array(await file.arrayBuffer());
       const zipInspection = inspectZipArchive(archiveBytes, MAX_BACKUP_EXPANDED_BYTES);
       if (!zipInspection.ok) {
@@ -141,6 +141,8 @@ export async function POST(request: NextRequest) {
       const manifest = archive['backup.json'];
       if (!manifest) return NextResponse.json({ error: 'فایل backup.json در بسته پیدا نشد.' }, { status: 400 });
       const { data } = await parseAccountingBackup(strFromU8(manifest));
+      const validation = validateAccountingData(data);
+      if (!validation.ok) return NextResponse.json({ error: validation.message }, { status: 400 });
       const expectedKeys = new Set<string>();
       for (const attachment of data.attachments || []) {
         if (!keyIsSafeForMetadata(attachment.storageKey) || (attachment.thumbnailKey && !keyIsSafeForMetadata(attachment.thumbnailKey))) {
@@ -187,11 +189,14 @@ export async function POST(request: NextRequest) {
       }
 
       const current = await loadAccountingData();
-      if (current) createSnapshot(current, 'before-import');
-      await replaceAccountingData(data);
-      const nextRevision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0) + 1;
-      db.prepare("INSERT INTO app_meta(key, value) VALUES ('accounting-state-revision', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(nextRevision));
-      return NextResponse.json({ ok: true, revision: nextRevision });
+      if (current) await createFullAccountingSnapshot(current, 'before-import');
+      const nextRevision = expectedRevision + 1;
+      const response = { ok: true, revision: nextRevision };
+      await replaceAccountingData(data, { transactionStatements: [
+        revisionAdvanceStatement(expectedRevision, nextRevision),
+        { sql: 'INSERT INTO accounting_commands(command_id, user_id, revision, response_json, created_at) VALUES (?, ?, ?, ?, ?)', bind: [commandId, user.id, nextRevision, JSON.stringify(response), new Date().toISOString()] },
+      ] });
+      return NextResponse.json(response);
     } catch (error) {
       for (const key of createdFiles) { try { attachmentFileStore.remove(key); } catch { /* best effort cleanup */ } }
       const message = error instanceof Error ? error.message : 'بازیابی بسته پشتیبان انجام نشد.';
@@ -208,31 +213,73 @@ export async function POST(request: NextRequest) {
       const data = await loadAccountingData();
       if (!data) return NextResponse.json({ id: null });
       const reason: SnapshotReason = body.reason === 'migration' ? 'migration' : 'manual';
-      return NextResponse.json({ id: createSnapshot(data, reason) });
+      return NextResponse.json({ id: await createFullAccountingSnapshot(data, reason), format: 'full' });
     }
     if (body.action === 'snapshot.delete') {
       if (typeof body.id !== 'string') return NextResponse.json({ error: 'شناسه Snapshot معتبر نیست.' }, { status: 400 });
-      db.prepare('DELETE FROM snapshots WHERE id = ?').run(body.id);
+      deleteAccountingSnapshot(body.id);
       return NextResponse.json({ ok: true });
     }
     if (body.action === 'snapshot.restore') {
-      if (typeof body.id !== 'string') return NextResponse.json({ error: 'شناسه Snapshot معتبر نیست.' }, { status: 400 });
-      const row = db.prepare('SELECT payload FROM snapshots WHERE id = ? LIMIT 1').get(body.id) as { payload?: string } | undefined;
-      if (!row?.payload) return NextResponse.json({ error: 'Snapshot پیدا نشد.' }, { status: 404 });
-      const data = JSON.parse(row.payload) as unknown;
+      if (typeof body.id !== 'string' || typeof body.commandId !== 'string' || !/^[A-Za-z0-9_-]{12,100}$/.test(body.commandId)) return NextResponse.json({ error: 'شناسه Snapshot یا فرمان معتبر نیست.' }, { status: 400 });
+      if (!Number.isInteger(body.expectedRevision)) return NextResponse.json({ error: 'شماره بازنگری Snapshot معتبر نیست.' }, { status: 400 });
+      const commandId = body.commandId;
+      const prior = db.prepare('SELECT user_id AS userId, response_json AS responseJson FROM accounting_commands WHERE command_id = ? LIMIT 1')
+        .get(commandId) as { userId: string; responseJson: string } | undefined;
+      if (prior) {
+        if (prior.userId !== user.id) return NextResponse.json({ error: 'شناسه فرمان قبلاً استفاده شده است.' }, { status: 409 });
+        return NextResponse.json(JSON.parse(prior.responseJson));
+      }
+      const expectedRevision = Number(body.expectedRevision);
+      const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0);
+      if (revision !== expectedRevision) return NextResponse.json({ error: 'داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.' }, { status: 409 });
+      const snapshot = await readAccountingSnapshot(body.id);
+      const { data } = snapshot;
       if (!hasDataShape(data)) return NextResponse.json({ error: 'ساختار Snapshot معتبر نیست.' }, { status: 400 });
+      const validation = validateAccountingData(data);
+      if (!validation.ok) return NextResponse.json({ error: validation.message }, { status: 400 });
       const current = await loadAccountingData();
-      if (current) createSnapshot(current, 'before-restore');
-      await replaceAccountingData(data);
-      const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0) + 1;
-      db.prepare("INSERT INTO app_meta(key, value) VALUES ('accounting-state-revision', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(revision));
-      return NextResponse.json({ ok: true });
+      if (current) await createFullAccountingSnapshot(current, 'before-restore');
+      const rollbackFiles = installSnapshotAttachments(data, snapshot.files);
+      const nextRevision = expectedRevision + 1;
+      const response = { ok: true, revision: nextRevision, format: snapshot.format };
+      try {
+        await replaceAccountingData(data, { transactionStatements: [
+          revisionAdvanceStatement(expectedRevision, nextRevision),
+          { sql: 'INSERT INTO accounting_commands(command_id, user_id, revision, response_json, created_at) VALUES (?, ?, ?, ?, ?)', bind: [commandId, user.id, nextRevision, JSON.stringify(response), new Date().toISOString()] },
+        ] });
+      } catch (error) {
+        rollbackFiles();
+        throw error;
+      }
+      return NextResponse.json(response);
     }
     if (body.action === 'database.clear') {
-      await clearAccountingData();
-      const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0) + 1;
-      db.prepare("INSERT INTO app_meta(key, value) VALUES ('accounting-state-revision', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(revision));
-      return NextResponse.json({ ok: true, revision });
+      const expectedRevision = Number(body.expectedRevision);
+      const commandId = body.commandId;
+      if (!Number.isInteger(expectedRevision) || typeof commandId !== 'string' || !/^[A-Za-z0-9_-]{12,100}$/.test(commandId)) {
+        return NextResponse.json({ error: 'شناسه فرمان یا شماره بازنگری پاک‌سازی معتبر نیست.' }, { status: 400 });
+      }
+      const prior = db.prepare('SELECT user_id AS userId, response_json AS responseJson FROM accounting_commands WHERE command_id = ? LIMIT 1')
+        .get(commandId) as { userId: string; responseJson: string } | undefined;
+      if (prior) {
+        if (prior.userId !== user.id) return NextResponse.json({ error: 'شناسه فرمان قبلاً استفاده شده است.' }, { status: 409 });
+        return NextResponse.json(JSON.parse(prior.responseJson));
+      }
+      const current = await loadAccountingData();
+      if (current) await createFullAccountingSnapshot(current, 'before-clear');
+      const revision = expectedRevision + 1;
+      const response = { ok: true, revision };
+      await clearAccountingData([
+        revisionAdvanceStatement(expectedRevision, revision),
+        { sql: 'INSERT INTO accounting_commands(command_id, user_id, revision, response_json, created_at) VALUES (?, ?, ?, ?, ?)', bind: [commandId, user.id, revision, JSON.stringify(response), new Date().toISOString()] },
+      ]);
+      for (const attachment of current?.attachments || []) {
+        for (const key of [attachment.storageKey, attachment.thumbnailKey].filter((item): item is string => !!item)) {
+          try { attachmentFileStore.remove(key); } catch { /* database is cleared; an orphan can be cleaned later */ }
+        }
+      }
+      return NextResponse.json(response);
     }
     if (body.action === 'yas.history') {
       if (typeof body.fingerprint !== 'string') return NextResponse.json({ error: 'Fingerprint معتبر نیست.' }, { status: 400 });
@@ -242,7 +289,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ error: 'عملیات شناخته‌شده نیست.' }, { status: 400 });
-  } catch {
-    return NextResponse.json({ error: 'عملیات ذخیره‌سازی انجام نشد.' }, { status: 409 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'عملیات ذخیره‌سازی انجام نشد.' }, { status: 409 });
   }
 }

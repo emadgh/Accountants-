@@ -28,6 +28,8 @@ export function BusinessProfilesView() {
   const [newProfileDraft, setNewProfileDraft] = useState<BusinessProfile | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const retainedDraftId = useRef<string | null>(null);
+  const lastSelectedProfileId = useRef(selectedProfileId);
   const isCreatingProfile = newProfileDraft?.id === selectedProfileId;
   const profileTabListRef = useRef<HTMLDivElement>(null);
   const selectedProfile = settings.businessProfiles.find((profile) => profile.id === selectedProfileId)
@@ -36,6 +38,11 @@ export function BusinessProfilesView() {
   const [profileDraft, setProfileDraft] = useState<BusinessProfile>(() => structuredClone(selectedProfile));
 
   useEffect(() => {
+    if (lastSelectedProfileId.current !== selectedProfileId) {
+      lastSelectedProfileId.current = selectedProfileId;
+      retainedDraftId.current = null;
+    }
+    if (retainedDraftId.current === selectedProfileId) return;
     const profile = settings.businessProfiles.find((item) => item.id === selectedProfileId);
     // A new profile is intentionally kept as a local draft until the user saves it.
     if (profile) setProfileDraft(structuredClone(profile));
@@ -157,14 +164,18 @@ export function BusinessProfilesView() {
       }
 
       await flushAccountingPersistence();
+      retainedDraftId.current = null;
       if (creatingProfile) setNewProfileDraft(null);
       setSelectedProfileId(savedProfile.id);
       setProfileDraft(savedProfile);
       notify(creatingProfile ? 'کسب‌وکار جدید ثبت شد.' : 'پروفایل کسب‌وکار ذخیره شد.', 'success');
-    } catch {
+    } catch (error) {
+      retainedDraftId.current = profileDraft.id;
+      setProfileDraft(profileDraft);
+      const detail = error instanceof Error ? ` ${error.message}` : '';
       setProfileSaveError(creatingProfile
-        ? 'ذخیره در پایگاه‌داده انجام نشد؛ پیش‌نویس کسب‌وکار حفظ شده است. پس از بررسی خطا دوباره ثبت کنید.'
-        : 'ذخیره در پایگاه‌داده انجام نشد.');
+        ? `ذخیره در پایگاه‌داده انجام نشد؛ پیش‌نویس کسب‌وکار حفظ شده است.${detail}`
+        : `ذخیره در پایگاه‌داده انجام نشد.${detail}`);
     } finally {
       setIsSavingProfile(false);
     }

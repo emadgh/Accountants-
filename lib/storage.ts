@@ -1,15 +1,18 @@
 import type { AccountingData } from './types';
+import { buildAccountingMutations } from './accounting-commands';
+import { createEmptyAccountingData } from './data';
 
 export const ACCOUNTING_PERSIST_KEY = 'accountants-web-v1';
 export const ACCOUNTING_SCHEMA_VERSION = 9;
 
-export type SnapshotReason = 'auto' | 'manual' | 'before-import' | 'before-restore' | 'migration';
+export type SnapshotReason = 'auto' | 'manual' | 'before-import' | 'before-restore' | 'before-clear' | 'migration';
 
 export interface AccountingSnapshotMeta {
   id: string;
   createdAt: string;
   reason: SnapshotReason;
   size: number;
+  format?: 'full' | 'data-only';
 }
 
 export interface YasImportHistory {
@@ -22,15 +25,38 @@ type AccountingEnvelope = { state: AccountingData; version: number };
 
 let writeQueue: Promise<void> = Promise.resolve();
 let persistedRevision: number | null = null;
+let persistedData: AccountingData | null = null;
+let lastPersistenceError: unknown = null;
+
+class AccountingApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'AccountingApiError';
+  }
+}
 
 function emitPersistenceError(error: unknown) {
   if (typeof window === 'undefined') return;
   const message = error instanceof Error ? error.message : String(error);
-  window.dispatchEvent(new CustomEvent('accounting:persistence-error', { detail: message }));
+  const detail = error instanceof AccountingApiError
+    ? { message, code: error.code, status: error.status }
+    : { message };
+  window.dispatchEvent(new CustomEvent('accounting:persistence-error', { detail }));
 }
 
 export function flushAccountingPersistence() {
-  return writeQueue;
+  return writeQueue.then(() => {
+    if (!lastPersistenceError) return;
+    const error = lastPersistenceError;
+    lastPersistenceError = null;
+    throw error;
+  });
+}
+
+export function alignAccountingPersistedBaseline(data: AccountingData) {
+  // Zustand normalizes legacy records on hydration. Compare later edits with
+  // that same view so a profile save does not resend old invoices or products.
+  persistedData = data;
 }
 
 async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -39,8 +65,8 @@ async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'same-origin',
     headers: { ...(init?.headers || {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
   });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || 'ذخیره‌سازی داده انجام نشد.');
+  const payload = await response.json().catch(() => ({})) as T & { error?: string; code?: string };
+  if (!response.ok) throw new AccountingApiError(payload.error || `ذخیره‌سازی داده انجام نشد (HTTP ${response.status}).`, response.status, payload.code);
   return payload;
 }
 
@@ -57,48 +83,65 @@ export async function initializeFirstRunAccountingData(data: AccountingData) {
 }
 
 export async function clearApplicationDatabase() {
-  const result = await requestApi<{ revision: number }>('/api/storage', { method: 'POST', body: JSON.stringify({ action: 'database.clear' }) });
+  const result = await requestApi<{ revision: number }>('/api/storage', { method: 'POST', body: JSON.stringify({ action: 'database.clear', expectedRevision: persistedRevision ?? 0, commandId: crypto.randomUUID().replace(/-/g, '') }) });
   persistedRevision = result.revision;
+  persistedData = null;
 }
 
 export const accountingStateStorage = {
   async getItem(_name: string) {
-    await writeQueue;
+    // A failed write must not poison subsequent reads. Rehydrate should still
+    // fetch the last committed state from the server after a rejected command.
+    await writeQueue.catch(() => undefined);
     const result = await requestApi<{ data: AccountingData | null; revision: number }>('/api/accounting-data', { cache: 'no-store' });
     persistedRevision = result.revision;
+    persistedData = result.data;
     return result.data ? JSON.stringify({ state: result.data, version: ACCOUNTING_SCHEMA_VERSION }) : null;
   },
 
   async setItem(_name: string, value: string) {
-    writeQueue = writeQueue
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          const envelope = dataFromEnvelope(value);
-          const result = await requestApi<{ revision: number }>('/api/accounting-data', {
-            method: 'PUT',
-            body: JSON.stringify({ ...envelope, expectedRevision: persistedRevision }),
-          });
-          persistedRevision = result.revision;
-        } catch (error) {
-          emitPersistenceError(error);
-          throw error;
-        }
+    const operation = writeQueue.then(async () => {
+      const envelope = dataFromEnvelope(value);
+      const baseline = persistedData || createEmptyAccountingData();
+      const commands = buildAccountingMutations(baseline, envelope.state);
+      if (!commands.length) {
+        persistedData = envelope.state;
+        return;
+      }
+      const body = JSON.stringify({
+        commandId: crypto.randomUUID().replace(/-/g, ''),
+        expectedRevision: persistedRevision,
+        commands,
       });
+      let result: { revision: number };
+      try {
+        result = await requestApi('/api/accounting-data/commands', { method: 'POST', body });
+      } catch (firstError) {
+        // Reuse the same ID: if the first response was lost after commit,
+        // the server returns the original result without applying it twice.
+        try {
+          result = await requestApi('/api/accounting-data/commands', { method: 'POST', body });
+        } catch {
+          throw firstError;
+        }
+      }
+      persistedRevision = result.revision;
+      persistedData = envelope.state;
+      lastPersistenceError = null;
+    });
+    writeQueue = operation.catch((error) => {
+      lastPersistenceError = error;
+      emitPersistenceError(error);
+    });
     return writeQueue;
   },
 
   async removeItem(_name: string) {
-    writeQueue = writeQueue
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          await clearApplicationDatabase();
-        } catch (error) {
-          emitPersistenceError(error);
-          throw error;
-        }
-      });
+    const operation = writeQueue.then(() => clearApplicationDatabase());
+    writeQueue = operation.catch((error) => {
+      lastPersistenceError = error;
+      emitPersistenceError(error);
+    });
     return writeQueue;
   },
 };
@@ -123,36 +166,61 @@ export async function deleteAccountingSnapshot(id: string) {
 }
 
 export async function restoreAccountingSnapshot(id: string) {
-  await requestApi('/api/storage', { method: 'POST', body: JSON.stringify({ action: 'snapshot.restore', id }) });
+  await requestApi('/api/storage', { method: 'POST', body: JSON.stringify({ action: 'snapshot.restore', id, expectedRevision: persistedRevision ?? 0, commandId: crypto.randomUUID().replace(/-/g, '') }) });
+  const latest = await requestApi<{ data: AccountingData | null; revision: number }>('/api/accounting-data', { cache: 'no-store' });
+  persistedData = latest.data;
+  persistedRevision = latest.revision;
 }
 
 export async function importAccountingData(data: AccountingData) {
   await writeQueue;
   const result = await requestApi<{ revision: number }>('/api/accounting-data', {
     method: 'PUT',
-    body: JSON.stringify({ state: data, version: ACCOUNTING_SCHEMA_VERSION, replace: true, expectedRevision: persistedRevision }),
+    body: JSON.stringify({ state: data, version: ACCOUNTING_SCHEMA_VERSION, replace: true, expectedRevision: persistedRevision, commandId: crypto.randomUUID().replace(/-/g, '') }),
   });
   persistedRevision = result.revision;
+  persistedData = data;
 }
 
 export async function importAccountingArchive(file: File) {
   await writeQueue;
   const form = new FormData();
   form.set('file', file, file.name);
+  form.set('expectedRevision', String(persistedRevision ?? 0));
+  form.set('commandId', crypto.randomUUID().replace(/-/g, ''));
   const response = await fetch('/api/storage?action=backup.import', { method: 'POST', body: form, credentials: 'same-origin' });
   const result = await response.json() as { revision?: number; error?: string };
   if (!response.ok) throw new Error(result.error || 'بازیابی بسته پشتیبان انجام نشد.');
   persistedRevision = result.revision ?? persistedRevision;
+  const latest = await requestApi<{ data: AccountingData | null; revision: number }>('/api/accounting-data', { cache: 'no-store' });
+  persistedData = latest.data;
+  persistedRevision = latest.revision;
 }
 
 export async function uploadProjectAttachment(projectId: string, file: File) {
   const form = new FormData();
   form.set('projectId', projectId);
   form.set('file', file, file.name);
-  const response = await fetch('/api/attachments', { method: 'POST', body: form, credentials: 'same-origin' });
+  form.set('expectedRevision', String(persistedRevision ?? 0));
+  form.set('commandId', crypto.randomUUID().replace(/-/g, ''));
+  let response: Response;
+  try {
+    response = await fetch('/api/attachments', { method: 'POST', body: form, credentials: 'same-origin' });
+  } catch (firstError) {
+    // The server may have committed before a connection dropped. Reusing the
+    // command ID lets it return the saved attachment without storing it twice.
+    try {
+      response = await fetch('/api/attachments', { method: 'POST', body: form, credentials: 'same-origin' });
+    } catch {
+      throw firstError;
+    }
+  }
   const result = await response.json() as { attachment?: AccountingData['attachments'][number]; revision?: number; error?: string };
   if (!response.ok || !result.attachment) throw new Error(result.error || 'بارگذاری پیوست انجام نشد.');
   persistedRevision = result.revision ?? persistedRevision;
+  if (persistedData) {
+    persistedData = { ...persistedData, attachments: [result.attachment, ...persistedData.attachments.filter((item) => item.id !== result.attachment!.id)] };
+  }
   return result.attachment;
 }
 

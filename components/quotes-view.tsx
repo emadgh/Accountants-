@@ -13,6 +13,7 @@ import { invoiceTotal, money, uid } from '@/lib/utils';
 import { todayIso } from '@/lib/standards';
 import { notify } from '@/lib/feedback';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
+import { flushAccountingPersistence } from '@/lib/storage';
 
 const statusNames: Record<Quote['status'], string> = {
   draft: 'پیش‌نویس', issued: 'ارسال‌شده', accepted: 'پذیرفته‌شده', rejected: 'ردشده', converted: 'تبدیل‌شده',
@@ -32,6 +33,9 @@ export function QuotesView() {
   const [validUntil, setValidUntil] = useState('');
   const [items, setItems] = useState<Array<{ id: string; productId?: string; description: string; unit: string; qty: string; unitPrice: string }>>([{ id: 'quote-line-1', description: '', unit: 'عدد', qty: '1', unitPrice: '' }]);
   const [notes, setNotes] = useState('');
+  const [customerError, setCustomerError] = useState('');
+  const [itemsError, setItemsError] = useState('');
+  const [saveError, setSaveError] = useState('');
   const quotes = useMemo(() => store.quotes.filter((quote) => (statusFilter === 'all' || quote.status === statusFilter) && `${quote.number} ${quote.customerName} ${quote.items.map((item) => item.description).join(' ')}`.toLowerCase().includes(query.toLowerCase())), [store.quotes, query, statusFilter]);
 
   useEffect(() => {
@@ -50,10 +54,14 @@ export function QuotesView() {
     setCustomerId(project && store.customers.some((customer) => customer.id === project.customerId) ? project.customerId : '');
   };
 
-  const save = (status: Quote['status']) => {
+  const save = async (status: Quote['status']) => {
+    setCustomerError(''); setItemsError(''); setSaveError('');
     const customer = store.customers.find((item) => item.id === customerId);
-    if (!customer) return notify('مشتری را انتخاب کنید.', 'error');
-    if (!items.length || items.some((item) => !item.description.trim() || Number(item.qty) <= 0 || Number(item.unitPrice) < 0)) return notify('شرح، تعداد و مبلغ همه ردیف‌ها را بررسی کنید.', 'error');
+    if (!customer) { setCustomerError('مشتری را انتخاب کنید.'); return; }
+    if (!items.length || items.some((item) => !item.description.trim() || !Number.isFinite(Number(item.qty)) || Number(item.qty) <= 0 || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0)) {
+      setItemsError('شرح، تعداد مثبت و مبلغ معتبر را برای همه ردیف‌ها وارد کنید.');
+      return;
+    }
     const now = new Date().toISOString();
     const quote: Quote = {
       id: uid('quote'), number: store.reserveDocumentNumber('quote'), status,
@@ -65,7 +73,9 @@ export function QuotesView() {
       createdAt: now, updatedAt: now,
     };
     const result = store.upsertQuote(quote);
-    if (!result.ok) return notify(result.message || 'ذخیره پیش‌فاکتور انجام نشد.', 'error');
+    if (!result.ok) { setSaveError(result.message || 'ذخیره پیش‌فاکتور انجام نشد.'); return; }
+    try { await flushAccountingPersistence(); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'ذخیره پیش‌فاکتور روی سرور انجام نشد. اطلاعات فرم حفظ شد.'); return; }
     setCreating(false); setCustomerId(''); setItems([{ id: 'quote-line-1', description: '', unit: 'عدد', qty: '1', unitPrice: '' }]); setNotes(''); setValidUntil(''); setProjectId('');
     notify('پیش‌فاکتور ذخیره شد.', 'success');
   };
@@ -89,12 +99,13 @@ export function QuotesView() {
     </div>
 
     {creating && <Card><CardHeader><CardTitle>ثبت پیش‌فاکتور خدماتی</CardTitle><Button variant="ghost" size="sm" onClick={() => setCreating(false)}>بستن</Button></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="space-y-1 text-xs font-bold text-slate-600">مشتری<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">انتخاب مشتری</option>{store.customers.filter((item) => item.kind !== 'supplier').map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+      {saveError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2 lg:col-span-3">{saveError}</p>}
+      <label className="space-y-1 text-xs font-bold text-slate-600">مشتری<select aria-invalid={!!customerError} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={customerId} onChange={(event) => { setCustomerId(event.target.value); setCustomerError(''); }}><option value="">انتخاب مشتری</option>{store.customers.filter((item) => item.kind !== 'supplier').map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select>{customerError && <span role="alert" className="block text-rose-600">{customerError}</span>}</label>
       <label className="space-y-1 text-xs font-bold text-slate-600">پروژه (اختیاری)<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">بدون پروژه</option>{store.projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
       <label className="space-y-1 text-xs font-bold text-slate-600">اعتبار تا<JalaliDatePicker value={validUntil} onChange={setValidUntil} placeholder="بدون تاریخ پایان" /></label>
-      <div className="space-y-2 sm:col-span-2 lg:col-span-3"><div className="flex items-center justify-between"><span className="text-xs font-black text-slate-600">ردیف‌های خدمت / کالا</span><Button type="button" size="sm" variant="outline" onClick={() => setItems((rows) => [...rows, { id: uid('quote_line'), description: '', unit: 'عدد', qty: '1', unitPrice: '' }])}><FilePlus2 className="h-3.5 w-3.5" /> افزودن ردیف</Button></div>{items.map((item, index) => <div key={item.id} className="grid gap-2 rounded-xl border border-slate-100 p-2 sm:grid-cols-[1fr_1.5fr_.5fr_.7fr_auto]"><select aria-label={`خدمت آماده ردیف ${index + 1}`} className="h-10 rounded-xl border border-slate-200 bg-white px-2 text-sm" value={item.productId || ''} onChange={(event) => { const product = store.products.find((candidate) => candidate.id === event.target.value); setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, productId: product?.id, description: product?.name || row.description, unit: product?.unit || row.unit, unitPrice: product ? String(product.salePrice) : row.unitPrice } : row)); }}><option value="">دستی</option>{store.products.filter((product) => product.kind === 'service' && !product.archived).map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select><Input aria-label={`شرح ردیف ${index + 1}`} value={item.description} onChange={(event) => setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, description: event.target.value } : row))} placeholder="شرح ردیف" /><Input aria-label={`تعداد ردیف ${index + 1}`} type="number" min="0.01" step="any" value={item.qty} onChange={(event) => setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, qty: event.target.value } : row))} /><Input aria-label={`مبلغ واحد ردیف ${index + 1}`} type="number" min="0" value={item.unitPrice} onChange={(event) => setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, unitPrice: event.target.value } : row))} placeholder="مبلغ واحد" /><Button type="button" size="icon" variant="ghost" disabled={items.length === 1} onClick={() => setItems((rows) => rows.filter((row) => row.id !== item.id))} aria-label="حذف ردیف"><X className="h-4 w-4 text-rose-500" /></Button></div>)}</div>
+      <div className="space-y-2 sm:col-span-2 lg:col-span-3"><div className="flex items-center justify-between"><span className="text-xs font-black text-slate-600">ردیف‌های خدمت / کالا</span><Button type="button" size="sm" variant="outline" onClick={() => setItems((rows) => [...rows, { id: uid('quote_line'), description: '', unit: 'عدد', qty: '1', unitPrice: '' }])}><FilePlus2 className="h-3.5 w-3.5" /> افزودن ردیف</Button></div>{items.map((item, index) => <div key={item.id} className="grid gap-2 rounded-xl border border-slate-100 p-2 sm:grid-cols-[1fr_1.5fr_.5fr_.7fr_auto]"><select aria-label={`خدمت آماده ردیف ${index + 1}`} className="h-10 rounded-xl border border-slate-200 bg-white px-2 text-sm" value={item.productId || ''} onChange={(event) => { const product = store.products.find((candidate) => candidate.id === event.target.value); setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, productId: product?.id, description: product?.name || row.description, unit: product?.unit || row.unit, unitPrice: product ? String(product.salePrice) : row.unitPrice } : row)); }}><option value="">دستی</option>{store.products.filter((product) => !product.archived).map((product) => <option key={product.id} value={product.id}>{product.kind === 'product' ? 'کالا' : 'خدمت'} · {product.name}</option>)}</select><Input aria-label={`شرح ردیف ${index + 1}`} aria-invalid={!!itemsError && !item.description.trim()} value={item.description} onChange={(event) => { setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, description: event.target.value } : row)); setItemsError(''); }} placeholder="شرح ردیف" /><Input aria-label={`تعداد ردیف ${index + 1}`} aria-invalid={!!itemsError && (!Number.isFinite(Number(item.qty)) || Number(item.qty) <= 0)} type="number" min="0.01" step="any" value={item.qty} onChange={(event) => { setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, qty: event.target.value } : row)); setItemsError(''); }} /><Input aria-label={`مبلغ واحد ردیف ${index + 1}`} aria-invalid={!!itemsError && (!Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0)} type="number" min="0" value={item.unitPrice} onChange={(event) => { setItems((rows) => rows.map((row) => row.id === item.id ? { ...row, unitPrice: event.target.value } : row)); setItemsError(''); }} placeholder="مبلغ واحد" /><Button type="button" size="icon" variant="ghost" disabled={items.length === 1} onClick={() => setItems((rows) => rows.filter((row) => row.id !== item.id))} aria-label="حذف ردیف"><X className="h-4 w-4 text-rose-500" /></Button></div>)}{itemsError && <p role="alert" className="text-xs text-rose-600">{itemsError}</p>}</div>
       <label className="space-y-1 text-xs font-bold text-slate-600 sm:col-span-2 lg:col-span-3">یادداشت<Input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="توضیحات اختیاری" /></label>
-      <div className="flex items-center justify-between gap-3 sm:col-span-2 lg:col-span-3"><span className="text-sm text-slate-500">مبلغ برآوردی: <b className="text-slate-900">{money(items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0))} {store.settings.currency}</b></span><div className="flex gap-2"><Button variant="outline" onClick={() => save('draft')}>ذخیره پیش‌نویس</Button><Button onClick={() => save('issued')}><Send className="h-4 w-4" /> ثبت و ارسال</Button></div></div>
+      <div className="flex items-center justify-between gap-3 sm:col-span-2 lg:col-span-3"><span className="text-sm text-slate-500">مبلغ برآوردی: <b className="text-slate-900">{money(items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0))} {store.settings.currency}</b></span><div className="flex gap-2"><Button variant="outline" onClick={() => void save('draft')}>ذخیره پیش‌نویس</Button><Button onClick={() => void save('issued')}><Send className="h-4 w-4" /> ثبت و ارسال</Button></div></div>
     </CardContent></Card>}
 
     <Card><CardHeader><div className="relative w-full max-w-sm"><Search className="absolute right-3 top-3 h-4 w-4 text-slate-400" /><Input className="pr-9" placeholder="جست‌وجو در شماره، مشتری یا شرح" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="فیلتر وضعیت پیش‌فاکتور" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">همه وضعیت‌ها</option>{Object.entries(statusNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className="text-xs text-slate-500">{quotes.length} پیش‌فاکتور</span></CardHeader><CardContent className="space-y-3">

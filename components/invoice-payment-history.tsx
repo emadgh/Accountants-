@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-export function InvoicePaymentHistoryButton({ invoiceId }: { invoiceId: string }) {
+export function InvoicePaymentHistoryButton({ invoiceId, showLabel = false }: { invoiceId: string; showLabel?: boolean }) {
   const { invoices, payments, checks, returns, settings } = useAccountingStore();
   const [open, setOpen] = useState(false);
   const invoice = invoices.find((item) => item.id === invoiceId);
@@ -29,12 +29,13 @@ export function InvoicePaymentHistoryButton({ invoiceId }: { invoiceId: string }
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size={showLabel ? 'sm' : 'icon'}
       title={`نمایش سوابق پرداخت فاکتور ${invoice.number}`}
       aria-label={`نمایش سوابق پرداخت فاکتور ${invoice.number}`}
       onClick={() => setOpen(true)}
     >
       <History className="h-4 w-4" />
+      {showLabel && 'سوابق پرداخت'}
     </Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl">

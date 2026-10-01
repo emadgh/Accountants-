@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountingStore } from '@/lib/store';
 import type { Invoice, Payment } from '@/lib/types';
-import { invoiceOutstandingAmount, money, uid } from '@/lib/utils';
+import { invoiceOutstandingAmount, invoiceReservedByPendingChecks, money, uid } from '@/lib/utils';
 import { todayIso } from '@/lib/standards';
 import { notify } from '@/lib/feedback';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { FormattedInput } from '@/components/ui/formatted-input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
+import { flushAccountingPersistence } from '@/lib/storage';
 
 function emptyPayment(invoice: Invoice, documentNumber: string): Payment {
   return {
@@ -50,14 +51,19 @@ export function InvoicePaymentDialog({
     [invoice, payments, checks, returns]
   );
   const [form, setForm] = useState<Payment | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const pendingReserved = invoice ? invoiceReservedByPendingChecks(invoice, payments, checks) : 0;
+  const available = Math.max(0, remaining - pendingReserved);
 
   useEffect(() => {
     if (!open || !invoice) return;
     const direction: Payment['direction'] = invoice.kind === 'sale' ? 'receipt' : 'payment';
     setForm({
       ...emptyPayment(invoice, documentNumber || ''),
-      amount: remaining,
+      amount: Math.max(0, remaining - invoiceReservedByPendingChecks(invoice, payments, checks)),
     });
+    setSubmitError('');
   }, [open, invoice?.id, documentNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const direction = invoice?.kind === 'sale' ? 'receipt' : 'payment';
@@ -68,10 +74,10 @@ export function InvoicePaymentDialog({
     check.direction === (direction === 'receipt' ? 'received' : 'issued') &&
     check.customerId === form?.customerId &&
     !payments.some((payment) => payment.checkId === check.id) &&
-    check.amount <= remaining + 0.0001
+    check.amount <= available + 0.0001
   );
-  const invalid = !invoice || !form || !form.customerId || invoice.status === 'draft' || invoice.status === 'void' || remaining <= 0 ||
-    form.amount <= 0 || form.amount > remaining + 0.0001 ||
+  const invalid = !invoice || !form || !form.customerId || invoice.status === 'draft' || invoice.status === 'void' || available <= 0 ||
+    !Number.isFinite(form.amount) || form.amount <= 0 || form.amount > available + 0.0001 ||
     (form.method === 'check' && (!form.checkId || !availableChecks.some((check) => check.id === form.checkId)));
 
   const selectCheck = (checkId: string) => {
@@ -84,14 +90,25 @@ export function InvoicePaymentDialog({
     setForm({ ...form, checkId, amount: check.amount, reference: check.number });
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!invoice || !form || invalid) return;
+    setSubmitError('');
     const result = addPayment({ ...form, invoiceId: invoice.id, customerId: invoice.customerId || form.customerId, direction });
     if (!result.ok) {
-      notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
+      const message = result.message || 'ثبت تراکنش انجام نشد.';
+      setSubmitError(message);
+      notify(message, 'error');
       return;
     }
-    onOpenChange(false);
+    setBusy(true);
+    try {
+      await flushAccountingPersistence();
+      onOpenChange(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'ذخیره دریافت روی سرور انجام نشد؛ اطلاعات فرم حفظ شده است.';
+      setSubmitError(message);
+      notify(message, 'error');
+    } finally { setBusy(false); }
   };
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
@@ -138,10 +155,14 @@ export function InvoicePaymentDialog({
         <label className="grid gap-1 text-xs font-bold text-slate-600">توضیحات
           <Input value={form.notes || ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
         </label>
+        {pendingReserved > 0 && <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800 sm:col-span-2">{money(pendingReserved)} از مانده با چک در انتظار رزرو شده؛ دریافت تازه حداکثر {money(available)} است. چک تا وصول‌شدن، دریافت مؤثر حساب نمی‌شود.</div>}
         {form.method === 'check' && <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800 sm:col-span-2">چک تا زمان وصول/پاس شدن در مانده فاکتور اثر ندارد.</div>}
+        {form.method === 'check' && !form.checkId && <span className="text-xs text-rose-600 sm:col-span-2" role="alert">چک ثبت‌شده را انتخاب کنید.</span>}
+        {form.amount > available + 0.0001 && <span className="text-xs text-rose-600 sm:col-span-2" role="alert">مبلغ از مانده آزاد فاکتور بیشتر است.</span>}
+        {submitError && <div className="text-xs text-rose-600 sm:col-span-2" role="alert">{submitError}</div>}
         <div className="flex justify-end gap-2 sm:col-span-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>انصراف</Button>
-          <Button disabled={invalid} onClick={submit}>{direction === 'receipt' ? 'ثبت دریافت' : 'ثبت پرداخت'}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>انصراف</Button>
+          <Button disabled={invalid || busy} onClick={submit}>{busy ? 'در حال ذخیره…' : direction === 'receipt' ? 'ثبت دریافت' : 'ثبت پرداخت'}</Button>
         </div>
       </div>}
     </DialogContent>

@@ -76,8 +76,15 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
 
   useEffect(() => {
     const onPersistenceError = (event: Event) => {
-      const message = (event as CustomEvent<string>).detail || 'خطای نامشخص دیتابیس';
-      notify('اتصال یا ذخیره‌سازی سرور در دسترس نیست؛ سند جدید ذخیره نمی‌شود. ' + message + ' وضعیت از آخرین Commit بازیابی می‌شود.', 'error');
+      const detail = (event as CustomEvent<string | { message?: string; code?: string; status?: number }>).detail;
+      const message = typeof detail === 'string' ? detail : detail?.message || 'خطای نامشخص دیتابیس';
+      if (typeof detail === 'object' && detail?.code === 'CLIENT_UPDATE_REQUIRED') {
+        notify('نسخهٔ باز برنامه با سرور سازگار نیست. صفحه را تازه کنید؛ تغییرات ثبت نشده و آخرین دادهٔ ذخیره‌شده حفظ است.', 'error');
+      } else if (typeof detail === 'object' && detail?.status && detail.status < 500) {
+        notify('ذخیره انجام نشد: ' + message + ' آخرین دادهٔ ثبت‌شده از سرور بارگذاری می‌شود.', 'error');
+      } else {
+        notify('ارتباط یا ذخیره‌سازی سرور در دسترس نیست؛ تغییرات ذخیره نشد. ' + message, 'error');
+      }
       void Promise.resolve(useAccountingStore.persist.rehydrate()).catch(() => undefined);
     };
     window.addEventListener('accounting:persistence-error', onPersistenceError);

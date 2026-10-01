@@ -1,4 +1,4 @@
-export const SQLITE_SCHEMA_VERSION = 3;
+export const SQLITE_SCHEMA_VERSION = 4;
 
 export const SQLITE_SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -277,6 +277,20 @@ export const SQLITE_MIGRATIONS: SqliteMigration[] = [
       CREATE UNIQUE INDEX idx_products_sku_unique ON products(sku COLLATE NOCASE) WHERE sku IS NOT NULL AND trim(sku) <> '';
       CREATE UNIQUE INDEX idx_products_barcode_unique ON products(barcode COLLATE NOCASE) WHERE barcode IS NOT NULL AND trim(barcode) <> '';
       CREATE INDEX idx_products_category ON products(category);
+    `,
+  },
+  {
+    version: 4,
+    name: 'idempotent-accounting-commands',
+    sql: `
+      CREATE TABLE accounting_commands (
+        command_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_accounting_commands_created_at ON accounting_commands(created_at);
     `,
   },
 ];

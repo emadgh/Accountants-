@@ -53,6 +53,8 @@ function reasonLabel(reason: AccountingSnapshotMeta['reason']) {
   if (reason === 'manual') return 'دستی';
   if (reason === 'before-import') return 'قبل از Import';
   if (reason === 'before-restore') return 'قبل از Restore';
+  if (reason === 'before-clear') return 'قبل از پاک‌سازی';
+  if (reason === 'migration') return 'قبل از مهاجرت';
   return 'مهاجرت';
 }
 
@@ -197,7 +199,7 @@ export function StorageBackupPanel() {
         <div className="max-h-72 space-y-2 overflow-auto">
           {snapshots.map((snapshot) => <div key={snapshot.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
             <div>
-              <div className="flex items-center gap-2"><span className="text-sm font-bold">{new Date(snapshot.createdAt).toLocaleString('fa-IR')}</span><Badge>{reasonLabel(snapshot.reason)}</Badge></div>
+              <div className="flex items-center gap-2"><span className="text-sm font-bold">{new Date(snapshot.createdAt).toLocaleString('fa-IR')}</span><Badge>{reasonLabel(snapshot.reason)}</Badge><Badge className={snapshot.format === 'full' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>{snapshot.format === 'full' ? 'داده و پیوست' : 'فقط داده'}</Badge></div>
               <div className="mt-1 text-[11px] text-slate-400">{formatBytes(snapshot.size)}</div>
             </div>
             <div className="flex gap-1">

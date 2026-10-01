@@ -35,19 +35,35 @@ export async function POST(request: NextRequest) {
   const db = getServerDatabase();
   const user = await authenticateRequest(request);
   if (!user) return NextResponse.json({ error: 'ورود لازم است.' }, { status: 401 });
+  if (user.role !== 'admin' && !user.permissions.includes('*')) return NextResponse.json({ error: 'بارگذاری پیوست فقط برای مدیر مجاز است.' }, { status: 403 });
   if (Number(request.headers.get('content-length') || 0) > MAX_UPLOAD_BYTES + 256 * 1024) {
     return NextResponse.json({ error: 'حجم فایل از ۲۵ مگابایت بیشتر است.' }, { status: 413 });
   }
 
   let file: FormDataEntryValue | null;
   let projectId: string;
+  let expectedRevision: number;
+  let commandId: string;
   try {
     const form = await request.formData();
     file = form.get('file');
     projectId = String(form.get('projectId') || '');
+    expectedRevision = Number(form.get('expectedRevision'));
+    commandId = String(form.get('commandId') || '');
   } catch {
     return NextResponse.json({ error: 'فرم بارگذاری فایل معتبر نیست.' }, { status: 400 });
   }
+  if (!Number.isInteger(expectedRevision) || !/^[A-Za-z0-9_-]{12,100}$/.test(commandId)) {
+    return NextResponse.json({ error: 'شناسه فرمان یا شماره بازنگری پیوست معتبر نیست.' }, { status: 400 });
+  }
+  const prior = db.prepare('SELECT user_id AS userId, response_json AS responseJson FROM accounting_commands WHERE command_id = ? LIMIT 1')
+    .get(commandId) as { userId: string; responseJson: string } | undefined;
+  if (prior) {
+    if (prior.userId !== user.id) return NextResponse.json({ error: 'شناسه فرمان قبلاً استفاده شده است.' }, { status: 409 });
+    return NextResponse.json(JSON.parse(prior.responseJson));
+  }
+  const currentRevision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0);
+  if (currentRevision !== expectedRevision) return NextResponse.json({ error: 'داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.' }, { status: 409 });
   if (!(file instanceof File) || !projectId || file.size < 1 || file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json({ error: 'فایل یا پروژه معتبر نیست؛ حداکثر حجم فایل ۲۵ مگابایت است.' }, { status: 400 });
   }
@@ -103,16 +119,21 @@ export async function POST(request: NextRequest) {
     storedKeys.push(storageKey);
     if (thumbnailKey && thumbnail) { attachmentFileStore.writeNew(thumbnailKey, thumbnail); storedKeys.push(thumbnailKey); }
     db.exec('BEGIN IMMEDIATE;');
+    const lockedRevision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0);
+    if (lockedRevision !== expectedRevision) throw new Error('داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.');
     db.prepare('INSERT INTO attachments(id, project_id, filename, mime_type, size, storage_key, thumbnail_key, created_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(attachment.id, attachment.projectId, attachment.filename, attachment.mimeType, attachment.size, attachment.storageKey, attachment.thumbnailKey || null, attachment.createdAt, JSON.stringify(attachment));
-    const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0) + 1;
+    const revision = lockedRevision + 1;
     db.prepare("INSERT INTO app_meta(key, value) VALUES ('accounting-state-revision', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(revision));
+    const response = { attachment, revision };
+    db.prepare('INSERT INTO accounting_commands(command_id, user_id, revision, response_json, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(commandId, user.id, revision, JSON.stringify(response), new Date().toISOString());
     db.exec('COMMIT;');
-    return NextResponse.json({ attachment, revision });
-  } catch {
+    return NextResponse.json(response);
+  } catch (error) {
     try { db.exec('ROLLBACK;'); } catch { /* transaction may not have started */ }
     for (const key of storedKeys) { try { attachmentFileStore.remove(key); } catch { /* best effort cleanup */ } }
-    return NextResponse.json({ error: 'ذخیره پیوست انجام نشد.' }, { status: 409 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'ذخیره پیوست انجام نشد.' }, { status: 409 });
   }
 }
 

@@ -60,8 +60,8 @@ export async function hasAccountingData() {
   return Number(rows[0]?.count || 0) > 0;
 }
 
-export async function clearAccountingData() {
-  await sqliteTransaction(DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })));
+export async function clearAccountingData(transactionStatements: SqlStatement[] = []) {
+  await sqliteTransaction([...DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })), ...transactionStatements]);
 }
 
 export async function resetApplicationDatabase() {
@@ -76,7 +76,7 @@ export async function resetApplicationDatabase() {
 
 export async function replaceAccountingData(
   data: AccountingData,
-  options: { resetStorage?: boolean } = {}
+  options: { resetStorage?: boolean; transactionStatements?: SqlStatement[] } = {}
 ) {
   const resetStatements: SqlStatement[] = options.resetStorage
     ? [
@@ -88,6 +88,7 @@ export async function replaceAccountingData(
   const statements: SqlStatement[] = [
     ...resetStatements,
     ...DELETE_ACCOUNTING_SQL.map((sql) => ({ sql })),
+    ...(options.transactionStatements || []),
   ];
 
   add(statements, 'INSERT INTO settings(id, payload) VALUES (1, ?)', [json(data.settings)]);
@@ -344,8 +345,8 @@ function upsertOrderMeta(statements: SqlStatement[], data: AccountingData) {
   );
 }
 
-export async function syncAccountingData(previous: AccountingData, next: AccountingData) {
-  const statements: SqlStatement[] = [];
+export async function syncAccountingData(previous: AccountingData, next: AccountingData, transactionStatements: SqlStatement[] = []) {
+  const statements: SqlStatement[] = [...transactionStatements];
 
   const profiles = diffById(previous.settings.businessProfiles, next.settings.businessProfiles);
   const customers = diffById(previous.customers, next.customers);
