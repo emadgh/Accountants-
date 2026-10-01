@@ -21,6 +21,7 @@ export const VIEW_PATHS: Record<ViewKey, string> = {
   reports: '/reports',
   settings: '/settings',
   'business-profiles': '/business-profiles',
+  about: '/about',
 };
 
 export function getViewForPathname(pathname: string): ViewKey {

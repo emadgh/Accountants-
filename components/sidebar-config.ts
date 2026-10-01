@@ -10,6 +10,7 @@ import {
   FilePlus2,
   FileText,
   Home,
+  Info,
   Landmark,
   PackageSearch,
   ReceiptText,
@@ -42,7 +43,8 @@ export type ViewKey =
   | 'accounting'
   | 'reports'
   | 'settings'
-  | 'business-profiles';
+  | 'business-profiles'
+  | 'about';
 
 export type SidebarItem = {
   key: ViewKey;
@@ -129,6 +131,7 @@ export const sidebarGroups: readonly SidebarGroup[] = [
     items: [
       { key: 'business-profiles', label: 'پروفایل‌های کسب‌وکار', icon: Building2 },
       { key: 'settings', label: 'تنظیمات', icon: Settings },
+      { key: 'about', label: 'دربارهٔ برنامه', icon: Info },
     ],
   },
 ] as const;
