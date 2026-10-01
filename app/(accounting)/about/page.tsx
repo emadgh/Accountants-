@@ -1,47 +1,127 @@
+'use client';
+
 import {
+  BarChart3,
   BadgeCheck,
   BriefcaseBusiness,
   Boxes,
   Database,
+  Home,
   FileText,
   Info,
+  Settings,
+  Users,
   WalletCards,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import packageInfo from '@/package.json';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const capabilities = [
   {
-    title: 'فروش و خدمات',
-    description: 'فاکتور فروش و خرید، ثبت سریع خدمات، پیش‌فاکتور، دریافت و پرداخت.',
+    title: 'داشبورد و پیگیری',
+    features: [
+      'نمای کلی فروش، خرید، دریافت‌ها و ارزش موجودی',
+      'یادآوری مطالبات و اقساط سررسیدشده، چک‌های در انتظار و هشدار کمبود کالا',
+      'پیگیری پروژه‌های منتظر تأیید و روند ماهانه',
+    ],
+    icon: Home,
+  },
+  {
+    title: 'فاکتور و فروش',
+    features: [
+      'فاکتور فروش و خرید، ذخیرهٔ پیش‌نویس و چاپ با قالب‌های مختلف در اندازهٔ A4 و A5',
+      'ثبت سریع خدمات و فروش سریع کالا با جست‌وجو یا بارکد',
+      'تخفیف، مالیات، دریافت نقدی، کارتی یا چکی، پرداخت جزئی و برنامهٔ اقساط',
+      'ثبت و پیگیری مرجوعی فروش و خرید',
+    ],
     icon: FileText,
   },
   {
-    title: 'پروژه‌ها',
-    description: 'اتصال اسناد، هزینه‌های مستقیم و پیوست‌ها به پروندهٔ هر پروژه.',
+    title: 'پیش‌فاکتور و پروژه',
+    features: [
+      'صدور پیش‌فاکتور، پیگیری وضعیت و تبدیل پیش‌فاکتور پذیرفته‌شده به فاکتور فروش',
+      'پروندهٔ پروژه با مشتری، وضعیت، موعد، مبلغ توافقی و اسناد مرتبط',
+      'محاسبهٔ هزینهٔ خدمات از فاکتور خرید و ثبت هزینه‌های بدون فاکتور',
+      'پیوست PDF و تصویر و نمایش فروش، هزینه و سود برآوردی پروژه',
+    ],
     icon: BriefcaseBusiness,
   },
   {
+    title: 'مشتریان و تأمین‌کنندگان',
+    features: [
+      'ثبت اطلاعات و ماندهٔ اول دورهٔ طرف‌حساب‌ها',
+      'دفتر گردش بدهکار و بستانکار، ماندهٔ حساب و اصلاحیهٔ قابل پیگیری',
+    ],
+    icon: Users,
+  },
+  {
     title: 'کالا و انبار',
-    description: 'مدیریت کالا و خدمات، ثبت خرید و فروش کالا و پیگیری موجودی.',
+    features: [
+      'تعریف کالا و خدمت همراه کد، SKU، بارکد، دسته و قیمت مشتری یا گروه مشتری',
+      'کاردکس ورود و خروج، ارزش موجودی با میانگین موزون، شمارش و اصلاح موجودی',
+      'هشدار حداقل موجودی و گزارش گردش کالا',
+    ],
     icon: Boxes,
   },
   {
-    title: 'حسابداری و گزارش‌ها',
-    description: 'دفتر حساب طرف‌حساب، اسناد حسابداری، چک‌ها و گزارش‌های مالی.',
+    title: 'دریافت، پرداخت و حسابداری',
+    features: [
+      'ثبت دریافت از مشتری و پرداخت به تأمین‌کننده با صندوق، بانک، کارت و چک',
+      'پیگیری چک‌های دریافتی و پرداختی، سررسید، وصول و برگشت',
+      'کدینگ حساب‌ها، اسناد روزنامهٔ خودکار و کنترل تراز',
+    ],
     icon: WalletCards,
+  },
+  {
+    title: 'گزارش‌ها و خروجی',
+    features: [
+      'گزارش فروش، خرید و مرجوعی؛ فروش به تفکیک کالا و دسته',
+      'گزارش موجودی و گردش کالا، دفتر طرف‌حساب‌ها، بدهکاران و بستانکاران و چک‌ها',
+      'فیلتر بازهٔ تاریخ و خروجی CSV، Excel و چاپ یا PDF',
+    ],
+    icon: BarChart3,
+  },
+  {
+    title: 'پروفایل و تنظیمات',
+    features: [
+      'مدیریت پروفایل‌های کسب‌وکار و مشخصات چاپ فاکتور',
+      'تنظیم واحد پول، مالیات پیش‌فرض، قالب و اندازهٔ کاغذ و شماره‌گذاری اسناد',
+    ],
+    icon: Settings,
+  },
+  {
+    title: 'ورود و پشتیبان‌گیری',
+    features: [
+      'ورود امن به برنامه و مدیریت پایگاه داده',
+      'ساخت Snapshot، دریافت نسخهٔ پشتیبان داده و پیوست‌ها و بازیابی آن',
+      'ورود اطلاعات از نرم‌افزار یاس و دریافت گزارش مهاجرت',
+    ],
+    icon: Database,
   },
 ];
 
+const cardsContainerVariants = {
+  hidden: { opacity: 1 },
+  visible: { opacity: 1, transition: { delayChildren: 0.05, staggerChildren: 0.08 } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 16, scale: 0.98 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.34, ease: 'easeOut' as const } },
+};
+
 export default function AboutPage() {
+  const reduceMotion = useReducedMotion();
+
   return (
     <div className="space-y-5" dir="rtl">
       <div>
         <div className="flex items-center gap-2 text-2xl font-black text-slate-900">
           <Info className="h-6 w-6 text-sky-600" /> دربارهٔ برنامه
         </div>
-        <p className="mt-1 text-sm text-slate-500">معرفی امکانات و نسخهٔ نرم‌افزار حسابداری</p>
+        <p className="mt-1 text-sm text-slate-500">فهرست امکانات نرم‌افزار حسابداری</p>
       </div>
 
       <Card className="overflow-hidden">
@@ -63,19 +143,30 @@ export default function AboutPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {capabilities.map(({ title, description, icon: Icon }) => (
-          <Card key={title}>
-            <CardHeader className="flex-row items-center gap-3 space-y-0">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-700">
-                <Icon className="h-5 w-5" />
-              </div>
-              <CardTitle>{title}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm leading-6 text-slate-600">{description}</CardContent>
-          </Card>
+      <motion.div
+        className="grid gap-4 sm:grid-cols-2"
+        variants={cardsContainerVariants}
+        initial={reduceMotion ? false : 'hidden'}
+        animate="visible"
+      >
+        {capabilities.map(({ title, features, icon: Icon }) => (
+          <motion.div key={title} variants={cardVariants}>
+            <Card>
+              <CardHeader className="flex-row items-center gap-3 space-y-0">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-700">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <CardTitle>{title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="list-inside list-disc space-y-1.5 text-sm leading-6 text-slate-600 marker:text-sky-500">
+                  {features.map((feature) => <li key={feature}>{feature}</li>)}
+                </ul>
+              </CardContent>
+            </Card>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       <Card>
         <CardHeader><CardTitle>ذخیره و پشتیبان‌گیری</CardTitle></CardHeader>
