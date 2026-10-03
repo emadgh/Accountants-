@@ -1,0 +1,72 @@
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.settings, .group {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.settings > legend, .group > legend {
+  padding-inline: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings { grid-column: 1 / -1; }
+.settings > legend { color: #475569; }
+.settings > label { display: grid; gap: 6px; }
+.settings select { width: 100%; }
+
+.group { 
+  --tool-accent: #0284c7;
+  --tool-ink: #0369a1;
+  border-color: color-mix(in srgb, var(--tool-accent) 20%, white);
+  background: color-mix(in srgb, var(--tool-accent) 3%, white);
+}
+.group[data-tone='edit'] { --tool-accent: #d97706; --tool-ink: #92400e; }
+.group[data-tone='payment'] { --tool-accent: #059669; --tool-ink: #047857; }
+.group > legend { color: var(--tool-ink); }
+
+.group > button {
+  width: 100%;
+  min-height: 34px;
+  height: auto;
+  justify-content: space-between;
+  white-space: normal;
+  text-align: right;
+  line-height: 1.6;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 25%, white);
+  background: white;
+  color: var(--tool-ink);
+  padding-block: 6px;
+}
+.group > button:hover { background: color-mix(in srgb, var(--tool-accent) 9%, white); }
+.group > button[data-intent='primary'] {
+  background: var(--tool-accent);
+  color: white;
+  border-color: var(--tool-accent);
+}
+.group > button[data-intent='primary']:hover { background: color-mix(in srgb, var(--tool-accent) 88%, #082f49); }
+.group > button[data-intent='danger'] {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+.group > button[data-intent='danger']:hover { background: #ffe4e6; }
+.group > button svg { flex-shrink: 0; }
+.group:disabled > button { opacity: 0.4; cursor: not-allowed; }
+.lockHint { font-size: 11px; line-height: 1.8; color: var(--tool-ink); }
+
+@media screen and (min-width: 1360px) {
+  .groups { grid-template-columns: 1fr; }
+}
