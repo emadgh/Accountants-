@@ -1,16 +1,3 @@
-'use client';
-
-import { useAccountingNavigation } from '@/components/accounting-app';
-import { InvoiceListView } from '@/components/management-views';
-
-export default function PurchasesPage() {
-  const navigation = useAccountingNavigation();
-  return (
-    <InvoiceListView
-      kind="purchase"
-      onView={(id) => navigation.viewInvoice(id, 'purchase')}
-      onEdit={(id) => navigation.editInvoice(id, 'purchase')}
-      onNew={() => navigation.newInvoice('purchase')}
-    />
-  );
-}
+import { redirect } from 'next/navigation';
+import { documentsAliasHref } from '@/lib/document-routes';
+export default async function PurchasesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) { redirect(documentsAliasHref('purchase', await searchParams)); }

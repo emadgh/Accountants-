@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Minus, Plus, ScanBarcode, ShoppingCart, Trash2 } from 'lucide-react';
@@ -18,7 +19,7 @@ import { formatDocumentNumber } from '@/lib/standards';
 type CartLine = { productId: string; qty: number; unitPrice: number; discount: number };
 
 export function QuickRetailSale() {
-  const store = useAccountingStore();
+  const store = useAccountingStore(useShallow((state) => ({ customers: state.customers, finalizeInvoiceWithPayment: state.finalizeInvoiceWithPayment, products: state.products, settings: state.settings })));
   const navigation = useAccountingNavigation();
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');

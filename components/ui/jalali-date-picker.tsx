@@ -14,6 +14,9 @@ import {
 } from '@/lib/date-utils';
 
 export interface JalaliDatePickerProps {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
   value?: string | null;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -37,12 +40,18 @@ export function JalaliDatePicker({
   maxDate,
   className,
   error,
+  id,
+  'aria-describedby': describedBy,
+  'aria-invalid': invalid,
 }: JalaliDatePickerProps) {
   const pickerValue = storageDateToDateObject(value);
 
   return <div className={cn('w-full', className)} dir="rtl" aria-required={required || undefined}>
     <div className="relative w-full">
       <DatePicker
+        id={id}
+        aria-describedby={describedBy}
+        aria-invalid={invalid}
         value={pickerValue || undefined}
         onChange={(selected) => {
           const storageValue = dateObjectToStorageDate(selected as DateObject | null);

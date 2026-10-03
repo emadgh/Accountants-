@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Building2, Check, Plus, Trash2, Upload } from 'lucide-react';
@@ -6,6 +7,7 @@ import { useAccountingStore } from '@/lib/store';
 import type { BusinessProfile } from '@/lib/types';
 import { uid } from '@/lib/utils';
 import { validateOfficialFields } from '@/lib/standards';
+import { persistOperation } from '@/lib/operation-result';
 import { flushAccountingPersistence } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -17,13 +19,11 @@ import { confirmDialog, notify } from '@/lib/feedback';
 import { AppNavbarContent } from '@/components/app-navbar';
 
 export function BusinessProfilesView() {
-  const {
-    settings,
+  const { settings,
     createBusinessProfile,
     upsertBusinessProfile,
     deleteBusinessProfile,
-    setDefaultBusinessProfile,
-  } = useAccountingStore();
+    setDefaultBusinessProfile, } = useAccountingStore(useShallow((state) => ({ settings: state.settings, createBusinessProfile: state.createBusinessProfile, upsertBusinessProfile: state.upsertBusinessProfile, deleteBusinessProfile: state.deleteBusinessProfile, setDefaultBusinessProfile: state.setDefaultBusinessProfile })));
   const [selectedProfileId, setSelectedProfileId] = useState(settings.defaultBusinessProfileId);
   const [newProfileDraft, setNewProfileDraft] = useState<BusinessProfile | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -181,15 +181,15 @@ export function BusinessProfilesView() {
     }
   };
 
-  const makeDefault = () => {
+  const makeDefault = async () => {
     if (isCreatingProfile) return;
-    const result = setDefaultBusinessProfile(profileDraft.id);
+    const result = await persistOperation(() => setDefaultBusinessProfile(profileDraft.id));
     if (!result.ok) notify(result.message || 'تغییر پروفایل پیش‌فرض انجام نشد.', 'error');
   };
 
   const removeProfile = async () => {
     if (!(await confirmDialog('این پروفایل حذف شود؟', { title: 'حذف پروفایل', confirmLabel: 'حذف', danger: true }))) return;
-    const result = deleteBusinessProfile(profileDraft.id);
+    const result = await persistOperation(() => deleteBusinessProfile(profileDraft.id));
     if (!result.ok) {
       notify(result.message || 'حذف پروفایل انجام نشد.', 'error');
       return;

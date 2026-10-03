@@ -1,0 +1,4 @@
+import type { AttachmentMetadata } from '@/lib/types';
+export function AttachmentList({ attachments, emptyText = 'فایلی پیوست نشده است.' }: { attachments: readonly AttachmentMetadata[]; emptyText?: string }) {
+  return <div className="space-y-2">{attachments.map(attachment => <a key={attachment.id} href={`/api/attachments?id=${encodeURIComponent(attachment.id)}`} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-between rounded-xl border border-slate-200 p-3 text-right hover:bg-slate-50"><span className="truncate text-sm font-semibold">{attachment.filename}</span><span className="mr-3 shrink-0 text-xs text-slate-400">{attachment.mimeType === 'application/pdf' ? 'PDF' : 'تصویر WebP'}</span></a>)}{!attachments.length && <div className="py-5 text-center text-sm text-slate-400">{emptyText}</div>}</div>;
+}

@@ -1,11 +1,14 @@
 'use client';
+import { AccountingRecoveryNotice } from '@/components/accounting-recovery-notice';
 
 import { createContext, Suspense, useContext, useEffect, useRef, useState, useTransition, type ReactNode } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'motion/react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { AnimatePresence, motion, MotionConfig } from 'motion/react';
+import { useWorkspacePreferences } from '@/hooks/use-workspace-preferences';
 import { Sidebar, type ViewKey } from '@/components/sidebar';
 import { AppNavbar } from '@/components/app-navbar';
 import type { TableDensity } from '@/components/ui/data-table';
+import { TableDensityProvider } from '@/components/ui/table-density-context';
 import { useAccountingStore } from '@/lib/store';
 import { notify } from '@/lib/feedback';
 import { pageTransitionVariants } from '@/lib/animation-config';
@@ -14,7 +17,7 @@ import { buildViewHref, getViewForPathname } from '@/components/app-routes';
 import type { InvoiceKind } from '@/lib/types';
 
 type AccountingNavigation = {
-  navigate: (view: ViewKey, details?: { projectId?: string }) => void;
+  navigate: (view: ViewKey, details?: { projectId?: string; quoteId?: string }) => void;
   viewInvoice: (id: string, kind: InvoiceKind) => void;
   editInvoice: (id: string, kind: InvoiceKind) => void;
   newInvoice: (kind: InvoiceKind, projectId?: string) => void;
@@ -31,9 +34,11 @@ export function useAccountingNavigation() {
 }
 
 export function AccountingApp({ onLogout, children }: { onLogout?: () => void; children: ReactNode }) {
+  const { preferences } = useWorkspacePreferences();
   const pathname = usePathname();
   const router = useRouter();
-  const view = getViewForPathname(pathname);
+  const searchParams = useSearchParams();
+  const view = getViewForPathname(pathname, searchParams.toString());
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [tableDensity, setTableDensity] = useState<TableDensity>('normal');
@@ -113,7 +118,7 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pathname, router, view]);
 
-  const navigate = (next: ViewKey, details?: { projectId?: string }) => {
+  const navigate = (next: ViewKey, details?: { projectId?: string; quoteId?: string }) => {
     pushHref(buildViewHref(next, details));
     setMenuOpen(false);
   };
@@ -170,7 +175,7 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
   const contentKey = pathname;
 
   return (
-    <NavigationContext.Provider value={navigation}>
+    <MotionConfig reducedMotion={preferences.reducedEffects ? 'always' : 'user'}><NavigationContext.Provider value={navigation}>
       <div className="app-shell" data-table-density={tableDensity}>
         <Sidebar active={view} onChange={navigate} open={menuOpen} onOpenChange={setMenuOpen} />
         <AnimatePresence>
@@ -195,6 +200,7 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
           )}
         </AnimatePresence>
         <main className="min-h-screen lg:mr-[275px]">
+          <div className="mx-4"><AccountingRecoveryNotice /></div>
           <AppNavbar
             onSearch={() => { setMenuOpen(false); setSearchOpen(true); }}
             onLogout={onLogout}
@@ -204,15 +210,17 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
           >
             {hydrated ? (
               <Suspense fallback={null}>
-                <motion.div
-                  key={contentKey}
-                  variants={pageTransitionVariants}
-                  initial="initial"
-                  animate="animate"
-                  className={isInvoiceEditor ? 'p-3 sm:p-5' : 'mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8'}
-                >
-                  {children}
-                </motion.div>
+                <TableDensityProvider value={tableDensity}>
+                  <motion.div
+                    key={contentKey}
+                    variants={pageTransitionVariants}
+                    initial="initial"
+                    animate="animate"
+                    className={isInvoiceEditor ? 'p-3 sm:p-5' : 'mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8'}
+                  >
+                    {children}
+                  </motion.div>
+                </TableDensityProvider>
               </Suspense>
             ) : (
               <div className="grid min-h-[calc(100dvh-4rem)] place-items-center bg-slate-50">
@@ -229,6 +237,6 @@ export function AccountingApp({ onLogout, children }: { onLogout?: () => void; c
           onOpenInvoice={(invoiceId, kind) => { viewInvoice(invoiceId, kind); setMenuOpen(false); }}
         />
       </div>
-    </NavigationContext.Provider>
+    </NavigationContext.Provider></MotionConfig>
   );
 }

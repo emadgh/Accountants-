@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DataTable } from '@/components/ui/data-table';
 
@@ -21,7 +22,7 @@ function formatNumber(value: number) {
 }
 
 export function YasImporterPanel() {
-  const store = useAccountingStore();
+  const store = useAccountingStore(useShallow((state) => ({ accounts: state.accounts, adjustments: state.adjustments, attachments: state.attachments, checks: state.checks, customers: state.customers, invoices: state.invoices, journalEntries: state.journalEntries, moneyTransactions: state.moneyTransactions, payments: state.payments, products: state.products, projects: state.projects, quotes: state.quotes, repairPaymentInvoiceLinks: state.repairPaymentInvoiceLinks, replaceAll: state.replaceAll, returns: state.returns, settings: state.settings, stockMovements: state.stockMovements })));
   const fileRef = useRef<HTMLInputElement>(null);
   const [analysis, setAnalysis] = useState<YasMigrationAnalysis | null>(null);
   const [filename, setFilename] = useState('');

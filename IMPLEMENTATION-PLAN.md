@@ -117,3 +117,8 @@ Progress for the approved service-first and small-retail roadmap. Existing work 
 - Node 24.21.0: final `npm run check` passed after the backup-compatibility changes; `typecheck`, all 26 tests across 7 files, and production build are green.
 - Node 24.19.0: `npm run typecheck` and all 26 tests also passed.
 - Browser smoke test reached the first-run admin setup page on an isolated temporary data directory; the temporary server and data were removed afterward.
+
+
+## Structure and shared UX follow-up — 2026-10-03
+
+The approved structural roadmap and its verification checklist are tracked in [STRUCTURE-UX-PLAN.md](./STRUCTURE-UX-PLAN.md). This follow-up preserves legacy backup compatibility and historical financial entries; tax semantics and additional product features remain separate work.

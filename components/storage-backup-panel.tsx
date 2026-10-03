@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -59,7 +60,7 @@ function reasonLabel(reason: AccountingSnapshotMeta['reason']) {
 }
 
 export function StorageBackupPanel() {
-  const store = useAccountingStore();
+  const store = useAccountingStore(useShallow((state) => ({ replaceAll: state.replaceAll })));
   const fileRef = useRef<HTMLInputElement>(null);
   const [snapshots, setSnapshots] = useState<AccountingSnapshotMeta[]>([]);
   const [storageInfo, setStorageInfo] = useState<{ backend: string; payloadSize: number; snapshotCount: number; schemaVersion: number } | null>(null);

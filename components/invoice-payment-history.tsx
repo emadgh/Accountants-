@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DataTable } from '@/components/ui/data-table';
 
@@ -13,7 +14,7 @@ import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export function InvoicePaymentHistoryButton({ invoiceId, showLabel = false }: { invoiceId: string; showLabel?: boolean }) {
-  const { invoices, payments, checks, returns, settings } = useAccountingStore();
+  const { invoices, payments, checks, returns, settings } = useAccountingStore(useShallow((state) => ({ invoices: state.invoices, payments: state.payments, checks: state.checks, returns: state.returns, settings: state.settings })));
   const [open, setOpen] = useState(false);
   const invoice = invoices.find((item) => item.id === invoiceId);
   const linkedPayments = useMemo(() => payments

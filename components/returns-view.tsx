@@ -1,11 +1,14 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
+import { usePersistedAction } from '@/hooks/use-persisted-action';
+import { persistOperation } from '@/lib/operation-result';
 import { DataTable } from '@/components/ui/data-table';
 
 import { useMemo, useState } from 'react';
 import { Ban, CheckCircle2, Edit3, Eye, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useAccountingStore } from '@/lib/store';
-import type { Invoice, ReturnDocument, ReturnItem } from '@/lib/types';
+import type { Invoice, ReturnDocument } from '@/lib/types';
 import { invoiceLineDiscount, invoiceLineNet, money, returnDocumentAmount, returnedQuantityForItem, uid } from '@/lib/utils';
 import { formatPersianDate, todayIso } from '@/lib/standards';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
@@ -51,15 +54,14 @@ function blankReturn(invoice?: Invoice): ReturnDocument {
 }
 
 export function ReturnsView() {
-  const {
-    invoices,
+  const submission = usePersistedAction();
+  const { invoices,
     returns,
     settings,
     saveReturnDraft,
     finalizeReturn,
     voidReturn,
-    deleteReturn,
-  } = useAccountingStore();
+    deleteReturn, } = useAccountingStore(useShallow((state) => ({ invoices: state.invoices, returns: state.returns, settings: state.settings, saveReturnDraft: state.saveReturnDraft, finalizeReturn: state.finalizeReturn, voidReturn: state.voidReturn, deleteReturn: state.deleteReturn })));
 
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ReturnDocument>(() => blankReturn());
@@ -113,8 +115,10 @@ export function ReturnsView() {
     }));
   };
 
-  const saveDraft = () => {
-    const result = saveReturnDraft(draft);
+  const saveDraft = async () => {
+    const saved = await submission.run(() => saveReturnDraft(draft));
+    if (!saved.ok || !saved.result) return notify(saved.message || 'ذخیره انجام نشد؛ فرم حفظ شد.', 'error');
+    const result = saved.result;
     if (!result.ok || !result.returnDocument) {
       notify(result.message || 'ذخیره پیش‌نویس مرجوعی انجام نشد.', 'error');
       return;
@@ -130,7 +134,9 @@ export function ReturnsView() {
       { title: 'تأیید ثبت نهایی مرجوعی', confirmLabel: 'ثبت نهایی' }
     );
     if (!approved) return;
-    const result = finalizeReturn(draft);
+    const saved = await submission.run(() => finalizeReturn(draft));
+    if (!saved.ok || !saved.result) return notify(saved.message || 'ذخیره انجام نشد؛ فرم حفظ شد.', 'error');
+    const result = saved.result;
     if (!result.ok || !result.returnDocument) {
       notify(result.message || 'ثبت نهایی مرجوعی انجام نشد.', 'error');
       return;
@@ -142,13 +148,13 @@ export function ReturnsView() {
   const voidDocument = async (document: ReturnDocument) => {
     const reason = await promptDialog('دلیل ابطال سند مرجوعی را وارد کنید:', { title: 'ابطال مرجوعی', confirmLabel: 'ابطال سند', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
-    const result = voidReturn(document.id, reason);
+    const result = await persistOperation(() => voidReturn(document.id, reason));
     if (!result.ok) notify(result.message || 'ابطال مرجوعی انجام نشد.', 'error');
   };
 
   const removeDraft = async (document: ReturnDocument) => {
     if (!(await confirmDialog('پیش‌نویس مرجوعی حذف شود؟', { title: 'حذف پیش‌نویس مرجوعی', confirmLabel: 'حذف', danger: true }))) return;
-    const result = deleteReturn(document.id);
+    const result = await persistOperation(() => deleteReturn(document.id));
     if (!result.ok) notify(result.message || 'حذف پیش‌نویس انجام نشد.', 'error');
   };
 
@@ -247,8 +253,8 @@ export function ReturnsView() {
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={() => setOpen(false)}>انصراف</Button>
-          <Button variant="outline" disabled={!original} onClick={saveDraft}><Save className="h-4 w-4" /> ذخیره پیش‌نویس</Button>
-          <Button disabled={!original || !draft.items.some((item) => item.qty > 0)} onClick={finalize}><CheckCircle2 className="h-4 w-4" /> ثبت نهایی مرجوعی</Button>
+          <Button variant="outline" disabled={submission.busy || !original} onClick={() => void saveDraft()}><Save className="h-4 w-4" /> ذخیره پیش‌نویس</Button>
+          <Button disabled={submission.busy || !original || !draft.items.some((item) => item.qty > 0)} onClick={() => void finalize()}><CheckCircle2 className="h-4 w-4" /> ثبت نهایی مرجوعی</Button>
         </div>
       </DialogContent>
     </Dialog>

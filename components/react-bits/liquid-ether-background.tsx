@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import LiquidEther from '@/components/react-bits/liquid-ether';
+import { useWorkspacePreferences } from '@/hooks/use-workspace-preferences';
 
 export function LiquidEtherBackground() {
+  const { preferences } = useWorkspacePreferences();
   const [motionAllowed, setMotionAllowed] = useState(false);
 
   useEffect(() => {
@@ -17,7 +19,7 @@ export function LiquidEtherBackground() {
 
   return (
     <div className="app-background" aria-hidden="true">
-      {motionAllowed ? (
+      {motionAllowed && !preferences.reducedEffects ? (
         <LiquidEther
           colors={['#0ea5e9', '#6366f1', '#a78bfa']}
           mouseForce={12}

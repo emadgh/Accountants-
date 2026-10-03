@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Building2,
-  FileText,
-} from 'lucide-react';
+import { BranchedMenu,type BranchedMenuGroup } from '@/components/branched-menu';
+import { sidebarGroups,type ViewKey } from '@/components/sidebar-config';
+import { useWorkspacePreferences } from '@/hooks/use-workspace-preferences';
 import { cn } from '@/lib/utils';
-import { sidebarGroups, type ViewKey } from '@/components/sidebar-config';
-import { BranchedMenu, type BranchedMenuGroup } from '@/components/branched-menu';
+import {
+Building2,
+FileText,
+} from 'lucide-react';
+import { useEffect,useMemo,useState } from 'react';
 
 export type { ViewKey } from '@/components/sidebar-config';
 
@@ -16,12 +17,7 @@ const defaultExpanded = Object.fromEntries(
 ) as Record<string, boolean>;
 
 const SESSION_KEY = 'accountants:sidebar-groups';
-const branchedMenuItems: readonly BranchedMenuGroup[] = sidebarGroups.map((group) => ({
-  id: group.id,
-  label: group.label,
-  collapsible: group.collapsible,
-  children: group.items.map(({ key, label, icon }) => ({ value: key, label, icon })),
-}));
+
 
 export function Sidebar({
   active,
@@ -34,17 +30,31 @@ export function Sidebar({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { preferences } = useWorkspacePreferences();
+  const order = preferences.menuPreset === 'retail'
+    ? ['main', 'sales', 'inventory', 'purchases', 'finance', 'contacts', 'reports', 'system']
+    : preferences.menuPreset === 'individual'
+      ? ['main', 'finance', 'sales', 'contacts', 'reports', 'purchases', 'inventory', 'system']
+      : ['main', 'sales', 'contacts', 'finance', 'purchases', 'reports', 'inventory', 'system'];
+  const orderedGroups = [...sidebarGroups].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  const branchedMenuItems: readonly BranchedMenuGroup[] = orderedGroups.map((group) => ({
+    id: group.id, label: group.label, collapsible: group.collapsible,
+    children: [...group.items].sort((a, b) => {
+      const preferred = preferences.menuPreset === 'retail' ? 'retail-quick' : 'service-quick';
+      return Number(b.key === preferred) - Number(a.key === preferred);
+    }).map(({ key, label, icon }) => ({ value: key, label, icon })),
+  }));
   const [expanded, setExpanded] = useState<Record<string, boolean>>(defaultExpanded);
 
   const activeGroupId = useMemo(
     () => sidebarGroups.find((group) => group.items.some((item) => item.key === active))?.id,
     [active]
   );
-  const openSections = useMemo(() => new Set(sidebarGroups.flatMap((group, index) => {
+  const openSections = new Set(orderedGroups.flatMap((group, index) => {
     const activeInside = group.id === activeGroupId;
     const isOpen = !group.collapsible || activeInside || expanded[group.id] !== false;
     return isOpen ? [index] : [];
-  })), [activeGroupId, expanded]);
+  }));
 
   useEffect(() => {
     try {
@@ -84,7 +94,7 @@ export function Sidebar({
   };
 
   const toggleMenuGroup = (index: number) => {
-    const group = sidebarGroups[index];
+    const group = orderedGroups[index];
     if (group?.collapsible) toggleGroup(group.id);
   };
 

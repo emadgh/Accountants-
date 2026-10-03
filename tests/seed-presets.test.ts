@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createSeedData, SEED_PRESETS, seedData } from '../lib/data';
 import { invoiceTotal } from '../lib/utils';
+import { validateAccountingData } from '../lib/accounting-validation';
+import { projectFinancialSummary } from '../lib/domain/project-summary';
 
 describe('account setup seed presets', () => {
   it('offers an empty preset and returns no operational records for it', () => {
@@ -59,6 +61,47 @@ describe('account setup seed presets', () => {
     expect(data.settings.numbering.quote.next).toBeGreaterThan(1);
     expect(invoiceTotal(quote)).toBe(project.agreedAmount);
     expect(data.moneyTransactions[0].projectId).toBe(project.id);
+  });
+
+  it('seeds construction material purchases, trade labor, fixtures, and balanced project records', () => {
+    const data = createSeedData('construction-suite');
+    const projectId = data.projects[0].id;
+    const purchases = data.invoices.filter((invoice) => invoice.kind === 'purchase');
+    const materials = purchases.flatMap((invoice) => invoice.items).map((item) => item.description).join(' ');
+    expect(purchases).toHaveLength(9);
+    expect(materials).toMatch(/آجر/);
+    expect(materials).toMatch(/سرامیک/);
+    expect(materials).toMatch(/شیرآلات/);
+    for (const trade of ['بنا', 'گچبری', 'سرامیک‌کاری', 'جوشکاری', 'برق‌کاری', 'لوله‌کشی']) {
+      expect(materials).toContain(trade);
+    }
+    expect(purchases.every((invoice) => invoice.projectId === projectId)).toBe(true);
+    expect(data.stockMovements.filter((movement) => movement.type === 'purchase')).toHaveLength(11);
+    expect(data.payments.some((payment) => payment.direction === 'receipt')).toBe(true);
+    expect(data.payments.some((payment) => payment.direction === 'payment')).toBe(true);
+    expect(data.checks.map((check) => check.status)).toEqual(['pending', 'pending']);
+    expect(data.payments.filter((payment) => payment.method === 'check')).toHaveLength(2);
+    expect(data.settings.numbering.check.next).toBe(3);
+    expect(new Set(data.payments.map((payment) => payment.documentNumber)).size).toBe(data.payments.length);
+    const summary = projectFinancialSummary(data, projectId);
+    expect(summary.purchaseInvoices).toHaveLength(9);
+    expect(summary.inventoryPurchases).toBeGreaterThan(0);
+    expect(summary.cost).toBeGreaterThan(0);
+    expect(summary.received).toBe(100_000_000);
+    expect(validateAccountingData(data)).toMatchObject({ ok: true });
+  });
+
+  it('seeds design work across projects with supplier bills and partial customer collection', () => {
+    const data = createSeedData('creative-studio');
+    expect(data.projects).toHaveLength(2);
+    expect(data.quotes).toHaveLength(2);
+    expect(data.invoices.filter((invoice) => invoice.kind === 'purchase')).toHaveLength(3);
+    const cafeInvoice = data.invoices.find((invoice) => invoice.id === 'inv_studio_cafe')!;
+    expect(cafeInvoice.status).toBe('partial');
+    expect(cafeInvoice.installments?.reduce((sum, item) => sum + item.amount, 0)).toBe(invoiceTotal(cafeInvoice));
+    expect(projectFinancialSummary(data, cafeInvoice.projectId).received).toBe(12_000_000);
+    expect(data.settings.numbering.purchase.next).toBe(4);
+    expect(validateAccountingData(data)).toMatchObject({ ok: true });
   });
 
   it('returns a fresh supermarket dataset for each setup and keeps the legacy sample export useful', () => {

@@ -1,8 +1,22 @@
 'use client';
+import { asOfInventory, before, daysAgoIso, inRange, invoiceAmountForProduct, movementLabel, movementSortKey, normalizedDate, productNames, returnAmountForProduct } from '@/lib/domain/report-calculations';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DataTable } from '@/components/ui/data-table';
 
-import { useMemo, useState } from 'react';
+import { BalancesChart, CardexStockChart, DueChecksChart, InventoryValueChart, LedgerBalanceChart, SalesPurchaseTrendChart } from '@/components/analytics/charts';
+import { AppNavbarContent } from '@/components/app-navbar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { JalaliDateRangePicker } from '@/components/ui/jalali-date-picker';
+import { MetricCard } from '@/components/ui/metric-card';
+import { buildTimeSeries } from '@/lib/chart-data';
+import { downloadCsv, downloadExcel, type ExportCell } from '@/lib/report-export';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { useAccountingStore } from '@/lib/store';
+import type { InvoiceKind } from '@/lib/types';
+import { buildCustomerLedger, invoiceLineNet, money } from '@/lib/utils';
 import {
   Archive,
   BookOpen,
@@ -11,111 +25,14 @@ import {
   FileDown,
   FileSpreadsheet,
   FileText,
-  Printer,
   Package,
+  Printer,
   TrendingUp,
   Users,
 } from 'lucide-react';
-import { useAccountingStore } from '@/lib/store';
-import type { Customer, Invoice, InvoiceKind, Product, ReturnDocument, StockMovement } from '@/lib/types';
-import { buildCustomerLedger, invoiceLineNet, invoiceTotal, money } from '@/lib/utils';
-import { formatPersianDate, normalizeStoredDate, todayIso } from '@/lib/standards';
-import { downloadCsv, downloadExcel, type ExportCell } from '@/lib/report-export';
-import { JalaliDateRangePicker } from '@/components/ui/jalali-date-picker';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MetricCard } from '@/components/ui/metric-card';
-import { AppNavbarContent } from '@/components/app-navbar';
-import { BalancesChart, CardexStockChart, DueChecksChart, InventoryValueChart, LedgerBalanceChart, SalesPurchaseTrendChart } from '@/components/analytics/charts';
-import { buildTimeSeries } from '@/lib/chart-data';
+import { useMemo, useState } from 'react';
 
 type ReportTab = 'sales' | 'product-sales' | 'balances' | 'checks' | 'inventory' | 'ledger' | 'cardex';
-
-function daysAgoIso(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
-function normalizedDate(value: string) {
-  if (!value || value === 'ابتدای دوره') return '';
-  return normalizeStoredDate(value);
-}
-
-function inRange(value: string, fromDate: string, toDate: string) {
-  const date = normalizedDate(value);
-  if (!date) return false;
-  return date >= fromDate && date <= toDate;
-}
-
-function before(value: string, dateLimit: string) {
-  if (value === 'ابتدای دوره') return true;
-  const date = normalizedDate(value);
-  return !!date && date < dateLimit;
-}
-
-function onOrBefore(value: string, dateLimit: string) {
-  if (value === 'ابتدای دوره') return true;
-  const date = normalizedDate(value);
-  return !!date && date <= dateLimit;
-}
-
-function invoiceRawSubtotal(invoice: Invoice) {
-  return invoice.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
-}
-
-function invoiceAmountForProduct(invoice: Invoice, productId: string) {
-  if (!productId) return invoiceTotal(invoice);
-  const subtotal = invoiceRawSubtotal(invoice);
-  if (subtotal <= 0) return 0;
-  const selected = invoice.items
-    .filter((item) => item.productId === productId)
-    .reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
-  return invoiceTotal(invoice) * (selected / subtotal);
-}
-
-function returnAmountForProduct(document: ReturnDocument, productId: string) {
-  if (!productId) return Number(document.totalAmount || 0);
-  const subtotal = document.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
-  if (subtotal <= 0) return 0;
-  const selected = document.items
-    .filter((item) => item.productId === productId)
-    .reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unitPrice || 0), 0);
-  return Number(document.totalAmount || 0) * (selected / subtotal);
-}
-
-function productNames(invoice: Invoice, products: Product[], productId: string) {
-  if (productId) return products.find((item) => item.id === productId)?.name || '—';
-  const names = [...new Set(invoice.items.map((item) => products.find((p) => p.id === item.productId)?.name || item.description).filter(Boolean))];
-  return names.slice(0, 3).join('، ') + (names.length > 3 ? '…' : '');
-}
-
-function movementSortKey(movement: StockMovement) {
-  const date = movement.date === 'ابتدای دوره' ? '0000-00-00' : normalizedDate(movement.date);
-  return date + '|' + movement.createdAt + '|' + movement.id;
-}
-
-function movementLabel(movement: StockMovement) {
-  if (movement.type === 'opening') return 'موجودی اول دوره';
-  if (movement.type === 'purchase') return 'خرید';
-  if (movement.type === 'sale') return 'فروش';
-  if (movement.type === 'sale-return') return 'مرجوعی فروش';
-  if (movement.type === 'purchase-return') return 'مرجوعی خرید';
-  if (movement.type === 'adjustment') return movement.action === 'count' ? 'شمارش انبار' : 'اصلاح موجودی';
-  return 'برگشت / اصلاح سند';
-}
-
-function asOfInventory(product: Product, movements: StockMovement[], toDate: string) {
-  const rows = movements
-    .filter((movement) => movement.productId === product.id && onOrBefore(movement.date, toDate))
-    .sort((a, b) => movementSortKey(a).localeCompare(movementSortKey(b)));
-  const last = rows.at(-1);
-  return {
-    stock: last ? Number(last.balanceAfter || 0) : 0,
-    averageCost: last ? Number(last.averageCostAfter || 0) : Number(product.averageCost || product.buyPrice || 0),
-  };
-}
 
 function EmptyRow({ cols, text }: { cols: number; text: string }) {
   return <tr><td colSpan={cols} className="!py-14 text-center text-slate-400">{text}</td></tr>;
@@ -126,8 +43,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
   onOpenCustomer?: (customerId: string) => void;
   onOpenCheck?: (checkId: string) => void;
 }) {
-  const {
-    customers,
+  const { customers,
     products,
     invoices,
     returns,
@@ -135,8 +51,7 @@ export function ReportsView({ onOpenInvoice, onOpenCustomer, onOpenCheck }: {
     checks,
     adjustments,
     stockMovements,
-    settings,
-  } = useAccountingStore();
+    settings, } = useAccountingStore(useShallow((state) => ({ customers: state.customers, products: state.products, invoices: state.invoices, returns: state.returns, payments: state.payments, checks: state.checks, adjustments: state.adjustments, stockMovements: state.stockMovements, settings: state.settings })));
 
   const [tab, setTab] = useState<ReportTab>('sales');
   const [fromDate, setFromDate] = useState(daysAgoIso(30));

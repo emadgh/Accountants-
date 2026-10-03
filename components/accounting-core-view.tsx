@@ -1,39 +1,41 @@
 'use client';
+import { AccountingRecoveryNotice } from '@/components/accounting-recovery-notice';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DataTable } from '@/components/ui/data-table';
 
-import { useMemo, useState } from 'react';
-import { Ban, BookOpenCheck, Landmark, Plus, Scale, WalletCards } from 'lucide-react';
-import { useAccountingStore } from '@/lib/store';
-import type { Account, AccountType, MoneyTransaction } from '@/lib/types';
-import { accountBalance, isBalancedJournal, journalTotals, systemAccountId } from '@/lib/accounting';
-import { money, uid } from '@/lib/utils';
-import { formatPersianDate, todayIso } from '@/lib/standards';
-import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
+import { AppNavbarContent } from '@/components/app-navbar';
+import { MoneyTransactionFields } from '@/components/forms/money-transaction-fields';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MetricCard } from '@/components/ui/metric-card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input, Textarea } from '@/components/ui/input';
-import { FormattedInput } from '@/components/ui/formatted-input';
+import { Card,CardHeader,CardTitle } from '@/components/ui/card';
+import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
-import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
-import { AppNavbarContent } from '@/components/app-navbar';
+import { Input } from '@/components/ui/input';
+import { MetricCard } from '@/components/ui/metric-card';
+import { usePersistedAction } from '@/hooks/use-persisted-action';
+import { accountBalance,isBalancedJournal,journalTotals,systemAccountId } from '@/lib/accounting';
+import { confirmDialog,notify,promptDialog } from '@/lib/feedback';
+import { persistOperation } from '@/lib/operation-result';
+import { formatPersianDate,todayIso } from '@/lib/standards';
+import { useAccountingStore } from '@/lib/store';
+import type { Account,AccountType,MoneyTransaction } from '@/lib/types';
+import { money,uid } from '@/lib/utils';
+import { Ban,BookOpenCheck,Landmark,Plus,Scale,WalletCards } from 'lucide-react';
+import { useMemo,useState } from 'react';
 
 type Tab = 'accounts' | 'journal' | 'money';
 
 export function AccountingCoreView() {
-  const {
-    accounts,
+  const submission = usePersistedAction();
+  const { accounts,
     journalEntries,
     moneyTransactions,
     settings,
     upsertAccount,
     deleteAccount,
     addMoneyTransaction,
-    voidMoneyTransaction,
-  } = useAccountingStore();
+    voidMoneyTransaction, } = useAccountingStore(useShallow((state) => ({ accounts: state.accounts, journalEntries: state.journalEntries, moneyTransactions: state.moneyTransactions, settings: state.settings, upsertAccount: state.upsertAccount, deleteAccount: state.deleteAccount, addMoneyTransaction: state.addMoneyTransaction, voidMoneyTransaction: state.voidMoneyTransaction })));
 
   const [tab, setTab] = useState<Tab>('accounts');
   const [accountOpen, setAccountOpen] = useState(false);
@@ -62,14 +64,7 @@ export function AccountingCoreView() {
     setAccountOpen(true);
   };
 
-  const saveAccount = () => {
-    const result = upsertAccount(accountDraft);
-    if (!result.ok) {
-      notify(result.message || 'ثبت حساب انجام نشد.', 'error');
-      return;
-    }
-    setAccountOpen(false);
-  };
+  const saveAccount = async () => { await submission.run(() => upsertAccount(accountDraft), () => setAccountOpen(false)); };
 
   const startMoney = (kind: 'income' | 'expense') => {
     const settlementAccountId = settlementAccounts[0]?.id || systemAccountId(accounts, 'cash');
@@ -93,18 +88,13 @@ export function AccountingCoreView() {
       { title: 'تأیید ثبت قطعی', confirmLabel: 'ثبت قطعی و تراز' }
     );
     if (!approved) return;
-    const result = addMoneyTransaction(moneyDraft);
-    if (!result.ok) {
-      notify(result.message || 'ثبت تراکنش انجام نشد.', 'error');
-      return;
-    }
-    setMoneyOpen(false);
+    await submission.run(() => addMoneyTransaction(moneyDraft), () => setMoneyOpen(false));
   };
 
   const voidMoney = async (transaction: MoneyTransaction) => {
     const reason = await promptDialog('دلیل ابطال تراکنش را وارد کنید:', { title: 'ابطال تراکنش', confirmLabel: 'ابطال', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
-    const result = voidMoneyTransaction(transaction.id, reason);
+    const result = await persistOperation(() => voidMoneyTransaction(transaction.id, reason));
     if (!result.ok) notify(result.message || 'ابطال انجام نشد.', 'error');
   };
 
@@ -204,29 +194,23 @@ export function AccountingCoreView() {
 
     <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
       <DialogContent>
-        <DialogHeader><DialogTitle className="text-lg font-black">حساب جدید</DialogTitle><DialogDescription className="text-sm text-slate-500">حساب‌های سیستمی ثابت هستند؛ حساب‌های تکمیلی برای درآمد و هزینه یا توسعه کدینگ قابل تعریف‌اند.</DialogDescription></DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <AccountingRecoveryNotice /><DialogHeader><DialogTitle className="text-lg font-black">حساب جدید</DialogTitle><DialogDescription className="text-sm text-slate-500">حساب‌های سیستمی ثابت هستند؛ حساب‌های تکمیلی برای درآمد و هزینه یا توسعه کدینگ قابل تعریف‌اند.</DialogDescription></DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">{submission.error && <p role="alert" className="text-sm text-rose-600 sm:col-span-2">{submission.error}</p>}
           <Field label="کد حساب"><Input value={accountDraft.code} onChange={(event) => setAccountDraft({ ...accountDraft, code: event.target.value })} /></Field>
           <Field label="نام حساب"><Input value={accountDraft.name} onChange={(event) => setAccountDraft({ ...accountDraft, name: event.target.value })} /></Field>
           <Field label="گروه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={accountDraft.type} onChange={(event) => { const type = event.target.value as AccountType; setAccountDraft({ ...accountDraft, type, normalBalance: type === 'asset' || type === 'expense' ? 'debit' : 'credit' }); }}><option value="asset">دارایی</option><option value="liability">بدهی</option><option value="equity">حقوق مالکانه</option><option value="revenue">درآمد</option><option value="expense">هزینه</option></select></Field>
           <Field label="ماهیت"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={accountDraft.normalBalance} onChange={(event) => setAccountDraft({ ...accountDraft, normalBalance: event.target.value as 'debit' | 'credit' })}><option value="debit">بدهکار</option><option value="credit">بستانکار</option></select></Field>
-          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAccountOpen(false)}>انصراف</Button><Button onClick={saveAccount}>ذخیره حساب</Button></div>
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setAccountOpen(false)}>انصراف</Button><Button disabled={submission.busy} onClick={() => void saveAccount()}>ذخیره حساب</Button></div>
         </div>
       </DialogContent>
     </Dialog>
 
     <Dialog open={moneyOpen} onOpenChange={setMoneyOpen}>
       <DialogContent>
-        <DialogHeader><DialogTitle className="text-lg font-black">{moneyDraft.kind === 'income' ? 'ثبت درآمد' : 'ثبت هزینه'}</DialogTitle><DialogDescription className="text-sm text-slate-500">ثبت قطعی است؛ برای اصلاح بعدی از ابطال و سند جدید استفاده کنید.</DialogDescription></DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="نوع"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.kind} onChange={(event) => { const kind = event.target.value as 'income' | 'expense'; const categories = kind === 'income' ? incomeAccounts : expenseAccounts; setMoneyDraft({ ...moneyDraft, kind, categoryAccountId: categories[0]?.id || '' }); }}><option value="income">درآمد</option><option value="expense">هزینه</option></select></Field>
-          <Field label="تاریخ"><JalaliDatePicker value={moneyDraft.date} onChange={(date) => setMoneyDraft({ ...moneyDraft, date })} /></Field>
-          <Field label="حساب صندوق / بانک"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.settlementAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, settlementAccountId: event.target.value })}>{settlementAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
-          <Field label="حساب درآمد / هزینه"><select className="h-10 w-full rounded-xl border border-slate-200 px-3" value={moneyDraft.categoryAccountId} onChange={(event) => setMoneyDraft({ ...moneyDraft, categoryAccountId: event.target.value })}>{(moneyDraft.kind === 'income' ? incomeAccounts : expenseAccounts).map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></Field>
-          <Field label={'مبلغ (' + settings.currency + ')'}><FormattedInput min={0} value={moneyDraft.amount} onValueChange={(amount) => setMoneyDraft({ ...moneyDraft, amount })} /></Field>
-          <Field label="مرجع"><Input value={moneyDraft.reference || ''} onChange={(event) => setMoneyDraft({ ...moneyDraft, reference: event.target.value })} /></Field>
-          <Field label="شرح *" className="sm:col-span-2"><Textarea value={moneyDraft.description} onChange={(event) => setMoneyDraft({ ...moneyDraft, description: event.target.value })} /></Field>
-          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setMoneyOpen(false)}>انصراف</Button><Button disabled={moneyDraft.amount <= 0 || !moneyDraft.description.trim()} onClick={saveMoney}><Scale className="h-4 w-4" /> ثبت قطعی و تراز</Button></div>
+        <AccountingRecoveryNotice /><DialogHeader><DialogTitle className="text-lg font-black">{moneyDraft.kind === 'income' ? 'ثبت درآمد' : 'ثبت هزینه'}</DialogTitle><DialogDescription className="text-sm text-slate-500">ثبت قطعی است؛ برای اصلاح بعدی از ابطال و سند جدید استفاده کنید.</DialogDescription></DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">{submission.error && <p role="alert" className="text-sm text-rose-600 sm:col-span-2">{submission.error}</p>}
+          <MoneyTransactionFields value={moneyDraft} onChange={(draft) => setMoneyDraft({ ...moneyDraft, ...draft })} accounts={accounts} currency={settings.currency} disabled={submission.busy} />
+          <div className="flex justify-end gap-2 sm:col-span-2"><Button variant="outline" onClick={() => setMoneyOpen(false)}>انصراف</Button><Button disabled={submission.busy || moneyDraft.amount <= 0 || !moneyDraft.description.trim()} onClick={saveMoney}><Scale className="h-4 w-4" /> ثبت قطعی و تراز</Button></div>
         </div>
       </DialogContent>
     </Dialog>

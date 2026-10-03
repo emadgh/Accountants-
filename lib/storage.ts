@@ -1,6 +1,7 @@
-import type { AccountingData } from './types';
-import { buildAccountingMutations } from './accounting-commands';
+import { buildAccountingMutations,type AccountingMutation } from './accounting-commands';
 import { createEmptyAccountingData } from './data';
+import type { DomainCommand } from './domain/commands';
+import type { AccountingData } from './types';
 
 export const ACCOUNTING_PERSIST_KEY = 'accountants-web-v1';
 export const ACCOUNTING_SCHEMA_VERSION = 9;
@@ -27,9 +28,35 @@ let writeQueue: Promise<void> = Promise.resolve();
 let persistedRevision: number | null = null;
 let persistedData: AccountingData | null = null;
 let lastPersistenceError: unknown = null;
+let activeCommands: Array<DomainCommand | AccountingMutation> | null = null;
+let applyingServerState = false;
+let queuedWrites = 0;
+let serverStateListener: ((data: AccountingData) => void) | undefined;
 
-class AccountingApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) {
+export function withDomainCommand<T>(command: DomainCommand, commit: () => T): T {
+  return withAccountingCommands([command], commit);
+}
+
+export function withAccountingCommands<T>(commands: Array<DomainCommand | AccountingMutation>, commit: () => T): T {
+  activeCommands = commands;
+  try { return commit(); } finally { activeCommands = null; }
+}
+
+export function onAccountingServerState(listener: (data: AccountingData) => void) {
+  serverStateListener = listener;
+}
+
+function publishServerState(data: AccountingData) {
+  applyingServerState = true;
+  try { serverStateListener?.(data); } finally { applyingServerState = false; }
+}
+
+export function isAccountingPersistencePending() { return queuedWrites > 0; }
+export function accountingRevision() { return persistedRevision ?? undefined; }
+export function accountingPersistenceErrorMessage() { return lastPersistenceError instanceof Error ? lastPersistenceError.message : lastPersistenceError ? String(lastPersistenceError) : ''; }
+
+export class AccountingApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly fieldErrors?: Record<string, string>) {
     super(message);
     this.name = 'AccountingApiError';
   }
@@ -48,7 +75,6 @@ export function flushAccountingPersistence() {
   return writeQueue.then(() => {
     if (!lastPersistenceError) return;
     const error = lastPersistenceError;
-    lastPersistenceError = null;
     throw error;
   });
 }
@@ -64,9 +90,9 @@ async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     credentials: 'same-origin',
     headers: { ...(init?.headers || {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
-  });
-  const payload = await response.json().catch(() => ({})) as T & { error?: string; code?: string };
-  if (!response.ok) throw new AccountingApiError(payload.error || `ذخیره‌سازی داده انجام نشد (HTTP ${response.status}).`, response.status, payload.code);
+  }).catch(() => { throw new AccountingApiError('ارتباط با سرور برقرار نشد؛ اطلاعات فرم حفظ شده است.', 0, 'NETWORK_UNAVAILABLE'); });
+  const payload = await response.json().catch(() => ({})) as T & { error?: string; code?: string; fieldErrors?: Record<string, string> };
+  if (!response.ok) throw new AccountingApiError(payload.error || `ذخیره‌سازی داده انجام نشد (HTTP ${response.status}).`, response.status, payload.code, payload.fieldErrors);
   return payload;
 }
 
@@ -96,16 +122,23 @@ export const accountingStateStorage = {
     const result = await requestApi<{ data: AccountingData | null; revision: number }>('/api/accounting-data', { cache: 'no-store' });
     persistedRevision = result.revision;
     persistedData = result.data;
+    lastPersistenceError = null;
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('accounting:persistence-recovered'));
     return result.data ? JSON.stringify({ state: result.data, version: ACCOUNTING_SCHEMA_VERSION }) : null;
   },
 
   async setItem(_name: string, value: string) {
+    if (applyingServerState) return;
+    const capturedCommands = activeCommands;
+    queuedWrites++;
     const operation = writeQueue.then(async () => {
+      if (lastPersistenceError) throw lastPersistenceError;
       const envelope = dataFromEnvelope(value);
       const baseline = persistedData || createEmptyAccountingData();
-      const commands = buildAccountingMutations(baseline, envelope.state);
+      const commands = capturedCommands || buildAccountingMutations(baseline, envelope.state);
       if (!commands.length) {
-        persistedData = envelope.state;
+        // An empty captured edit must not replace a newer canonical response.
+        if (!persistedData) persistedData = envelope.state;
         return;
       }
       const body = JSON.stringify({
@@ -113,7 +146,7 @@ export const accountingStateStorage = {
         expectedRevision: persistedRevision,
         commands,
       });
-      let result: { revision: number };
+      let result: { revision: number; data?: AccountingData };
       try {
         result = await requestApi('/api/accounting-data/commands', { method: 'POST', body });
       } catch (firstError) {
@@ -126,12 +159,20 @@ export const accountingStateStorage = {
         }
       }
       persistedRevision = result.revision;
-      persistedData = envelope.state;
+      if (capturedCommands?.length && !result.data) {
+        const latest = await requestApi<{ data: AccountingData; revision: number }>('/api/accounting-data', { cache: 'no-store' });
+        result = latest;
+        persistedRevision = latest.revision;
+      }
+      persistedData = result.data || envelope.state;
       lastPersistenceError = null;
     });
     writeQueue = operation.catch((error) => {
       lastPersistenceError = error;
       emitPersistenceError(error);
+    }).finally(() => {
+      queuedWrites--;
+      if (queuedWrites === 0 && persistedData && !lastPersistenceError) publishServerState(persistedData);
     });
     return writeQueue;
   },

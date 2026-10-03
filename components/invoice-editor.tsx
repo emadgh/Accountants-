@@ -1,28 +1,35 @@
 'use client';
+import { DocumentProductPicker } from '@/components/forms/document-product-picker';
+import { productLinePatch, patchDocumentLine } from '@/lib/domain/document-line';
+import { AccountingRecoveryNotice } from '@/components/accounting-recovery-notice';
+import { useAsyncSubmission } from '@/hooks/use-persisted-action';
+import { createGuestCustomer } from '@/lib/domain/customer';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DataTable } from '@/components/ui/data-table';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowRight, ArrowDownToLine, Ban, CheckCircle2, Copy, Edit3, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
-import { useAccountingStore } from '@/lib/store';
-import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId, Project } from '@/lib/types';
-import { INVOICE_PAPER_SIZES, INVOICE_TEMPLATES } from '@/lib/invoice-templates';
-import { buildCustomerLedger, invoiceLineDiscount, invoiceLineGross, invoiceLineNet, invoiceOutstandingAmount, invoiceTotal, money, numberToPersianWords, settledForInvoice, uid } from '@/lib/utils';
-import { formatPersianDate, todayIso } from '@/lib/standards';
-import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Panel } from '@/components/ui/panel';
-import { SearchableSelect, type SearchableOption } from '@/components/ui/searchable-select';
-import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FormattedInput, formatCardNumber, formatIranIban, formatPostalCode, type TextInputFormat } from '@/components/ui/formatted-input';
+import { AppNavbarContent } from '@/components/app-navbar';
+import { NumberEdit } from '@/components/forms/document-number-edit';
+import { PartyPicker } from '@/components/forms/party-picker';
 import { InvoicePaymentDialog } from '@/components/invoice-payment-dialog';
 import { InvoicePaymentHistoryButton } from '@/components/invoice-payment-history';
-import { AppNavbarContent } from '@/components/app-navbar';
 import ElectricBorder from '@/components/react-bits/electric-border';
-import { flushAccountingPersistence } from '@/lib/storage';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { FormattedInput, formatCardNumber, formatIranIban, formatPostalCode, type TextInputFormat } from '@/components/ui/formatted-input';
+import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
+import { Panel } from '@/components/ui/panel';
+import { confirmDialog, notify, promptDialog } from '@/lib/feedback';
+import { INVOICE_PAPER_SIZES, INVOICE_TEMPLATES } from '@/lib/invoice-templates';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { flushAccountingPersistence, isAccountingPersistencePending } from '@/lib/storage';
+import { useAccountingStore } from '@/lib/store';
+import type { BusinessProfile, Customer, Invoice, InvoiceItem, InvoiceKind, InvoicePaperSize, InvoiceTemplateId, Project } from '@/lib/types';
+import { buildCustomerLedger, invoiceLineDiscount, invoiceLineGross, invoiceLineNet, invoiceOutstandingAmount, invoiceTotal, money, numberToPersianWords, settledForInvoice, uid } from '@/lib/utils';
+import { ArrowDownToLine, ArrowRight, Ban, CheckCircle2, Copy, Edit3, Eye, History, Plus, Printer, Save, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 
 function blankInvoice(kind: InvoiceKind, customerName = '', number = '', businessProfileId = '', templateId: InvoiceTemplateId = 'classic', paperSize: InvoicePaperSize = 'A4', project?: Project, projectCustomer?: Customer): Invoice {
   const now = new Date().toISOString();
@@ -47,7 +54,8 @@ function InvoiceAmount({ value, empty = false }: { value: number; empty?: boolea
 
 export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit, onBack }: { kind: InvoiceKind; invoiceId?: string | null; projectId?: string | null; mode: 'view' | 'edit'; onRequestEdit?: () => void; onBack?: () => void }) {
   const router = useRouter();
-  const { invoices, customers, projects, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore();
+  const submission = useAsyncSubmission();
+  const { invoices, customers, projects, products, payments, checks, adjustments, returns, settings, upsertBusinessProfile, upsertCustomer, reserveDocumentNumber, saveInvoiceDraft, setInvoiceTemplate, setInvoicePaperSize, finalizeInvoice, reviseInvoice, voidInvoice } = useAccountingStore(useShallow((state) => ({ invoices: state.invoices, customers: state.customers, projects: state.projects, products: state.products, payments: state.payments, checks: state.checks, adjustments: state.adjustments, returns: state.returns, settings: state.settings, upsertBusinessProfile: state.upsertBusinessProfile, upsertCustomer: state.upsertCustomer, reserveDocumentNumber: state.reserveDocumentNumber, saveInvoiceDraft: state.saveInvoiceDraft, setInvoiceTemplate: state.setInvoiceTemplate, setInvoicePaperSize: state.setInvoicePaperSize, finalizeInvoice: state.finalizeInvoice, reviseInvoice: state.reviseInvoice, voidInvoice: state.voidInvoice })));
   const initialProject = projectId ? projects.find((item) => item.id === projectId) : undefined;
   const initialProjectCustomer = initialProject ? customers.find((item) => item.id === initialProject.customerId) : undefined;
   const selectedInvoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
@@ -66,6 +74,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
   }, [selectedInvoice?.id, kind, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (isAccountingPersistencePending() && mode !== 'view') return;
     if (selectedInvoice && invoice.id === selectedInvoice.id && (mode === 'view' || selectedInvoice.status === 'settled' || selectedInvoice.status === 'void' || selectedInvoice.status !== invoice.status)) {
       setInvoice(structuredClone(selectedInvoice));
     }
@@ -118,35 +127,13 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     const result = upsertBusinessProfile({ ...businessProfile, ...values });
     if (!result.ok) notify(result.message || 'ذخیره پروفایل انجام نشد.', 'error');
   };
-  const customerOptions: SearchableOption[] = [
-    { value: '', label: 'ورود دستی', description: 'نام و اطلاعات طرف حساب را دستی وارد کنید' },
-    ...customers
-      .filter((c) => (c.status !== 'archived' || c.id === invoice.customerId) && (invoice.kind === 'sale' ? c.kind !== 'supplier' : c.kind !== 'customer'))
-      .map((c) => ({
-        value: c.id,
-        label: c.name,
-        description: [c.code, c.phone].filter(Boolean).join(' · '),
-        keywords: [c.code, c.phone, c.nationalId, c.economicCode].filter(Boolean).join(' '),
-      })),
-  ];
-  const invoiceProductIds = new Set(invoice.items.map((item) => item.productId).filter(Boolean));
-  const productOptions: SearchableOption[] = [
-    { value: '', label: 'شرح دستی', description: 'ردیف بدون اتصال به کالا/خدمت' },
-    ...products.filter((product) => !product.archived || invoiceProductIds.has(product.id)).map((p) => ({
-      value: p.id,
-      label: p.name,
-      description: [p.code, p.kind === 'product' ? 'کالا' : 'خدمت', p.unit].join(' · '),
-      keywords: [p.code, p.name, p.notes].filter(Boolean).join(' '),
-    })),
-  ];
-
   const patch = <K extends keyof Invoice>(key: K, value: Invoice[K]) => {
     if (!canEdit || (isPartial && key !== 'notes')) return;
     setInvoice((x) => ({ ...x, [key]: value, updatedAt: new Date().toISOString() }));
   };
   const patchItem = (id: string, values: Partial<InvoiceItem>) => {
     if (!canEdit || isPartial) return;
-    setInvoice((x) => ({ ...x, items: x.items.map((item) => item.id === id ? { ...item, ...values } : item), updatedAt: new Date().toISOString() }));
+    setInvoice((x) => ({ ...x, items: patchDocumentLine(x.items, id, values), updatedAt: new Date().toISOString() }));
   };
   const chooseTemplate = (templateId: InvoiceTemplateId) => {
     if (existing) {
@@ -186,7 +173,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
 
   const chooseCustomer = (id: string) => {
     if (!canEdit || isPartial) return;
-    const c = customers.find((x) => x.id === id);
+    const c = useAccountingStore.getState().customers.find((x) => x.id === id);
     if (!c) return patch('customerId', '');
     setInvoice((x) => ({ ...x, customerId: c.id, customerName: c.name, customerPhone: c.phone, customerAddress: c.address, customerNationalId: c.nationalId, customerEconomicCode: c.economicCode, customerPostalCode: c.postalCode }));
   };
@@ -219,9 +206,8 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       notify('نام طرف حساب را وارد کنید یا یک طرف حساب انتخاب کنید.', 'error');
       return null;
     }
-    const customer: Customer = {
-      id: source.customerId || uid('cus'),
-      code: `GUEST-${Date.now().toString(36).toUpperCase()}`,
+    const customer = createGuestCustomer({
+      ...(source.customerId ? { id: source.customerId } : {}),
       name: source.customerName.trim(),
       kind: source.kind === 'sale' ? 'customer' : 'supplier',
       status: 'active',
@@ -232,7 +218,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       postalCode: source.customerPostalCode || '',
       openingBalance: 0,
       notes: 'طرف حساب ساخته‌شده هنگام ثبت فاکتور',
-    };
+    });
     upsertCustomer(customer);
     const updated = { ...source, customerId: customer.id, customerName: customer.name };
     setInvoice(updated);
@@ -242,8 +228,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
   const chooseProduct = (rowId: string, productId: string) => {
     if (!canEdit || isPartial) return;
     const p = products.find((x) => x.id === productId);
-    if (!p) return patchItem(rowId, { productId: undefined });
-    patchItem(rowId, { productId: p.id, description: p.name, unit: p.unit, unitPrice: invoice.kind === 'sale' ? p.salePrice : p.buyPrice });
+    patchItem(rowId, productLinePatch(p, invoice.kind));
   };
 
   const showSaved = () => {
@@ -251,7 +236,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     window.setTimeout(() => setSavedFlash(false), 1200);
   };
 
-  const persist = async () => {
+  const persistRecord = async () => {
     if (!canEdit) return null;
     if (isVoid) return null;
 
@@ -264,6 +249,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         notify(result.message || 'ذخیره فاکتور انجام نشد.', 'error');
         return null;
       }
+      try { await flushAccountingPersistence(); } catch (error) { notify(error instanceof Error ? error.message : 'ذخیره انجام نشد؛ فرم حفظ شد.', 'error'); return null; }
       setInvoice(structuredClone(result.invoice));
       showSaved();
       return result.invoice;
@@ -284,15 +270,18 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       notify(result.message || 'ثبت Revision انجام نشد.', 'error');
       return null;
     }
+    try { await flushAccountingPersistence(); } catch (error) { notify(error instanceof Error ? error.message : 'ذخیره انجام نشد؛ فرم حفظ شد.', 'error'); return null; }
     setInvoice(structuredClone(result.invoice));
     showSaved();
     return result.invoice;
   };
 
-  const openInstallments = async () => {
+  const persist = () => submission.run(persistRecord);
+
+  const openInstallments = () => submission.run(async () => {
     let target = existing;
     if (canEdit && (isDirty || !target)) {
-      target = await persist() || undefined;
+      target = await persistRecord() || undefined;
       if (!target) return;
       try {
         await flushAccountingPersistence();
@@ -302,13 +291,13 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       }
     }
     if (target) router.push(`/sales/installments?invoiceId=${encodeURIComponent(target.id)}`);
-  };
+  });
 
   const previewPrint = () => {
     setPreviewOpen(true);
   };
 
-  const print = async () => {
+  const print = () => submission.run(async () => {
     if (isReadOnly) {
       window.print();
       return;
@@ -342,7 +331,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       return;
     }
 
-    if (isDirty && !(await persist())) return;
+    if (isDirty && !(await persistRecord())) return;
     try {
       await flushAccountingPersistence();
     } catch (error) {
@@ -350,9 +339,9 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       return;
     }
     window.setTimeout(() => window.print(), 80);
-  };
+  });
 
-  const voidCurrent = async () => {
+  const voidCurrent = () => submission.run(async () => {
     if (!canEdit || !isPosted || isSettled) return;
     const reason = await promptDialog('دلیل ابطال فاکتور را وارد کنید:', { title: 'ابطال فاکتور', confirmLabel: 'ابطال سند', danger: true, placeholder: 'دلیل ابطال...' });
     if (!reason?.trim()) return;
@@ -361,8 +350,9 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       notify(result.message || 'ابطال فاکتور انجام نشد.', 'error');
       return;
     }
+    try { await flushAccountingPersistence(); } catch (error) { notify(error instanceof Error ? error.message : 'ذخیره ابطال انجام نشد.', 'error'); return; }
     setInvoice(structuredClone(result.invoice));
-  };
+  });
 
   const duplicate = () => {
     if (!canEdit || isPartial) return;
@@ -411,12 +401,13 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
   });
 
   return <div className={'invoice-editor-root invoice-editor-layout space-y-4' + (previewOpen ? ' invoice-preview-active' : '')}>
+    <div className="invoice-editor-alert screen-only empty:hidden"><AccountingRecoveryNotice /></div>
     <style>{`@media print { @page { size: ${paperSize} portrait; margin: ${paperSize === 'A5' ? '5mm' : '8mm 8mm 10mm'}; } }`}</style>
     {previewOpen ? <div className="invoice-preview-toolbar screen-only" data-paper-size={paperSize}>
       <Button variant="outline" onClick={() => setPreviewOpen(false)}><ArrowRight className="h-4 w-4" /> بازگشت به ویرایش</Button>
       <span className="text-sm font-black">پیش‌نمایش قالب {INVOICE_TEMPLATES.find((template) => template.id === invoice.templateId)?.label || 'کلاسیک'} · {paperSize}</span>
       <InvoicePaperSizeSelect value={paperSize} onChange={choosePaperSize} />
-      <Button onClick={print}><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : 'چاپ'}</Button>
+      <Button disabled={submission.busy} onClick={print}><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : 'چاپ'}</Button>
     </div> : <AppNavbarContent
       title={`${isReadOnly ? 'نمایش' : isPartial ? 'ویرایش محدود' : existing ? 'ویرایش' : 'ثبت'} فاکتور ${invoice.kind === 'sale' ? 'فروش' : 'خرید'}`}
       subtitle={isReadOnly ? 'اطلاعات فاکتور فقط برای مشاهده باز شده است.' : existing ? 'همین فرم نسخه قابل چاپ فاکتور است.' : 'اطلاعات را تکمیل کنید؛ می‌توانید پیش‌نویس را ذخیره یا فاکتور را ثبت نهایی کنید.'}
@@ -452,11 +443,11 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
           <Button variant="outline" size="sm" disabled={isDirty} title={isDirty ? 'ابتدا تغییرات را ثبت کنید.' : undefined} onClick={startPayment}><ArrowDownToLine className="h-4 w-4" />{invoice.kind === 'sale' ? 'دریافت / تسویه' : 'پرداخت / تسویه'}</Button>
         </>}
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
-        <Button size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
+        <Button disabled={submission.busy} size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
         <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="block text-[11px] font-normal text-slate-500">{invoice.kind === 'sale' ? 'در فاکتور فروش، طرف‌حساب همان پروژه انتخاب می‌شود.' : 'اتصال پروژه، طرف‌حساب تأمین‌کننده را تغییر نمی‌دهد.'}</span></label>
-        {invoice.kind === 'sale' && <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>}
+        {invoice.kind === 'sale' && <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button disabled={submission.busy} type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>}
       </div>
     </Panel>}
 
@@ -567,7 +558,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         <div className="invoice-reference-party-title">{invoice.kind === 'sale' ? 'مشخصات خریدار' : 'مشخصات فروشنده'}</div>
         {isGreenBrandTemplate ? <div className="invoice-green-party-layout">
           <div className="invoice-green-buyer">
-          <div className="invoice-green-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+          <div className="invoice-green-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><PartyPicker value={invoice.customerId} onChange={chooseCustomer} kind={invoice.kind === 'sale' ? 'customer' : 'supplier'} manual disabled={!canEdit || isPartial} inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
           </div>
@@ -578,7 +569,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
           </div>
         </div> : isStorefrontTemplate ? <div className="invoice-storefront-party-layout">
           <div className="invoice-storefront-buyer">
-          <div className="invoice-storefront-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+          <div className="invoice-storefront-customer-name"><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'طرف حساب:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><PartyPicker value={invoice.customerId} onChange={chooseCustomer} kind={invoice.kind === 'sale' ? 'customer' : 'supplier'} manual disabled={!canEdit || isPartial} inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} />
           </div>
@@ -589,7 +580,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
           </div>
         </div> : isOfficialTemplate ? <div className="invoice-official-party-content invoice-official-buyer-content">
           <div className="invoice-official-party-main">
-            <div className="invoice-official-customer-name" data-print-empty={!hasText(invoice.customerName) ? 'true' : undefined}><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'خریدار:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+            <div className="invoice-official-customer-name" data-print-empty={!hasText(invoice.customerName) ? 'true' : undefined}><span className="shrink-0 font-bold">{invoice.kind === 'sale' ? 'خریدار:' : 'فروشنده:'}</span><span className="screen-only min-w-[110px] flex-1"><PartyPicker value={invoice.customerId} onChange={chooseCustomer} kind={invoice.kind === 'sale' ? 'customer' : 'supplier'} manual disabled={!canEdit || isPartial} inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" hideWhenEmptyForPrint />
             <InfoLine label="آدرس" value={invoice.customerAddress} onChange={(v) => patch('customerAddress', v)} hideWhenEmptyForPrint />
             <div className="invoice-official-party-codes">
@@ -605,7 +596,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
           </div>
         </div> : invoice.templateId === 'violet-ledger' ? <div className="invoice-violet-party-fields invoice-violet-customer-fields">
           <div className="invoice-violet-fields-main">
-            <div className="invoice-violet-customer-name"><span className="font-bold">{invoice.kind === 'sale' ? 'خریدار' : 'فروشنده'}:</span><span className="screen-only min-w-[110px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
+            <div className="invoice-violet-customer-name"><span className="font-bold">{invoice.kind === 'sale' ? 'خریدار' : 'فروشنده'}:</span><span className="screen-only min-w-[110px] flex-1"><PartyPicker value={invoice.customerId} onChange={chooseCustomer} kind={invoice.kind === 'sale' ? 'customer' : 'supplier'} manual disabled={!canEdit || isPartial} inputClassName="font-bold" /></span><span className="print-only font-bold">{invoice.customerName || '—'}</span>{!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}</div>
             <InfoLine label="شماره تماس" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
             <InfoLine label="کد اقتصادی" value={invoice.customerEconomicCode || ''} onChange={(v) => patch('customerEconomicCode', v)} format="economicCode" />
           </div>
@@ -613,7 +604,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         </div> : <div className="invoice-reference-party-content grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-[1.35fr_.65fr]">
           <div className="space-y-1">
             <div className="flex items-center gap-2"><span className="shrink-0 font-bold">{invoice.templateId === 'blue-ledger' ? 'نام' : 'طرف حساب'}:</span>
-              <div className="screen-only min-w-[210px] flex-1"><SearchableSelect value={invoice.customerId} options={customerOptions} onChange={chooseCustomer} placeholder="انتخاب طرف حساب..." searchPlaceholder="جستجوی نام، کد یا تلفن..." inputClassName="font-bold" /></div><span className="print-only font-bold">{invoice.customerName || '—'}</span>
+              <div className="screen-only min-w-[210px] flex-1"><PartyPicker value={invoice.customerId} onChange={chooseCustomer} kind={invoice.kind === 'sale' ? 'customer' : 'supplier'} manual disabled={!canEdit || isPartial} inputClassName="font-bold" /></div><span className="print-only font-bold">{invoice.customerName || '—'}</span>
               {!invoice.customerId && <input className="screen-editor invoice-inline-input font-bold" placeholder="نام طرف حساب" value={invoice.customerName} onChange={(e) => patch('customerName', e.target.value)} />}
             </div>
             <InfoLine label="تلفن" value={invoice.customerPhone} onChange={(v) => patch('customerPhone', v)} valueDirection="rtl" />
@@ -641,7 +632,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         <thead><tr><th>شرح کالا</th><th>مقدار</th><th>واحد</th><th>قیمت واحد</th><th>مبلغ کل</th></tr></thead>
         <tbody>{invoice.items.map((item) => <tr key={item.id}>
           <td>
-            <div className="screen-only"><SearchableSelect value={item.productId || ''} options={productOptions} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
+            <div className="screen-only"><DocumentProductPicker value={item.productId || ''} products={products} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
             <span className="print-only desc">{item.description || '—'}</span>
             {!item.productId && <input className="screen-editor invoice-inline-input desc" placeholder="شرح کالا یا خدمت" value={item.description} onChange={(e) => patchItem(item.id, { description: e.target.value })} />}
             <textarea className="screen-editor invoice-inline-textarea detail" placeholder="توضیحات ردیف..." value={item.details || ''} onChange={(e) => patchItem(item.id, { details: e.target.value })} />
@@ -670,7 +661,7 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         <tbody>{invoice.items.map((item, index) => <tr key={item.id}>
           <td className="text-center font-bold">{index + 1}</td>
           <td>
-            <div className="screen-only"><SearchableSelect value={item.productId || ''} options={productOptions} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
+            <div className="screen-only"><DocumentProductPicker value={item.productId || ''} products={products} onChange={(value) => chooseProduct(item.id, value)} placeholder="انتخاب کالا / خدمت..." searchPlaceholder="جستجوی نام یا کد..." inputClassName="h-8 border-transparent bg-transparent font-bold hover:border-sky-200" /></div>
             <span className="print-only desc">{item.description || (isOfficialTemplate ? '' : '—')}</span>
             {!item.productId && <input className="screen-editor invoice-inline-input desc" placeholder="شرح کالا یا خدمت" value={item.description} onChange={(e) => patchItem(item.id, { description: e.target.value })} />}
             <textarea className="screen-editor invoice-inline-textarea detail" placeholder="توضیحات ردیف..." value={item.details || ''} onChange={(e) => patchItem(item.id, { details: e.target.value })} />
@@ -843,9 +834,7 @@ function MiniEdit({ value, onChange, placeholder, format }: { value: string; onC
     ? <FormattedInput format={format} dir="ltr" unstyled className="invoice-inline-input !border-slate-200 text-[10px]" value={value} onValueChange={onChange} placeholder={placeholder} />
     : <input className="invoice-inline-input !border-slate-200 text-[10px]" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
 }
-function NumberEdit({ value, onChange, formatted = false }: { value: number; onChange: (v: number) => void; formatted?: boolean }) {
-  return <><FormattedInput dir="ltr" min={0} unstyled className="screen-editor invoice-inline-input text-center" value={value} onValueChange={onChange} /><span className="print-only" dir="ltr">{formatted ? money(value) : value}</span></>;
-}
+
 function InfoLine({ label, value, onChange, readOnly = false, valueDirection, format, hideWhenEmptyForPrint = false }: { label: string; value: string; onChange: (v: string) => void; readOnly?: boolean; valueDirection?: 'rtl'; format?: IdentifierFormat; hideWhenEmptyForPrint?: boolean }) {
   return <div className="invoice-info-line flex min-h-7 items-center gap-1" data-print-empty={hideWhenEmptyForPrint && !hasText(value) ? 'true' : undefined}>
     <span className="invoice-info-line-label shrink-0 font-bold">{label}:</span>

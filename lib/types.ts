@@ -43,6 +43,8 @@ export interface Product {
   code: string;
   name: string;
   kind: ProductKind;
+  /** Server-maintained classification of existing posted invoices when kind changes. */
+  invoiceKinds?: Record<string, ProductKind>;
   unit: string;
   salePrice: number;
   buyPrice: number;
@@ -445,6 +447,9 @@ export interface AccountingData {
 export interface OperationResult {
   ok: boolean;
   message?: string;
+  code?: string;
+  fieldErrors?: Record<string, string>;
+  revision?: number;
 }
 
 export interface StoreOperationResult extends OperationResult {

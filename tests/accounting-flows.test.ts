@@ -12,6 +12,9 @@ import { projectPurchaseInvoiceAllocation, projectPurchaseReturnAllocation } fro
 vi.mock('../lib/storage', () => ({
   ACCOUNTING_SCHEMA_VERSION: 9,
   alignAccountingPersistedBaseline: vi.fn(),
+  onAccountingServerState: vi.fn(),
+  withDomainCommand: (_command: unknown, commit: () => unknown) => commit(),
+  withAccountingCommands: (_commands: unknown, commit: () => unknown) => commit(),
   accountingStateStorage: {
     getItem: vi.fn(async () => null),
     setItem: vi.fn(async () => undefined),

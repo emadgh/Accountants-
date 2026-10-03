@@ -10,6 +10,7 @@ import { createEmptyAccountingData } from '@/lib/data';
 import { revisionAdvanceStatement } from '@/lib/persistence/revision';
 import { createFullAccountingSnapshot } from '@/lib/persistence/snapshots';
 import { attachmentFileStore } from '@/lib/persistence/attachment-files';
+import { applyDomainCommand, DomainCommandError, isDomainCommand, type DomainCommand } from '@/lib/domain/commands';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -151,12 +152,13 @@ function hasStoredAttachmentFiles(data: AccountingData) {
   return true;
 }
 
-function parseMutations(value: unknown): AccountingMutation[] | null {
+function parseMutations(value: unknown): Array<AccountingMutation | DomainCommand> | null {
   if (!Array.isArray(value) || value.length > 10_000) return null;
-  const mutations: AccountingMutation[] = [];
+  const mutations: Array<AccountingMutation | DomainCommand> = [];
   for (const item of value) {
     if (!item || typeof item !== 'object') return null;
     const mutation = item as Record<string, unknown>;
+    if (isDomainCommand(item)) { mutations.push(item); continue; }
     if (mutation.type === 'settings.update') {
       if (!mutation.value || typeof mutation.value !== 'object') return null;
       mutations.push(mutation as AccountingMutation);
@@ -209,12 +211,18 @@ export async function POST(request: NextRequest) {
     }
     const revision = Number((db.prepare("SELECT value FROM app_meta WHERE key = 'accounting-state-revision'").get() as { value?: string } | undefined)?.value || 0);
     if ((body.expectedRevision === null && revision !== 0) || (body.expectedRevision !== null && Number(body.expectedRevision) !== revision)) {
-      return NextResponse.json({ error: 'داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.' }, { status: 409 });
+      return NextResponse.json({ error: 'داده در تب دیگری تغییر کرده است؛ داده تازه را بارگذاری کنید.', code: 'REVISION_CONFLICT', revision }, { status: 409 });
     }
     try {
       const previous = await loadAccountingData();
       const baseline = previous || createEmptyAccountingData();
-      const next = applyAccountingMutations(baseline, commands);
+      if (previous && commands.some((command) => command.type !== 'domain.execute' && /^(customers|invoices|returns|payments|checks|adjustments|products|stockMovements|journalEntries|moneyTransactions|accounts)\./.test(command.type))) {
+        return NextResponse.json({ error: 'برای ثبت مالی از فرمان عملیات استفاده کنید؛ نوشتن مستقیم سند یا گردش مجاز نیست.', code: 'DOMAIN_COMMAND_REQUIRED' }, { status: 400 });
+      }
+      let next = baseline;
+      for (const command of commands) next = command.type === 'domain.execute'
+        ? applyDomainCommand(next, command)
+        : applyAccountingMutations(next, [command]);
       // A settings command changes no historical document. Validate the settings
       // and their links without rejecting unrelated legacy invoices or stock.
       const validation = previous && commands.every((command) => command.type === 'settings.update')
@@ -239,9 +247,10 @@ export async function POST(request: NextRequest) {
       ];
       if (previous) await syncAccountingData(previous, next, transactionStatements);
       else await replaceAccountingData(next, { transactionStatements });
-      return NextResponse.json(response);
+      return NextResponse.json({ ...response, data: next });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'اجرای فرمان حسابداری انجام نشد.';
+      if (error instanceof DomainCommandError) return NextResponse.json({ error: message, code: error.code, fieldErrors: error.fieldErrors, revision }, { status: 400 });
       return NextResponse.json({ error: message }, { status: 409 });
     }
   });

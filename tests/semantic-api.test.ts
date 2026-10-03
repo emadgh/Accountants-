@@ -1,0 +1,60 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+import { createEmptyAccountingData } from '../lib/data';
+import { normalizeAccountingData } from '../lib/domain/shared';
+import type { AccountingData, Invoice } from '../lib/types';
+const previousDirectory = process.env.ACCOUNTING_DATA_DIR;
+const directory = mkdtempSync(join(tmpdir(), 'accountants-semantic-api-'));
+let api: typeof import('../app/api/accounting-data/route');
+let auth: typeof import('../app/api/auth/route');
+let close: () => void;
+beforeAll(async () => {
+  process.env.ACCOUNTING_DATA_DIR = directory;
+  api = await import('../app/api/accounting-data/route'); auth = await import('../app/api/auth/route');
+  close = (await import('../lib/persistence/server-database')).closeServerDatabase;
+});
+afterAll(() => { close?.(); rmSync(directory, { recursive: true, force: true }); if (previousDirectory === undefined) delete process.env.ACCOUNTING_DATA_DIR; else process.env.ACCOUNTING_DATA_DIR = previousDirectory; });
+
+describe('server owned financial commands', () => {
+  it('atomically posts a sale and receipt, replays once, rejects stale tabs and direct journals', async () => {
+    const setup = await auth.POST(new NextRequest('http://localhost/api/auth', { method: 'POST', headers: { host: 'localhost', origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify({ action: 'setup', username: 'admin', password: 'password-123' }) }));
+    expect(setup.status).toBe(200);
+    const cookie = `accountants_session=${setup.cookies.get('accountants_session')!.value}`;
+    const request = (body: unknown, method = 'POST') => new NextRequest('http://localhost/api/accounting-data', { method, headers: { host: 'localhost', origin: 'http://localhost', 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
+    const base = createEmptyAccountingData();
+    base.customers.push({ id: 'customer', code: 'C1', name: 'مشتری', kind: 'customer', status: 'active', phone: '', address: '', nationalId: '', economicCode: '', postalCode: '', openingBalance: 0 });
+    base.products.push({ id: 'product', code: 'P1', name: 'کالا', kind: 'product', unit: 'عدد', stock: 10, minStock: 0, salePrice: 100, buyPrice: 20, averageCost: 20 });
+    const bootstrap = await api.PUT(request({ state: normalizeAccountingData(base), version: 9, replace: true, expectedRevision: 0, commandId: 'bootstrap_semantic_01' }, 'PUT'));
+    expect(bootstrap.status, JSON.stringify(await bootstrap.clone().json())).toBe(200);
+    const invoice: Invoice = { id: 'invoice', number: '300001', kind: 'sale', status: 'draft', businessProfileId: 'business_default', templateId: 'classic', paperSize: 'A4', date: '2026-01-01', customerId: 'customer', customerName: 'مشتری', customerPhone: '', customerAddress: '', items: [{ id: 'line', productId: 'product', description: 'کالا', unit: 'عدد', qty: 2, unitPrice: 100, discount: 0 }], discount: 0, tax: 0, shipping: 0, notes: '', createdAt: '2026-01-01', updatedAt: '2026-01-01' };
+    const payment = { id: 'receipt', documentNumber: 'R-0001', invoiceId: 'invoice', customerId: 'customer', direction: 'receipt', method: 'cash', amount: 200, date: '2026-01-01' };
+    const command = { commandId: 'sale_with_receipt_001', expectedRevision: 1, commands: [{ type: 'domain.execute', action: 'finalizeInvoiceWithPayment', args: [invoice, payment], seed: 'sale_with_receipt_seed' }] };
+    // Use the configured sequences rather than relying on demo numbering.
+    const current = await (await api.GET(new NextRequest('http://localhost/api/accounting-data', { headers: { cookie } }))).json() as { data: AccountingData };
+    const { formatDocumentNumber } = await import('../lib/standards');
+    invoice.number = formatDocumentNumber(current.data.settings.numbering.sale);
+    payment.documentNumber = formatDocumentNumber(current.data.settings.numbering.receipt);
+    const badCommand = structuredClone(command); badCommand.commandId = 'failed_sale_receipt_01'; badCommand.commands[0].args[1] = { ...payment, amount: 201 };
+    const failed = await api.POST(request(badCommand)); expect(failed.status).not.toBe(200);
+    const unchanged = await (await api.GET(new NextRequest('http://localhost/api/accounting-data', { headers: { cookie } }))).json();
+    expect(unchanged.revision).toBe(1); expect(unchanged.data.products[0].stock).toBe(10); expect(unchanged.data.invoices).toHaveLength(0);
+    const response = await api.POST(request(command));
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+    const saved = await response.json(); expect(saved.data.products[0].stock).toBe(8); expect(saved.data.invoices[0].status).toBe('settled'); expect(saved.data.payments).toHaveLength(1);
+    expect(saved.data.journalEntries.some((entry: { sourceType: string }) => entry.sourceType === 'invoice')).toBe(true);
+    const replay = await api.POST(request(command)); expect(replay.status).toBe(200); expect((await replay.json()).revision).toBe(2);
+    const stale = await api.POST(request({ ...command, commandId: 'other_tab_command_01' })); expect(stale.status).toBe(409);
+    const forged = await api.POST(request({ commandId: 'forged_journal_001', expectedRevision: 2, commands: [{ type: 'journalEntries.upsert', value: saved.data.journalEntries[0] }] })); expect(forged.status).toBe(400);
+    const latest = await (await api.GET(new NextRequest('http://localhost/api/accounting-data', { headers: { cookie } }))).json(); expect(latest.data.payments).toHaveLength(1); expect(latest.revision).toBe(2);
+    const reclassified = await api.POST(request({ commandId: 'reclassify_product_01', expectedRevision: 2, commands: [{ type: 'domain.execute', action: 'upsertProduct', args: [{ ...latest.data.products[0], kind: 'service', invoiceKinds: { invoice: 'service' } }], seed: 'reclassify_product_seed' }] }));
+    expect(reclassified.status, JSON.stringify(await reclassified.clone().json())).toBe(200);
+    const updated = await reclassified.json();
+    expect(updated.data.products[0]).toMatchObject({ kind: 'service', stock: 8, invoiceKinds: { invoice: 'product' } });
+    for (const key of ['invoices', 'payments', 'stockMovements', 'journalEntries']) expect(updated.data[key]).toEqual(latest.data[key]);
+    const reloaded = await (await api.GET(new NextRequest('http://localhost/api/accounting-data', { headers: { cookie } }))).json();
+    expect(reloaded.data.products[0].invoiceKinds).toEqual({ invoice: 'product' });
+  });
+});

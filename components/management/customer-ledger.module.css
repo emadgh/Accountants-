@@ -1,0 +1,49 @@
+/* Clean colour accents diluted with white, without grey in the row backgrounds. */
+.row { --ledger-accent: #0ea5e9; }
+.row[data-ledger-kind='sale'] { --ledger-accent: #3b82f6; }
+.row[data-ledger-kind='purchase'] { --ledger-accent: #6366f1; }
+.row[data-ledger-kind='receipt'] { --ledger-accent: #10b981; }
+.row[data-ledger-kind='payment'] { --ledger-accent: #f97316; }
+.row[data-ledger-kind='check'] { --ledger-accent: #eab308; }
+.row[data-ledger-kind='adjustment'] { --ledger-accent: #a855f7; }
+.row[data-ledger-kind='sale-return'] { --ledger-accent: #06b6d4; }
+.row[data-ledger-kind='purchase-return'] { --ledger-accent: #ec4899; }
+.row[data-ledger-kind='void'] { --ledger-accent: #f43f5e; }
+
+.row > td {
+  background-color: color-mix(in srgb, var(--ledger-accent) 4%, white);
+}
+
+.row > td:first-child {
+  box-shadow: inset -3px 0 var(--ledger-accent);
+}
+
+.row:hover > td {
+  background-color: color-mix(in srgb, var(--ledger-accent) 7%, white);
+}
+
+.kindLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.kindLabel::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ledger-accent);
+  flex-shrink: 0;
+}
+
+.row > .debit, .row > .credit, .row > .balance {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.row > .debit { color: #be123c; }
+.row > .credit { color: #047857; }
+.row > .balance { color: #334155; }
+.row > .emptyAmount { color: #cbd5e1; }

@@ -1,4 +1,5 @@
 'use client';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useEffect, useState } from 'react';
 import { ArrowRight, Plus, Save, Trash2 } from 'lucide-react';
@@ -15,7 +16,7 @@ import type { Invoice } from '@/lib/types';
 import { calculateAutomaticInstallments, existingAutomaticInstallmentOptions } from '@/lib/installment-plan';
 
 export function InvoiceInstallments({ invoiceId, onBack }: { invoiceId: string | null; onBack: () => void }) {
-  const { invoices, settings, saveInvoiceDraft, reviseInvoice } = useAccountingStore();
+  const { invoices, settings, saveInvoiceDraft, reviseInvoice } = useAccountingStore(useShallow((state) => ({ invoices: state.invoices, settings: state.settings, saveInvoiceDraft: state.saveInvoiceDraft, reviseInvoice: state.reviseInvoice })));
   const saved = invoices.find((item) => item.id === invoiceId && item.kind === 'sale');
   const [form, setForm] = useState<Invoice | null>(() => saved ? structuredClone(saved) : null);
   const [automatic, setAutomatic] = useState(() => saved ? existingAutomaticInstallmentOptions(saved) : { downPayment: 0, count: 3, profitPercent: 0, firstDueDate: todayIso() });

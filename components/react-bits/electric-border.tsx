@@ -2,6 +2,7 @@
 
 // Adapted from React Bits ElectricBorder, inspired by @BalintFerenczy.
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useWorkspacePreferences } from '@/hooks/use-workspace-preferences';
 import './electric-border.css';
 
 type ElectricBorderProps = {
@@ -70,6 +71,7 @@ function roundedRectPoint(t: number, left: number, top: number, width: number, h
 }
 
 export default function ElectricBorder({ children, color = '#5227FF', speed = 1, chaos = 0.12, borderRadius = 24, className = '', style }: ElectricBorderProps) {
+  const { preferences } = useWorkspacePreferences();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -126,11 +128,11 @@ export default function ElectricBorder({ children, color = '#5227FF', speed = 1,
       }
       ctx.closePath();
       ctx.stroke();
-      if (!reducedMotion.matches) frame = requestAnimationFrame(draw);
+      if (!reducedMotion.matches && !preferences.reducedEffects) frame = requestAnimationFrame(draw);
     };
 
     const resizeObserver = new ResizeObserver(() => {
-      if (reducedMotion.matches) draw(0);
+      if (reducedMotion.matches || preferences.reducedEffects) draw(0);
     });
     resizeObserver.observe(container);
     frame = requestAnimationFrame(draw);
@@ -138,7 +140,7 @@ export default function ElectricBorder({ children, color = '#5227FF', speed = 1,
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [color, speed, chaos, borderRadius]);
+  }, [color, speed, chaos, borderRadius, preferences.reducedEffects]);
 
   return <div ref={containerRef} className={`electric-border ${className}`} style={{ '--electric-border-color': color, borderRadius, ...style } as CSSProperties} aria-hidden="true">
     <div className="eb-canvas-container"><canvas ref={canvasRef} className="eb-canvas" /></div>

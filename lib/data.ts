@@ -9,6 +9,7 @@ import type {
   Quote,
 } from './types';
 import { SYSTEM_ACCOUNTS } from './accounting';
+import { enrichConstructionSeed, enrichCreativeStudioSeed } from './seed-scenarios';
 
 function documentNumbering() {
   return {
@@ -83,8 +84,8 @@ export function createEmptyAccountingData(): AccountingData {
 export const SEED_PRESETS = [
   { id: 'empty', title: 'بدون داده', description: 'شروع با پرونده خالی و سرفصل‌های پایه حسابداری' },
   { id: 'supermarket', title: 'فروشگاهی؛ سوپرمارکت', description: 'کالاهای دسته‌بندی‌شده، بارکد، موجودی و مشتریان نمونه' },
-  { id: 'creative-studio', title: 'خدمات طراحی و چاپ', description: 'طراحی هویت بصری، چاپ و طراحی وب‌سایت با پیش‌فاکتور و پروژه' },
-  { id: 'construction-suite', title: 'ساخت‌وساز و معماری', description: 'پروژه نمونه ساخت سوییت یک‌خوابه با سرویس بهداشتی' },
+  { id: 'creative-studio', title: 'خدمات طراحی و چاپ', description: 'دو پروژه طراحی، خرید خدمات پیمانکار و دریافت مرحله‌ای' },
+  { id: 'construction-suite', title: 'ساخت‌وساز و معماری', description: 'سوییت یک‌خوابه با خرید مصالح، دستمزد استادکاران، صورت‌وضعیت و چک' },
 ] as const;
 
 export type SeedPresetId = (typeof SEED_PRESETS)[number]['id'];
@@ -313,16 +314,16 @@ function createCreativeStudioSeed(): AccountingData {
   data.settings.numbering.quote.next = 2;
   data.moneyTransactions = [sampleMoneyExpense({
     id: 'money_studio_project_cost',
-    amount: 2_600_000,
-    description: 'هزینه چاپ نمونه کاتالوگ پروژه آرمان داده',
+    amount: 1_100_000,
+    description: 'هزینه پیک و نمونه‌گیری رنگ کاتالوگ پروژه آرمان داده',
     reference: 'EXP-STUDIO-001',
     projectId: project.id,
   })];
   data.journalEntries = [sampleJournal(
-    'je_studio_project_cost', sampleDate, 'هزینه چاپ نمونه کاتالوگ پروژه آرمان داده',
+    'je_studio_project_cost', sampleDate, 'هزینه پیک و نمونه‌گیری رنگ کاتالوگ پروژه آرمان داده',
     'money-transaction', 'money_studio_project_cost', 'EXP-STUDIO-001', [
-      { accountId: 'acct_general_expense', debit: 2_600_000, credit: 0 },
-      { accountId: 'acct_bank', debit: 0, credit: 2_600_000 },
+      { accountId: 'acct_general_expense', debit: 1_100_000, credit: 0 },
+      { accountId: 'acct_bank', debit: 0, credit: 1_100_000 },
     ]
   )];
   return data;
@@ -380,16 +381,16 @@ function createConstructionSeed(): AccountingData {
   data.settings.numbering.quote.next = 2;
   data.moneyTransactions = [sampleMoneyExpense({
     id: 'money_suite_project_cost',
-    amount: 75_000_000,
-    description: 'هزینه مستقیم نمونه؛ بازدید و آماده‌سازی اولیه پروژه سوییت',
+    amount: 7_500_000,
+    description: 'هزینه نقشه‌برداری و تجهیز اولیه کارگاه سوییت',
     reference: 'EXP-SUITE-001',
     projectId: project.id,
   })];
   data.journalEntries = [sampleJournal(
     'je_suite_project_cost', sampleDate, 'هزینه مستقیم پروژه ساخت سوییت',
     'money-transaction', 'money_suite_project_cost', 'EXP-SUITE-001', [
-      { accountId: 'acct_general_expense', debit: 75_000_000, credit: 0 },
-      { accountId: 'acct_bank', debit: 0, credit: 75_000_000 },
+      { accountId: 'acct_general_expense', debit: 7_500_000, credit: 0 },
+      { accountId: 'acct_bank', debit: 0, credit: 7_500_000 },
     ]
   )];
   return data;
@@ -401,10 +402,16 @@ export function createSeedData(preset: SeedPresetId): AccountingData {
       return createEmptyAccountingData();
     case 'supermarket':
       return createSupermarketSeed();
-    case 'creative-studio':
-      return createCreativeStudioSeed();
-    case 'construction-suite':
-      return createConstructionSeed();
+    case 'creative-studio': {
+      const data = createCreativeStudioSeed();
+      enrichCreativeStudioSeed(data);
+      return data;
+    }
+    case 'construction-suite': {
+      const data = createConstructionSeed();
+      enrichConstructionSeed(data);
+      return data;
+    }
   }
 }
 

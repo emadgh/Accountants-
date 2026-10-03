@@ -21,6 +21,9 @@ export function SearchableSelect({
   disabled = false,
   className,
   inputClassName,
+  id: controlId,
+  'aria-describedby': describedBy,
+  'aria-invalid': invalid,
 }: {
   value: string;
   options: SearchableOption[];
@@ -31,6 +34,9 @@ export function SearchableSelect({
   disabled?: boolean;
   className?: string;
   inputClassName?: string;
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
 }) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -105,6 +111,9 @@ export function SearchableSelect({
     <div className="relative">
       <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden="true" />
       <input
+        id={controlId || id}
+        aria-describedby={describedBy}
+        aria-invalid={invalid}
         ref={inputRef}
         role="combobox"
         aria-autocomplete="list"

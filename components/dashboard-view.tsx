@@ -1,24 +1,26 @@
 'use client';
+import { paymentCapacity } from '@/lib/domain/payment-capacity';
+import { useShallow } from 'zustand/react/shallow';
 
-import { useMemo } from 'react';
 import { DataTable } from '@/components/ui/data-table';
+import { useMemo } from 'react';
 
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Boxes, CircleDollarSign, Clock3, FileText, Users } from 'lucide-react';
-import { useAccountingStore } from '@/lib/store';
-import { invoiceTotal, money, settledForInvoice } from '@/lib/utils';
-import { formatPersianDate, todayIso } from '@/lib/standards';
-import { getReceivableDueBuckets } from '@/lib/receivables';
+import { useAccountingNavigation } from '@/components/accounting-app';
+import { SalesPurchaseTrendChart } from '@/components/analytics/charts';
+import { AppNavbarContent } from '@/components/app-navbar';
 import { FadeContent } from '@/components/reactbits/fade-content';
 import { Badge } from '@/components/ui/badge';
 import { MetricCard, type MetricTone } from '@/components/ui/metric-card';
 import { Panel } from '@/components/ui/panel';
-import { AppNavbarContent } from '@/components/app-navbar';
-import { SalesPurchaseTrendChart } from '@/components/analytics/charts';
 import { buildTimeSeries, lastJalaliMonthsRange } from '@/lib/chart-data';
-import { useAccountingNavigation } from '@/components/accounting-app';
+import { getReceivableDueBuckets } from '@/lib/receivables';
+import { formatPersianDate, todayIso } from '@/lib/standards';
+import { useAccountingStore } from '@/lib/store';
+import { invoiceTotal, money } from '@/lib/utils';
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Boxes, CircleDollarSign, Clock3, FileText, Users } from 'lucide-react';
 
 export function DashboardView() {
-  const { invoices, returns, payments, customers, products, checks, settings, projects } = useAccountingStore();
+  const { invoices, returns, payments, customers, products, checks, settings, projects } = useAccountingStore(useShallow((state) => ({ invoices: state.invoices, returns: state.returns, payments: state.payments, customers: state.customers, products: state.products, checks: state.checks, settings: state.settings, projects: state.projects })));
   const navigation = useAccountingNavigation();
   const saleInvoices = useMemo(() => invoices.filter((i) => i.kind === 'sale' && i.status !== 'draft' && i.status !== 'void'), [invoices]);
   const purchaseInvoices = useMemo(() => invoices.filter((i) => i.kind === 'purchase' && i.status !== 'draft' && i.status !== 'void'), [invoices]);
@@ -27,11 +29,7 @@ export function DashboardView() {
   const purchaseReturns = finalizedReturns.filter((document) => document.kind === 'purchase-return').reduce((sum, document) => sum + document.totalAmount, 0);
   const totalSales = Math.max(0, saleInvoices.reduce((s, i) => s + invoiceTotal(i), 0) - saleReturns);
   const totalPurchases = Math.max(0, purchaseInvoices.reduce((s, i) => s + invoiceTotal(i), 0) - purchaseReturns);
-  const receivable = saleInvoices.reduce((sum, invoice) => {
-    const returned = returns.filter((document) => document.status === 'final' && document.originalInvoiceId === invoice.id).reduce((value, document) => value + document.totalAmount, 0);
-    const netTotal = Math.max(0, invoiceTotal(invoice) - returned);
-    return sum + Math.max(0, netTotal - settledForInvoice(invoice, payments, checks));
-  }, 0);
+  const receivable = saleInvoices.reduce((sum, invoice) => sum + paymentCapacity(invoice, { payments, checks, returns }).outstanding, 0);
   const inventoryValue = products.filter((p) => p.kind === 'product' && !p.archived).reduce((s, p) => s + p.stock * Number(p.averageCost ?? p.buyPrice ?? 0), 0);
   const pendingChecks = checks.filter((c) => c.status === 'pending');
   const lowStock = products.filter((p) => p.kind === 'product' && !p.archived && p.stock <= p.minStock);
@@ -107,7 +105,7 @@ export function DashboardView() {
           <div className="space-y-2">{lowStock.slice(0, 5).map((p) => <button key={p.id} onClick={() => navigation.navigate('inventory')} className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-right text-sm hover:bg-rose-50"><span>{p.name}</span><span className="font-black text-rose-600">{money(p.stock)} {p.unit}</span></button>)}{!lowStock.length && <div className="py-5 text-center text-sm text-slate-400">موجودی‌ها در محدوده مناسب هستند.</div>}</div>
         </div></Panel>
         <Panel padding="none" spotlight interactive><div className="p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 font-black"><CircleDollarSign className="h-5 w-5 text-sky-600" /> مطالبات و پیگیری</div><Badge>{overdueInvoices.length + upcomingInvoices.length + approvalProjects.length}</Badge></div>
-          <div className="space-y-2">{overdueInvoices.slice(0, 3).map((item) => <button key={item.id} onClick={() => navigation.viewInvoice(item.invoiceId, 'sale')} className="flex w-full items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-right text-xs"><span className="truncate font-bold">{item.customerName} · {item.invoiceNumber}{item.downPayment ? ' · پیش‌پرداخت' : item.installmentNumber ? ` · قسط ${item.installmentNumber}` : ''} · {money(item.amount)}</span><span className="shrink-0 text-rose-700">سررسید گذشته</span></button>)}{upcomingInvoices.slice(0, 3).map((item) => <button key={item.id} onClick={() => navigation.viewInvoice(item.invoiceId, 'sale')} className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-right text-xs"><span className="truncate font-bold">{item.customerName} · {item.invoiceNumber}{item.downPayment ? ' · پیش‌پرداخت' : item.installmentNumber ? ` · قسط ${item.installmentNumber}` : ''} · {money(item.amount)}</span><span className="shrink-0">نزدیک سررسید</span></button>)}{approvalProjects.slice(0, 3).map((project) => <button key={project.id} onClick={() => navigation.navigate('projects')} className="w-full rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-2 text-right text-xs font-bold">پروژه منتظر تأیید: {project.title}</button>)}{!overdueInvoices.length && !upcomingInvoices.length && !approvalProjects.length && <div className="py-5 text-center text-sm text-slate-400">موردی برای پیگیری ندارید.</div>}</div>
+          <div className="space-y-2">{overdueInvoices.slice(0, 3).map((item) => <button key={item.id} onClick={() => navigation.viewInvoice(item.invoiceId, 'sale')} className="flex w-full items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-right text-xs"><span className="truncate font-bold">{item.customerName} · {item.invoiceNumber}{item.downPayment ? ' · پیش‌پرداخت' : item.installmentNumber ? ` · قسط ${item.installmentNumber}` : ''} · {money(item.amount)}</span><span className="shrink-0 text-rose-700">سررسید گذشته</span></button>)}{upcomingInvoices.slice(0, 3).map((item) => <button key={item.id} onClick={() => navigation.viewInvoice(item.invoiceId, 'sale')} className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-right text-xs"><span className="truncate font-bold">{item.customerName} · {item.invoiceNumber}{item.downPayment ? ' · پیش‌پرداخت' : item.installmentNumber ? ` · قسط ${item.installmentNumber}` : ''} · {money(item.amount)}</span><span className="shrink-0">نزدیک سررسید</span></button>)}{approvalProjects.slice(0, 3).map((project) => <button key={project.id} onClick={() => navigation.navigate('projects', { projectId: project.id })} className="w-full rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-2 text-right text-xs font-bold">پروژه منتظر تأیید: {project.title}</button>)}{!overdueInvoices.length && !upcomingInvoices.length && !approvalProjects.length && <div className="py-5 text-center text-sm text-slate-400">موردی برای پیگیری ندارید.</div>}</div>
           <div className="mt-3 text-[11px] text-slate-400">{overdueInvoices.length} سررسید گذشته · {upcomingInvoices.length} تا ۷ روز آینده · {approvalProjects.length} پروژه منتظر تأیید</div>
         </div></Panel>
       </div>

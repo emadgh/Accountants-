@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyAccountingData } from '../lib/data';
-import { ACCOUNTING_PERSIST_KEY, ACCOUNTING_SCHEMA_VERSION, accountingStateStorage, flushAccountingPersistence } from '../lib/storage';
+import { ACCOUNTING_PERSIST_KEY, ACCOUNTING_SCHEMA_VERSION, accountingStateStorage, flushAccountingPersistence, withAccountingCommands } from '../lib/storage';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -65,4 +65,48 @@ describe('accounting persistence recovery', () => {
     await flushAccountingPersistence();
     expect(postedCommands.map((command) => command.type)).toEqual(['settings.update']);
   });
+  it('keeps the form value and withholds its success callback when a write fails', async () => {
+    const { persistOperation } = await import('../lib/operation-result');
+    const committed = createEmptyAccountingData();
+    let offline = false;
+    vi.stubGlobal('fetch', vi.fn(async (_path: unknown, init?: RequestInit) => {
+      if (offline) throw new TypeError('Failed to fetch');
+      return Response.json(init?.method ? { revision: 2, data: committed } : { revision: 1, data: committed });
+    }));
+    await accountingStateStorage.getItem(ACCOUNTING_PERSIST_KEY);
+    const form = { businessName: 'نام ذخیره‌نشده' };
+    const success = vi.fn(); offline = true;
+    const result = await persistOperation(() => {
+      const next = structuredClone(committed); next.settings.businessName = form.businessName;
+      void accountingStateStorage.setItem(ACCOUNTING_PERSIST_KEY, JSON.stringify({state: next}));
+      return {ok: true};
+    });
+    if (result.ok) success();
+    expect(result).toMatchObject({ok: false, code: 'NETWORK_UNAVAILABLE'});
+    expect(success).not.toHaveBeenCalled(); expect(form.businessName).toBe('نام ذخیره‌نشده');
+    offline = false; await accountingStateStorage.getItem(ACCOUNTING_PERSIST_KEY);
+    await expect(flushAccountingPersistence()).resolves.toBeUndefined();
+  });
+
+  it('loads canonical data when the response is lost after commit, without applying twice', async () => {
+    const committed = createEmptyAccountingData(); let posts = 0; let applied = 0;
+    const fetchMock = vi.fn(async (_path: unknown, init?: RequestInit) => {
+      if (!init?.method) return Response.json({data: committed, revision: applied ? 2 : 1});
+      posts++;
+      if (posts === 1) { applied++; committed.settings.businessName = 'تأیید سرور'; throw new TypeError('Lost response'); }
+      return Response.json({revision: 2});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await accountingStateStorage.getItem(ACCOUNTING_PERSIST_KEY);
+    const next = structuredClone(committed); next.settings.businessName = 'تأیید سرور';
+    withAccountingCommands([{type:'settings.update',value:next.settings}], () => {
+      void accountingStateStorage.setItem(ACCOUNTING_PERSIST_KEY, JSON.stringify({state:next}));
+    });
+    await flushAccountingPersistence();
+    expect(applied).toBe(1); expect(posts).toBe(2);
+    const bodies = fetchMock.mock.calls.filter(call => call[1]?.method).map(call => JSON.parse(String(call[1]?.body)));
+    expect(bodies[0].commandId).toBe(bodies[1].commandId);
+    expect(fetchMock.mock.calls.filter(call=>!call[1]?.method)).toHaveLength(2);
+  });
+
 });

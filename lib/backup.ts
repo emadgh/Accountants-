@@ -5,6 +5,7 @@ import { inspectZipArchive } from './zip-limits';
 import { buildOpeningJournal, normalizeAccounts } from './accounting';
 import { createEmptyAccountingData } from './data';
 import { invoiceTotal, settledForInvoice } from './utils';
+import { productKindForInvoice } from './domain/product-kind';
 
 const MAX_BACKUP_ARCHIVE_BYTES = 200 * 1024 * 1024;
 const MAX_BACKUP_EXPANDED_BYTES = 300 * 1024 * 1024;
@@ -180,14 +181,15 @@ function validateAccountingShape(raw: unknown): AccountingData {
     });
   };
   for (const invoice of invoices.filter((item) => item.status !== 'draft' && item.status !== 'void')) {
-    for (const productId of new Set(invoice.items.map((item) => item.productId).filter((id): id is string => !!id && products.some((product) => product.id === id && product.kind === 'product')))) {
+    for (const productId of new Set(invoice.items.map((item) => item.productId).filter((id): id is string => !!id && products.some((product) => product.id === id && productKindForInvoice(product, invoice) === 'product')))) {
       const qty = invoice.items.filter((item) => item.productId === productId).reduce((sum, item) => sum + Number(item.qty || 0), 0);
       addMissingSourceMovement({ sourceType: 'invoice', sourceId: invoice.id, productId, expectedQuantity: invoice.kind === 'sale' ? -qty : qty, date: invoice.date,
         type: invoice.kind, action: 'finalize', sourceKind: invoice.kind });
     }
   }
   for (const document of data.returns.filter((item) => item.status === 'final')) {
-    for (const productId of new Set(document.items.map((item) => item.productId).filter((id): id is string => !!id && products.some((product) => product.id === id && product.kind === 'product')))) {
+    const original = invoices.find((invoice) => invoice.id === document.originalInvoiceId);
+    for (const productId of new Set(document.items.map((item) => item.productId).filter((id): id is string => !!id && original !== undefined && products.some((product) => product.id === id && productKindForInvoice(product, original) === 'product')))) {
       const qty = document.items.filter((item) => item.productId === productId).reduce((sum, item) => sum + Number(item.qty || 0), 0);
       addMissingSourceMovement({ sourceType: 'return', sourceId: document.id, productId, expectedQuantity: document.kind === 'sale-return' ? qty : -qty, date: document.date,
         type: document.kind, action: 'return-finalize', sourceKind: document.kind });

@@ -1,5 +1,7 @@
 import type { AccountingData } from './types';
 import { invoiceTotal, paymentIsEffective, settledForInvoice } from './utils';
+import { validationScope } from './domain/validation-scope';
+import { productKindForInvoice } from './domain/product-kind';
 
 export interface AccountingValidationResult {
   ok: boolean;
@@ -61,6 +63,7 @@ function hasActiveJournal(data: AccountingData, sourceType: string, sourceId: st
 }
 
 export function validateAccountingData(data: AccountingData, previousData?: AccountingData): AccountingValidationResult {
+  const scope = validationScope(data, previousData);
   const groups: Array<[Array<{ id: string }>, string]> = [
     [data.customers, 'مشتری'], [data.products, 'کالا'], [data.invoices, 'فاکتور'], [data.returns, 'مرجوعی'],
     [data.payments, 'دریافت'], [data.checks, 'چک'], [data.adjustments, 'تعدیل'], [data.stockMovements, 'گردش انبار'],
@@ -101,7 +104,10 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
   if (!settingsValidation.ok) return settingsValidation;
 
   const previousProducts = new Map((previousData?.products || []).map((product) => [product.id, product]));
-  for (const product of data.products) {
+  for (const product of scope.products) {
+    if (!['product', 'service'].includes(product.kind) || (product.invoiceKinds && Object.entries(product.invoiceKinds).some(([id, kind]) => !invoiceById.has(id) || !['product', 'service'].includes(kind)))) {
+      return { ok: false, message: `نوع کالا/خدمت ${product.name} یا سابقه نوع آن معتبر نیست.` };
+    }
     const previous = previousProducts.get(product.id);
     const validOrUnchangedLegacyValue = (key: 'salePrice' | 'buyPrice' | 'averageCost' | 'stock' | 'minStock') =>
       finiteNonNegative(product[key]) || (previous !== undefined && product[key] === previous[key]);
@@ -113,7 +119,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const invoice of data.invoices) {
+  for (const invoice of scope.invoices) {
     if (!customerIds.has(invoice.customerId) || !data.settings.businessProfiles.some((item) => item.id === invoice.businessProfileId)) {
       return { ok: false, message: `مشتری یا مشخصات کسب‌وکار فاکتور ${invoice.number} معتبر نیست.` };
     }
@@ -139,7 +145,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
   }
 
   const linkedQuoteInvoiceIds = new Set<string>();
-  for (const quote of data.quotes || []) {
+  for (const quote of scope.quotes || []) {
     if (!customerIds.has(quote.customerId) || (quote.projectId && !projectIds.has(quote.projectId))) return { ok: false, message: `مشتری یا پروژه پیش‌فاکتور ${quote.number} پیدا نشد.` };
     if (quote.linkedInvoiceId) {
       const linked = invoiceById.get(quote.linkedInvoiceId);
@@ -151,18 +157,18 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
       if (!finiteNonNegative(item.qty) || item.qty <= 0 || !finiteNonNegative(item.unitPrice) || (item.productId && !productIds.has(item.productId))) return { ok: false, message: `ردیف پیش‌فاکتور ${quote.number} معتبر نیست.` };
     }
   }
-  for (const invoice of data.invoices.filter((item) => item.quoteId)) {
+  for (const invoice of scope.invoices.filter((item) => item.quoteId)) {
     if (!data.quotes.some((quote) => quote.id === invoice.quoteId && quote.linkedInvoiceId === invoice.id)) return { ok: false, message: `ارتباط فاکتور ${invoice.number} با پیش‌فاکتور معتبر نیست.` };
   }
 
-  for (const check of data.checks) {
+  for (const check of scope.checks) {
     if (!customerIds.has(check.customerId) || !finiteNonNegative(check.amount) || check.amount <= 0) {
       return { ok: false, message: `مبلغ یا طرف حساب چک ${check.documentNumber} معتبر نیست.` };
     }
   }
 
   const linkedChecks = new Set<string>();
-  for (const payment of data.payments) {
+  for (const payment of scope.payments) {
     if (!customerIds.has(payment.customerId) || !finiteNonNegative(payment.amount) || payment.amount <= 0) {
       return { ok: false, message: `مبلغ یا طرف حساب دریافت ${payment.documentNumber} معتبر نیست.` };
     }
@@ -183,7 +189,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const invoice of data.invoices.filter((item) => item.kind === 'sale' && item.status !== 'draft' && item.status !== 'void')) {
+  for (const invoice of scope.invoices.filter((item) => item.kind === 'sale' && item.status !== 'draft' && item.status !== 'void')) {
     const returned = data.returns.filter((item) => item.originalInvoiceId === invoice.id && item.status === 'final')
       .reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
     const invoicePayments = data.payments.filter((payment) => payment.invoiceId === invoice.id && payment.direction === 'receipt');
@@ -198,7 +204,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const invoice of data.invoices.filter((item) => item.status !== 'draft' && item.status !== 'void')) {
+  for (const invoice of scope.invoices.filter((item) => item.status !== 'draft' && item.status !== 'void')) {
     if (!hasActiveJournal(data, 'invoice', invoice.id)) return { ok: false, message: `سند حسابداری فاکتور قطعی ${invoice.number} ثبت نشده است.` };
     const expectedStatus = (() => {
       const returned = data.returns.filter((item) => item.originalInvoiceId === invoice.id && item.status === 'final')
@@ -208,7 +214,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
       return remaining <= EPSILON || settled >= remaining - EPSILON ? 'settled' : settled > EPSILON ? 'partial' : 'final';
     })();
     if (invoice.status !== expectedStatus) return { ok: false, message: `وضعیت پرداخت فاکتور ${invoice.number} با دریافت‌ها و مرجوعی‌ها سازگار نیست.` };
-    const invoiceProductIds = new Set(invoice.items.filter((item) => item.productId && data.products.find((product) => product.id === item.productId)?.kind === 'product').map((item) => item.productId!));
+    const invoiceProductIds = new Set(invoice.items.filter((item) => item.productId && productKindForInvoice(data.products.find((product) => product.id === item.productId), invoice) === 'product').map((item) => item.productId!));
     for (const productId of invoiceProductIds) {
       const itemQuantity = invoice.items.filter((item) => item.productId === productId).reduce((sum, item) => sum + item.qty, 0);
       const expectedQuantity = invoice.kind === 'sale' ? -itemQuantity : itemQuantity;
@@ -218,7 +224,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const document of data.returns.filter((item) => item.status === 'final')) {
+  for (const document of scope.returns.filter((item) => item.status === 'final')) {
     const original = invoiceById.get(document.originalInvoiceId);
     if (!original || original.status === 'draft' || original.status === 'void' || document.customerId !== original.customerId) {
       return { ok: false, message: `فاکتور اصلی مرجوعی ${document.number} معتبر نیست.` };
@@ -232,7 +238,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
         .reduce((sum, candidate) => sum + candidate.qty, 0);
       if (quantityReturned > sourceItem.qty + EPSILON) return { ok: false, message: `تعداد مرجوعی فاکتور ${original.number} از تعداد فروش بیشتر است.` };
     }
-    const returnProductIds = new Set(document.items.filter((item) => item.productId && data.products.find((product) => product.id === item.productId)?.kind === 'product').map((item) => item.productId!));
+    const returnProductIds = new Set(document.items.filter((item) => item.productId && productKindForInvoice(data.products.find((product) => product.id === item.productId), original) === 'product').map((item) => item.productId!));
     for (const productId of returnProductIds) {
       const itemQuantity = document.items.filter((item) => item.productId === productId).reduce((sum, item) => sum + item.qty, 0);
       const expectedQuantity = document.kind === 'sale-return' ? itemQuantity : -itemQuantity;
@@ -242,7 +248,7 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const payment of data.payments) {
+  for (const payment of scope.payments) {
     const effective = paymentIsEffective(payment, data.checks);
     const shouldHaveJournal = payment.method !== 'check' || effective;
     if (shouldHaveJournal !== hasActiveJournal(data, 'payment', payment.id)) {
@@ -250,13 +256,13 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     }
   }
 
-  for (const movement of data.stockMovements) {
+  for (const movement of scope.stockMovements) {
     if (!productIds.has(movement.productId) || !Number.isFinite(movement.quantity) || !Number.isFinite(movement.balanceAfter)) {
       return { ok: false, message: 'گردش انبار به کالا نامعتبر متصل است یا مقدار عددی آن نادرست است.' };
     }
   }
 
-  for (const entry of data.journalEntries) {
+  for (const entry of scope.journalEntries) {
     if (!entry.lines?.length) return { ok: false, message: `سند حسابداری ${entry.description || entry.id} ردیف ندارد.` };
     let debits = 0;
     let credits = 0;
@@ -270,17 +276,17 @@ export function validateAccountingData(data: AccountingData, previousData?: Acco
     if (Math.abs(debits - credits) > EPSILON) return { ok: false, message: `سند حسابداری ${entry.description || entry.id} تراز نیست.` };
   }
 
-  for (const transaction of data.moneyTransactions) {
+  for (const transaction of scope.moneyTransactions) {
     if (!finiteNonNegative(transaction.amount) || transaction.amount <= 0 || !accountIds.has(transaction.settlementAccountId) || !accountIds.has(transaction.categoryAccountId)) {
       return { ok: false, message: `تراکنش مالی ${transaction.description} معتبر نیست.` };
     }
     if (transaction.projectId && !projectIds.has(transaction.projectId)) return { ok: false, message: `پروژه تراکنش مالی ${transaction.description} پیدا نشد.` };
     if (transaction.status === 'final' && !hasActiveJournal(data, 'money-transaction', transaction.id)) return { ok: false, message: `سند حسابداری تراکنش «${transaction.description}» ثبت نشده است.` };
   }
-  for (const project of data.projects || []) {
+  for (const project of scope.projects || []) {
     if (!customerIds.has(project.customerId)) return { ok: false, message: `مشتری پروژه ${project.title} پیدا نشد.` };
   }
-  for (const attachment of data.attachments || []) {
+  for (const attachment of scope.attachments || []) {
     const isPdf = attachment.mimeType === 'application/pdf';
     const storageKeyValid = /^[0-9a-f-]{36}\.(?:webp|pdf)$/.test(attachment.storageKey) && (isPdf ? attachment.storageKey.endsWith('.pdf') : attachment.storageKey.endsWith('.webp'));
     const thumbnailValid = isPdf ? !attachment.thumbnailKey : (!attachment.thumbnailKey || /^[0-9a-f-]{36}-thumb\.webp$/.test(attachment.thumbnailKey));
