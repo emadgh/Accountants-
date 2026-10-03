@@ -17,6 +17,7 @@ import ElectricBorder from '@/components/react-bits/electric-border';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormattedInput, formatCardNumber, formatIranIban, formatPostalCode, type TextInputFormat } from '@/components/ui/formatted-input';
 import { JalaliDatePicker } from '@/components/ui/jalali-date-picker';
 import { Panel } from '@/components/ui/panel';
@@ -64,6 +65,14 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
   const [savedFlash, setSavedFlash] = useState(false);
   const [paymentAction, setPaymentAction] = useState<{ documentNumber: string } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [showFields, setShowFields] = useState(mode === 'edit');
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  useEffect(() => {
+    setShowFields(mode === 'edit');
+    setPreviewOpen(false);
+    setHistoryOpen(false);
+  }, [invoiceId, mode]);
 
   useEffect(() => {
     if (selectedInvoice) {
@@ -109,6 +118,8 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
   const isPosted = !isDraft && !isVoid;
   const canEdit = mode === 'edit' && !isVoid && !isSettled;
   const isReadOnly = mode === 'view' || isVoid || isSettled;
+  const fieldsVisible = showFields && !isVoid && !isSettled;
+  const paperPrintView = previewOpen || !fieldsVisible;
   const isDirty = !!existing && invoiceEditableSignature(existing) !== invoiceEditableSignature(invoice);
   const outstanding = existing ? invoiceOutstandingAmount(existing, payments, checks, returns) : 0;
   const settledAmount = existing ? settledForInvoice(existing, payments, checks) : 0;
@@ -400,11 +411,11 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  return <div className={'invoice-editor-root invoice-editor-layout space-y-4' + (previewOpen ? ' invoice-preview-active' : '')}>
+  return <div className={'invoice-editor-root invoice-editor-layout space-y-4' + (previewOpen ? ' invoice-preview-active' : '') + (paperPrintView ? ' invoice-print-view' : '')}>
     <div className="invoice-editor-alert screen-only empty:hidden"><AccountingRecoveryNotice /></div>
     <style>{`@media print { @page { size: ${paperSize} portrait; margin: ${paperSize === 'A5' ? '5mm' : '8mm 8mm 10mm'}; } }`}</style>
     {previewOpen ? <div className="invoice-preview-toolbar screen-only" data-paper-size={paperSize}>
-      <Button variant="outline" onClick={() => setPreviewOpen(false)}><ArrowRight className="h-4 w-4" /> بازگشت به ویرایش</Button>
+      <Button variant="outline" onClick={() => setPreviewOpen(false)}><ArrowRight className="h-4 w-4" /> بازگشت به فاکتور</Button>
       <span className="text-sm font-black">پیش‌نمایش قالب {INVOICE_TEMPLATES.find((template) => template.id === invoice.templateId)?.label || 'کلاسیک'} · {paperSize}</span>
       <InvoicePaperSizeSelect value={paperSize} onChange={choosePaperSize} />
       <Button disabled={submission.busy} onClick={print}><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : 'چاپ'}</Button>
@@ -439,20 +450,24 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
         {canEdit && <Button variant="outline" size="sm" onClick={persist} title="Ctrl/Cmd + S"><Save className="h-4 w-4" /> {isDraft ? 'ذخیره پیش‌نویس' : 'ثبت Revision'}</Button>}
         {canEdit && isPosted && !isSettled && <Button variant="danger" size="sm" onClick={voidCurrent}><Ban className="h-4 w-4" /> ابطال</Button>}
         {existing && currentStatus !== 'draft' && <InvoicePaymentHistoryButton invoiceId={existing.id} showLabel />}
+        <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}><History className="h-4 w-4" /> تاریخچه سند</Button>
         {existing && isPosted && outstanding > 0 && <>
           <Button variant="outline" size="sm" disabled={isDirty} title={isDirty ? 'ابتدا تغییرات را ثبت کنید.' : undefined} onClick={startPayment}><ArrowDownToLine className="h-4 w-4" />{invoice.kind === 'sale' ? 'دریافت / تسویه' : 'پرداخت / تسویه'}</Button>
         </>}
         <Button variant="outline" size="sm" onClick={previewPrint}><Eye className="h-4 w-4" /> پیش‌نمایش چاپ</Button>
+        {!isSettled && !isVoid && <Button variant="outline" size="sm" aria-pressed={fieldsVisible} onClick={() => setShowFields((value) => !value)}>
+          {fieldsVisible ? <Eye className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}{fieldsVisible ? 'نمای چاپی فاکتور' : 'نمای فرم فاکتور'}
+        </Button>}
         <Button disabled={submission.busy} size="sm" onClick={print} title="Ctrl/Cmd + P"><Printer className="h-4 w-4" /> {canEdit && isDraft ? 'ثبت نهایی و چاپ' : isVoid ? 'چاپ نسخه باطل' : 'چاپ'}</Button>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
-        <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط<select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)} disabled={!canEdit || isPartial}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select><span className="block text-[11px] font-normal text-slate-500">{invoice.kind === 'sale' ? 'در فاکتور فروش، طرف‌حساب همان پروژه انتخاب می‌شود.' : 'اتصال پروژه، طرف‌حساب تأمین‌کننده را تغییر نمی‌دهد.'}</span></label>
+        <label className="min-w-48 flex-1 space-y-1 text-xs font-bold text-slate-600">پروژه مرتبط{canEdit && !isPartial ? <select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm" value={invoice.projectId || ''} onChange={(event) => chooseProject(event.target.value)}><option value="">بدون پروژه</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select> : <span className="block py-2 text-sm font-medium text-slate-800">{projects.find((project) => project.id === invoice.projectId)?.title || 'بدون پروژه'}</span>}<span className="block text-[11px] font-normal text-slate-500">{invoice.kind === 'sale' ? 'در فاکتور فروش، طرف‌حساب همان پروژه انتخاب می‌شود.' : 'اتصال پروژه، طرف‌حساب تأمین‌کننده را تغییر نمی‌دهد.'}</span></label>
         {invoice.kind === 'sale' && <div className="flex min-w-44 flex-1 flex-col gap-1"><span className="text-xs font-bold text-slate-600">دریافت و اقساط</span><Button disabled={submission.busy} type="button" variant="outline" onClick={openInstallments}>مدیریت سررسید و اقساط {invoice.installments?.length ? `(${invoice.installments.length})` : ''}</Button></div>}
       </div>
     </Panel>}
 
-    <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize} data-editing={canEdit && !previewOpen ? 'true' : undefined}>
-      {canEdit && !previewOpen && <>
+    <div className="print-surface invoice-paper relative" data-template={invoice.templateId} data-paper-size={paperSize} data-editing={canEdit && !paperPrintView ? 'true' : undefined}>
+      {canEdit && !paperPrintView && <>
         <ElectricBorder className="invoice-edit-border screen-only" color="#51c187" speed={0.6} chaos={0.02} borderRadius={5} />
         <span className="invoice-edit-label screen-only"><Edit3 className="h-3.5 w-3.5" /> {isPartial ? 'ویرایش محدود فاکتور' : 'در حال ویرایش فاکتور'}</span>
       </>}
@@ -794,15 +809,21 @@ export function InvoiceEditor({ kind, invoiceId, projectId, mode, onRequestEdit,
       </label>
     </Panel>}
 
-    {!!invoice.auditTrail?.length && <Panel padding="sm" className="invoice-editor-followup screen-only">
-      <div className="mb-3 flex items-center gap-2 font-black text-slate-800"><History className="h-4 w-4 text-sky-600" /> تاریخچه سند</div>
-      <div className="space-y-2">
-        {[...invoice.auditTrail].reverse().map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
-          <div><span className="font-bold">{auditActionLabel(entry.action)}</span>{entry.note ? <span className="mr-2 text-slate-500">— {entry.note}</span> : null}</div>
-          <div className="text-slate-400">{entry.action === 'template_changed' ? 'تغییر ظاهری' : `Revision ${entry.revision}`} · {new Date(entry.at).toLocaleString('fa-IR')}</div>
-        </div>)}
-      </div>
-    </Panel>}
+    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+      <DialogContent className="screen-only w-[min(36rem,calc(100vw-2rem))]">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-black">تاریخچه سند</DialogTitle>
+          <DialogDescription className="text-sm text-slate-500">فاکتور {invoice.number || 'جدید'} · رویدادهای ثبت و تغییر سند، از جدید به قدیم</DialogDescription>
+        </DialogHeader>
+        {invoice.auditTrail?.length ? <ol className="grid gap-3">
+          {[...invoice.auditTrail].reverse().map((entry) => <li key={entry.id} className="grid gap-1 rounded-xl border border-slate-100 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-bold">{auditActionLabel(entry.action)}</span><Badge>{entry.action === 'template_changed' || entry.action === 'paper_size_changed' ? 'تغییر ظاهری' : `نسخه ${entry.revision}`}</Badge></div>
+            <time className="text-xs text-slate-500" dateTime={entry.at}>{new Date(entry.at).toLocaleString('fa-IR')}</time>
+            {entry.note && <p className="whitespace-pre-wrap text-slate-600">{entry.note}</p>}
+          </li>)}
+        </ol> : <p className="py-6 text-center text-sm text-slate-500">هنوز رویدادی برای این سند ثبت نشده است.</p>}
+      </DialogContent>
+    </Dialog>
     <InvoicePaymentDialog invoiceId={existing?.id} documentNumber={paymentAction?.documentNumber} open={!!paymentAction} onOpenChange={(open) => { if (!open) setPaymentAction(null); }} />
   </div>;
 }
